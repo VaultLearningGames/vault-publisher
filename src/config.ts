@@ -16,7 +16,8 @@ export interface Config {
 }
 
 function required(name: string): string {
-  const value = process.env[name];
+  // Trimmed because secrets pasted into Secret Manager often carry a trailing newline.
+  const value = process.env[name]?.trim();
   if (!value) throw new Error(`Missing required environment variable ${name}`);
   return value;
 }

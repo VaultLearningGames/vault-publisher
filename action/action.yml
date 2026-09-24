@@ -1,0 +1,43 @@
+name: Vault publish
+description: >
+  Upload a WebGL build to the Vault Learning Games staging CDN as a preview of the current branch or tag,
+  or delete a preview. Authenticates with the workflow's GitHub OIDC token; requires `permissions: id-token: write`.
+
+inputs:
+  game:
+    description: Game slug on the CDN, e.g. "aqualab".
+    required: true
+  path:
+    description: Folder containing the build (the folder with index.html).
+    default: build/WebGL/WebGL
+  mode:
+    description: '"publish" (default) or "delete".'
+    default: publish
+  ref:
+    description: For mode "delete", the branch or tag to remove (e.g. github.event.ref from a delete event).
+    default: ''
+  publisher-url:
+    description: Base URL of the vault-publisher service.
+    required: true
+  audience:
+    description: OIDC audience the publisher expects.
+    default: vault-publisher
+
+outputs:
+  url:
+    description: Public URL of the published preview.
+    value: ${{ steps.run.outputs.url }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      run: node "${{ github.action_path }}/publish.mjs"
+      env:
+        INPUT_GAME: ${{ inputs.game }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_REF: ${{ inputs.ref }}
+        INPUT_PUBLISHER_URL: ${{ inputs.publisher-url }}
+        INPUT_AUDIENCE: ${{ inputs.audience }}

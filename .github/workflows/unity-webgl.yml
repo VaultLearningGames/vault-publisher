@@ -1,0 +1,100 @@
+name: Unity WebGL preview
+
+# Reusable workflow for Field Day game repos. Every push builds WebGL and publishes it to
+# https://cdn.vaultlearninggames-staging.org/fielddaylab/GAME/BRANCH/ ; deleting a branch removes its preview.
+#
+# Caller (e.g. .github/workflows/webgl.yml in fielddaylab/wake):
+#
+#   on: { push: {}, delete: {}, workflow_dispatch: {} }
+#   permissions: { contents: read, id-token: write }
+#   jobs:
+#     webgl:
+#       uses: fielddaylab/vault-publisher/.github/workflows/unity-webgl.yml@main
+#       with: { game: aqualab }
+#       secrets: inherit
+on:
+  workflow_call:
+    inputs:
+      game:
+        description: Game slug on the CDN, e.g. "aqualab".
+        required: true
+        type: string
+      build-path:
+        description: Where game-ci leaves the WebGL build.
+        type: string
+        default: build/WebGL/WebGL
+      publisher-url:
+        description: Overrides the VAULT_PUBLISHER_URL organization variable.
+        type: string
+        default: ''
+    secrets:
+      UNITY_EMAIL:
+        required: false
+      UNITY_PASSWORD:
+        required: false
+      UNITY_SERIAL:
+        required: false
+
+jobs:
+  build:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: vault-preview-${{ github.repository }}-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+        submodules: recursive
+
+    - name: Read Unity version
+      id: unity
+      run: echo "version=$(sed -n 's/^m_EditorVersion: //p' ProjectSettings/ProjectVersion.txt)" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@v4
+      with:
+        path: Library
+        key: Library-${{ steps.unity.outputs.version }}-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+        restore-keys: |
+          Library-${{ steps.unity.outputs.version }}-
+
+    - uses: game-ci/unity-builder@v4
+      env:
+        UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+        UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+      with:
+        unityVersion: ${{ steps.unity.outputs.version }}
+        targetPlatform: WebGL
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.game }}-webgl-${{ github.sha }}
+        path: ${{ inputs.build-path }}
+        retention-days: 14
+
+    - name: Publish preview
+      uses: fielddaylab/vault-publisher/action@main
+      with:
+        game: ${{ inputs.game }}
+        path: ${{ inputs.build-path }}
+        publisher-url: ${{ inputs.publisher-url || vars.VAULT_PUBLISHER_URL }}
+
+  delete:
+    if: github.event_name == 'delete'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+    - name: Delete preview
+      uses: fielddaylab/vault-publisher/action@main
+      with:
+        game: ${{ inputs.game }}
+        mode: delete
+        ref: ${{ github.event.ref }}
+        publisher-url: ${{ inputs.publisher-url || vars.VAULT_PUBLISHER_URL }}

@@ -1,0 +1,6 @@
+# Continuously replicates the SQLite database to GCS. On startup, docker-entrypoint.sh restores
+# the latest copy, because Cloud Run's filesystem is wiped whenever an instance stops.
+dbs:
+  - path: ${DB_PATH}
+    replicas:
+      - url: gcs://${LITESTREAM_BUCKET}/publisher.db

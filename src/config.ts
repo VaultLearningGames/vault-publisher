@@ -1,0 +1,39 @@
+export interface Config {
+  port: number;
+  dbPath: string;
+  studiosFile: string;
+  // Audience GitHub Actions must request for their OIDC token.
+  oidcAudience: string;
+  r2AccountId: string;
+  r2AccessKeyId: string;
+  r2SecretAccessKey: string;
+  stagingBucket: string;
+  stagingPublicUrl: string;
+  previewRetentionDays: number;
+  // Cloud Scheduler calls /v1/tasks/cleanup with a Google-signed ID token for this service account.
+  taskInvokerEmail: string;
+  taskAudience: string;
+}
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required environment variable ${name}`);
+  return value;
+}
+
+export function loadConfig(): Config {
+  return {
+    port: Number(process.env.PORT ?? 8080),
+    dbPath: process.env.DB_PATH ?? 'data/publisher.db',
+    studiosFile: process.env.STUDIOS_FILE ?? 'studios.json',
+    oidcAudience: process.env.OIDC_AUDIENCE ?? 'vault-publisher',
+    r2AccountId: required('R2_ACCOUNT_ID'),
+    r2AccessKeyId: required('R2_ACCESS_KEY_ID'),
+    r2SecretAccessKey: required('R2_SECRET_ACCESS_KEY'),
+    stagingBucket: process.env.STAGING_BUCKET ?? 'cdn-vaultlearninggames-staging',
+    stagingPublicUrl: (process.env.STAGING_PUBLIC_URL ?? 'https://cdn.vaultlearninggames-staging.org').replace(/\/+$/, ''),
+    previewRetentionDays: Number(process.env.PREVIEW_RETENTION_DAYS ?? 90),
+    taskInvokerEmail: required('TASK_INVOKER_EMAIL'),
+    taskAudience: process.env.TASK_AUDIENCE ?? 'vault-publisher-tasks',
+  };
+}

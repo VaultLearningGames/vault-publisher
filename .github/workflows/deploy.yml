@@ -1,0 +1,61 @@
+name: Deploy (Cloud Run)
+
+# Deploys main to the vault-publisher Cloud Run service in the same GCP project as fielddaysite.
+# One-time setup (secrets, service accounts, Litestream bucket, variables): docs/setup.md
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    # Never run two deploys at once: only one instance may write the SQLite database.
+    concurrency:
+      group: ${{ github.workflow }}
+      cancel-in-progress: false
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: npm
+    - run: npm ci && npm run typecheck && npm test
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+        service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+    - name: Deploy to Cloud Run
+      id: deploy
+      uses: google-github-actions/deploy-cloudrun@v3
+      with:
+        service: vault-publisher
+        region: ${{ vars.GCP_REGION }}
+        project_id: ${{ vars.GCP_PROJECT_ID }}
+        source: ./
+        env_vars: |-
+          R2_ACCOUNT_ID=${{ vars.R2_ACCOUNT_ID }}
+          LITESTREAM_BUCKET=${{ vars.LITESTREAM_BUCKET }}
+          TASK_INVOKER_EMAIL=${{ vars.TASK_INVOKER_EMAIL }}
+        secrets: |-
+          R2_ACCESS_KEY_ID=vault-publisher-r2-access-key-id:latest
+          R2_SECRET_ACCESS_KEY=vault-publisher-r2-secret-access-key:latest
+        # Exactly one instance: SQLite has a single writer, and it stays warm so Litestream isn't restoring on every request.
+        flags: >-
+          --service-account=${{ vars.PUBLISHER_SERVICE_ACCOUNT }}
+          --allow-unauthenticated
+          --min-instances=1 --max-instances=1
+          --memory=512Mi --cpu-boost
+
+    - name: Show URL
+      run: echo "Deployed to ${{ steps.deploy.outputs.url }}"

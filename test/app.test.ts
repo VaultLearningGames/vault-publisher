@@ -4,9 +4,25 @@ import { createApp } from '../src/app.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db } from '../src/db.ts';
 import type { Storage } from '../src/storage.ts';
+import type { ObjectHeaders } from '../src/paths.ts';
+import type { Readable } from 'node:stream';
 
 class FakeStorage implements Storage {
   objects = new Map<string, number>();
+  data = new Map<string, Uint8Array>();
+  headers = new Map<string, ObjectHeaders>();
+  failPutAfter = Infinity;
+  async get(key: string) {
+    if (!this.objects.has(key)) throw new Error(`no such key ${key}`);
+    return this.data.get(key) ?? new Uint8Array(this.objects.get(key)!);
+  }
+  async put(key: string, body: Readable | Uint8Array, size: number, headers: ObjectHeaders) {
+    if (this.failPutAfter-- <= 0) throw new Error('simulated R2 failure');
+    const bytes = body instanceof Uint8Array ? body : new Uint8Array(Buffer.concat(await (body as Readable).toArray()));
+    this.objects.set(key, size);
+    this.data.set(key, bytes);
+    this.headers.set(key, headers);
+  }
   async presignPut(key: string) {
     return `https://r2.test/${key}`;
   }
@@ -32,7 +48,9 @@ const otherRepo: GitHubIdentity = { ...wake, repository: 'fielddaylab/bloom', re
 const otherOrg: GitHubIdentity = { ...wake, owner: 'acme', ownerId: '999', repository: 'acme/wake', repositoryId: '300' };
 
 // Tokens in tests are just keys into this table.
-const identities: Record<string, GitHubIdentity> = { wake, otherRepo, otherOrg };
+const releaser: GitHubIdentity = { ...wake, repository: 'fielddaylab/vault-publisher', repositoryId: '900', ref: 'refs/heads/main', eventName: 'workflow_dispatch', environment: 'production' };
+const releaserNoEnv: GitHubIdentity = { ...releaser, environment: undefined };
+const identities: Record<string, GitHubIdentity> = { wake, otherRepo, otherOrg, releaser, releaserNoEnv };
 const verifier: Verifier = {
   async github(token) {
     const id = identities[token];
@@ -47,17 +65,23 @@ const verifier: Verifier = {
 
 let db: Db;
 let storage: FakeStorage;
+let prod: FakeStorage;
 let app: ReturnType<typeof createApp>;
 
 beforeEach(() => {
   db = new Db(':memory:');
   db.syncStudios([{ slug: 'fielddaylab', name: 'Field Day Lab', github_owner: 'fielddaylab', github_owner_id: '1881825' }]);
   storage = new FakeStorage();
+  prod = new FakeStorage();
   app = createApp({
     db,
     staging: storage,
+    production: prod,
     verifier,
     stagingPublicUrl: 'https://cdn.example-staging.org',
+    prodPublicUrl: 'https://cdn.example.org',
+    adminRepository: 'fielddaylab/vault-publisher',
+    adminEnvironment: 'production',
     previewRetentionDays: 90,
     taskInvokerEmail: 'scheduler@example.iam.gserviceaccount.com',
   });
@@ -203,5 +227,87 @@ describe('deleting and cleanup', () => {
     assert.deepEqual(((await res.json()) as any).removed, ['fielddaylab/aqualab/feature_new-map/']);
     assert.equal(db.build(1, 'm3.2')?.status, 'live');
     assert.equal([...storage.objects.keys()].every((k) => k.includes('/m3.2/')), true);
+  });
+});
+
+describe('production releases', () => {
+  async function publishTag(tag = 'm3.2') {
+    identities.tag = { ...wake, ref: `refs/tags/${tag}` };
+    const { json } = await start('tag');
+    uploadAll(json);
+    await post(`/v1/previews/${json.upload_id}/finalize`, 'tag');
+  }
+  const approve = (version = 'm3.2', token = 'releaser', extra = {}) =>
+    post('/v1/admin/releases/approve', token, { studio: 'fielddaylab', game: 'aqualab', version, ...extra });
+  const promote = (version: string, token = 'releaser') =>
+    post('/v1/admin/releases/promote', token, { studio: 'fielddaylab', game: 'aqualab', version });
+
+  test('approve copies the staging build into production with a one-year immutable cache', async () => {
+    await publishTag();
+    const res = await approve();
+    assert.equal(res.status, 200);
+    assert.equal(((await res.json()) as any).url, 'https://cdn.example.org/fielddaylab/aqualab/m3.2/');
+    assert.deepEqual([...prod.objects.keys()].sort(), ['fielddaylab/aqualab/m3.2/Build/game.wasm.br', 'fielddaylab/aqualab/m3.2/index.html']);
+    const wasm = prod.headers.get('fielddaylab/aqualab/m3.2/Build/game.wasm.br')!;
+    assert.equal(wasm.cacheControl, 'public, max-age=31536000, immutable');
+    assert.equal(wasm.contentEncoding, 'br');
+    assert.equal(wasm.contentType, 'application/wasm');
+    assert.equal(db.release(1, 'm3.2')?.commit_sha, 'abc123');
+  });
+
+  test('a release can never be approved twice or overwritten', async () => {
+    await publishTag();
+    assert.equal((await approve()).status, 200);
+    assert.equal((await approve()).status, 409);
+  });
+
+  test('approving from another staging ref (e.g. a legacy import) works with ref', async () => {
+    const { json } = await start(); // feature/new-map branch
+    uploadAll(json);
+    await post(`/v1/previews/${json.upload_id}/finalize`, 'wake');
+    const res = await approve('legacy-2026-09', 'releaser', { ref: 'feature/new-map' });
+    assert.equal(res.status, 200);
+    assert.equal(db.release(1, 'legacy-2026-09')?.source_ref, 'feature_new-map');
+  });
+
+  test('a failed copy leaves nothing behind so it can be retried', async () => {
+    await publishTag();
+    prod.failPutAfter = 1;
+    await assert.rejects(async () => { const r = await approve(); if (r.status >= 500) throw new Error(String(r.status)); });
+    assert.equal(prod.objects.size, 0);
+    assert.equal(db.release(1, 'm3.2'), undefined);
+    prod.failPutAfter = Infinity;
+    assert.equal((await approve()).status, 200);
+  });
+
+  test('only the Release workflow in the production environment may approve or promote', async () => {
+    await publishTag();
+    assert.equal((await approve('m3.2', 'wake')).status, 403);          // a game repo
+    assert.equal((await approve('m3.2', 'releaserNoEnv')).status, 403); // right repo, no protected environment
+    assert.equal((await promote('m3.2', 'wake')).status, 403);
+  });
+
+  test('promote points STUDIO/GAME/ at a release; promoting an older one is a rollback', async () => {
+    await publishTag('m3.1');
+    await approve('m3.1');
+    await publishTag('m3.2');
+    await approve('m3.2');
+    let res = await promote('m3.2');
+    assert.deepEqual(await res.json(), { current: 'm3.2', previous: null, rollback: false, url: 'https://cdn.example.org/fielddaylab/aqualab/' });
+    const html = new TextDecoder().decode(prod.data.get('fielddaylab/aqualab/index.html'));
+    assert.match(html, /location\.replace\("\.\/m3\.2\/" \+ location\.search/);
+    assert.equal(prod.headers.get('fielddaylab/aqualab/index.html')?.cacheControl, 'no-cache');
+    res = await promote('m3.1');
+    assert.equal(((await res.json()) as any).rollback, true);
+    assert.match(new TextDecoder().decode(prod.data.get('fielddaylab/aqualab/current.json')), /"version":"m3.1"/);
+    const list = (await (await app.request('/v1/releases/fielddaylab/aqualab')).json()) as any;
+    assert.equal(list.current, 'm3.1');
+    assert.deepEqual(list.releases.map((r: any) => r.version), ['m3.2', 'm3.1']);
+  });
+
+  test('promoting an unapproved version or a bad version name is refused', async () => {
+    assert.equal((await promote('m9')).status, 404);
+    assert.equal((await approve('../evil')).status, 400);
+    assert.equal((await approve('index.html')).status, 400);
   });
 });

@@ -18,8 +18,20 @@ const app = createApp({
     secretAccessKey: config.r2SecretAccessKey,
     bucket: config.stagingBucket,
   }),
+  production:
+    config.prodAccessKeyId && config.prodSecretAccessKey
+      ? createR2Storage({
+          accountId: config.r2AccountId,
+          accessKeyId: config.prodAccessKeyId,
+          secretAccessKey: config.prodSecretAccessKey,
+          bucket: config.prodBucket,
+        })
+      : null,
   verifier: createVerifier({ githubAudience: config.oidcAudience, googleAudience: config.taskAudience }),
   stagingPublicUrl: config.stagingPublicUrl,
+  prodPublicUrl: config.prodPublicUrl,
+  adminRepository: config.adminRepository,
+  adminEnvironment: config.adminEnvironment,
   previewRetentionDays: config.previewRetentionDays,
   taskInvokerEmail: config.taskInvokerEmail,
 });

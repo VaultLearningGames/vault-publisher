@@ -34,6 +34,11 @@ export function parseGitRef(ref: string): { type: RefType; name: string } | null
   return name ? { type, name } : null;
 }
 
+// A production release name, e.g. "m3.2" or "legacy-2026-09". Becomes a folder under STUDIO/GAME/.
+export function isVersionName(v: unknown): v is string {
+  return typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(v) && !['index.html', 'current.json'].includes(v.toLowerCase());
+}
+
 export const MAX_FILES = 10_000;
 export const MAX_FILE_BYTES = 5 * 1024 ** 3; // R2 single-PUT limit
 export const MAX_TOTAL_BYTES = 4 * 1024 ** 3;

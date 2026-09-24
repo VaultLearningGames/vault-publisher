@@ -9,6 +9,14 @@ export interface Config {
   r2SecretAccessKey: string;
   stagingBucket: string;
   stagingPublicUrl: string;
+  // Production is optional so the service still runs (staging only) until its key exists.
+  prodAccessKeyId?: string;
+  prodSecretAccessKey?: string;
+  prodBucket: string;
+  prodPublicUrl: string;
+  // Release actions are accepted only from this repository's workflow, in this GitHub environment.
+  adminRepository: string;
+  adminEnvironment: string;
   previewRetentionDays: number;
   // Cloud Scheduler calls /v1/tasks/cleanup with a Google-signed ID token for this service account.
   taskInvokerEmail: string;
@@ -33,6 +41,12 @@ export function loadConfig(): Config {
     r2SecretAccessKey: required('R2_SECRET_ACCESS_KEY'),
     stagingBucket: process.env.STAGING_BUCKET ?? 'cdn-vaultlearninggames-staging',
     stagingPublicUrl: (process.env.STAGING_PUBLIC_URL ?? 'https://cdn.vaultlearninggames-staging.org').replace(/\/+$/, ''),
+    prodAccessKeyId: process.env.R2_PROD_ACCESS_KEY_ID?.trim() || undefined,
+    prodSecretAccessKey: process.env.R2_PROD_SECRET_ACCESS_KEY?.trim() || undefined,
+    prodBucket: process.env.PROD_BUCKET ?? 'cdn-vaultlearninggames',
+    prodPublicUrl: (process.env.PROD_PUBLIC_URL ?? 'https://cdn.vaultlearninggames.org').replace(/\/+$/, ''),
+    adminRepository: process.env.ADMIN_REPOSITORY ?? 'fielddaylab/vault-publisher',
+    adminEnvironment: process.env.ADMIN_ENVIRONMENT ?? 'production',
     previewRetentionDays: Number(process.env.PREVIEW_RETENTION_DAYS ?? 90),
     taskInvokerEmail: required('TASK_INVOKER_EMAIL'),
     taskAudience: process.env.TASK_AUDIENCE ?? 'vault-publisher-tasks',

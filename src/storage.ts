@@ -1,5 +1,7 @@
+import type { Readable } from 'node:stream';
 import {
   DeleteObjectsCommand,
+  GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -18,6 +20,9 @@ export interface Storage {
   presignPut(key: string, headers: ObjectHeaders, expiresIn: number): Promise<string>;
   list(prefix: string): Promise<StoredObject[]>;
   deleteKeys(keys: string[]): Promise<void>;
+  // Streams one object's body; used to copy approved builds from staging to production.
+  get(key: string): Promise<Readable | Uint8Array>;
+  put(key: string, body: Readable | Uint8Array, size: number, headers: ObjectHeaders): Promise<void>;
 }
 
 export function requestHeaders(headers: ObjectHeaders): Record<string, string> {
@@ -74,6 +79,26 @@ export function createR2Storage(opts: {
         token = page.IsTruncated ? page.NextContinuationToken : undefined;
       } while (token);
       return objects;
+    },
+
+    async get(key) {
+      const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      if (!res.Body) throw new Error(`empty body for ${key}`);
+      return res.Body as Readable;
+    },
+
+    async put(key, body, size, headers) {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: body,
+          ContentLength: size,
+          ContentType: headers.contentType,
+          ContentEncoding: headers.contentEncoding,
+          CacheControl: headers.cacheControl,
+        }),
+      );
     },
 
     async deleteKeys(keys) {

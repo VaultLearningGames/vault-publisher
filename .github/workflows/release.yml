@@ -1,0 +1,80 @@
+name: Release
+
+# Vault staff release a tested staging build to classrooms (https://cdn.vaultlearninggames.org).
+# Runs in the "production" environment, so a required reviewer must approve each run.
+# The publisher only accepts release actions from this workflow in that environment.
+#
+#   approve              copy a staging build (usually a tag) into production as an immutable release
+#   promote              make an approved release the one players get at .../STUDIO/GAME/ (also used to roll back)
+#   approve-and-promote  both, in one run
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [approve-and-promote, approve, promote]
+        default: approve-and-promote
+      game:
+        description: Game slug, e.g. aqualab
+        required: true
+        type: string
+      version:
+        description: Release name, e.g. m3.2 (for promote/rollback, an already-approved release)
+        required: true
+        type: string
+      ref:
+        description: Staging branch or tag to release (approve only; defaults to the version)
+        type: string
+        default: ''
+      studio:
+        description: Studio slug
+        type: string
+        default: fielddaylab
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-${{ inputs.studio }}-${{ inputs.game }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://cdn.vaultlearninggames.org/${{ inputs.studio }}/${{ inputs.game }}/
+    env:
+      PUBLISHER: ${{ vars.VAULT_PUBLISHER_URL }}
+      ACTION: ${{ inputs.action }}
+      STUDIO: ${{ inputs.studio }}
+      GAME: ${{ inputs.game }}
+      VERSION: ${{ inputs.version }}
+      REF: ${{ inputs.ref }}
+    steps:
+    - name: Release
+      run: |
+        set -euo pipefail
+        token=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=vault-publisher" | jq -r .value)
+        call() {
+          body=$(jq -n --arg s "$STUDIO" --arg g "$GAME" --arg v "$VERSION" --arg r "$REF" \
+            '{studio: $s, game: $g, version: $v} + (if $r == "" then {} else {ref: $r} end)')
+          res=$(curl -sS -w '\n%{http_code}' -X POST "$PUBLISHER/v1/admin/releases/$1" \
+            -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$body")
+          code=$(echo "$res" | tail -1); json=$(echo "$res" | sed '$d')
+          echo "$json" | jq . || echo "$json"
+          if [ "$code" != 200 ]; then echo "::error::$1 failed (HTTP $code): $(echo "$json" | jq -r .error)"; exit 1; fi
+        }
+        if [ "$ACTION" != promote ]; then
+          call approve
+          echo "::notice title=Approved $GAME $VERSION::https://cdn.vaultlearninggames.org/$STUDIO/$GAME/$VERSION/"
+          echo "### ✅ Approved \`$GAME\` $VERSION → https://cdn.vaultlearninggames.org/$STUDIO/$GAME/$VERSION/" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        if [ "$ACTION" != approve ]; then
+          call promote
+          echo "::notice title=$GAME now plays $VERSION::https://cdn.vaultlearninggames.org/$STUDIO/$GAME/"
+          echo "### 🎮 \`$GAME\` now plays $VERSION → https://cdn.vaultlearninggames.org/$STUDIO/$GAME/" >> "$GITHUB_STEP_SUMMARY"
+        fi

@@ -68,6 +68,25 @@ const MIGRATIONS = [
     detail_json TEXT
   );
   `,
+  `
+  -- Production releases: immutable copies of approved staging builds.
+  CREATE TABLE releases (
+    id          INTEGER PRIMARY KEY,
+    game_id     INTEGER NOT NULL REFERENCES games(id),
+    version     TEXT NOT NULL,
+    source_ref  TEXT NOT NULL,
+    commit_sha  TEXT,
+    file_count  INTEGER NOT NULL,
+    total_bytes INTEGER NOT NULL,
+    approved_by TEXT NOT NULL,
+    approved_at TEXT NOT NULL,
+    UNIQUE (game_id, version)
+  );
+
+  -- The release players get at STUDIO/GAME/.
+  ALTER TABLE games ADD COLUMN current_release_id INTEGER REFERENCES releases(id);
+  ALTER TABLE games ADD COLUMN promoted_at TEXT;
+  `,
 ];
 
 export interface Studio {
@@ -109,8 +128,22 @@ export interface Build {
   game_id: number;
   ref_name: string;
   ref_type: RefType;
+  commit_sha: string;
+  file_count: number;
   status: 'live' | 'deleted';
   updated_at: string;
+}
+
+export interface Release {
+  id: number;
+  game_id: number;
+  version: string;
+  source_ref: string;
+  commit_sha: string | null;
+  file_count: number;
+  total_bytes: number;
+  approved_by: string;
+  approved_at: string;
 }
 
 export interface StaleBuild {
@@ -159,6 +192,10 @@ export class Db {
 
   studioByOwnerId(ownerId: string): Studio | undefined {
     return this.sqlite.prepare('SELECT * FROM studios WHERE github_owner_id = ?').get(ownerId) as Studio | undefined;
+  }
+
+  studioBySlug(slug: string): Studio | undefined {
+    return this.sqlite.prepare('SELECT * FROM studios WHERE slug = ?').get(slug) as Studio | undefined;
   }
 
   studioById(id: number): Studio | undefined {
@@ -246,6 +283,34 @@ export class Db {
         FROM builds b JOIN games g ON g.id = b.game_id JOIN studios s ON s.id = g.studio_id
         WHERE b.status = 'live' AND b.ref_type = 'branch' AND b.updated_at < ?`)
       .all(cutoff) as unknown as StaleBuild[];
+  }
+
+  createRelease(r: Omit<Release, 'id' | 'approved_at'>): Release {
+    this.sqlite
+      .prepare(`INSERT INTO releases (game_id, version, source_ref, commit_sha, file_count, total_bytes, approved_by, approved_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(r.game_id, r.version, r.source_ref, r.commit_sha, r.file_count, r.total_bytes, r.approved_by, now());
+    return this.release(r.game_id, r.version)!;
+  }
+
+  release(gameId: number, version: string): Release | undefined {
+    return this.sqlite.prepare('SELECT * FROM releases WHERE game_id = ? AND version = ?').get(gameId, version) as
+      | Release
+      | undefined;
+  }
+
+  releases(gameId: number): Release[] {
+    return this.sqlite.prepare('SELECT * FROM releases WHERE game_id = ? ORDER BY id DESC').all(gameId) as unknown as Release[];
+  }
+
+  currentRelease(gameId: number): Release | undefined {
+    return this.sqlite
+      .prepare('SELECT r.* FROM releases r JOIN games g ON g.current_release_id = r.id WHERE g.id = ?')
+      .get(gameId) as Release | undefined;
+  }
+
+  setCurrentRelease(gameId: number, releaseId: number) {
+    this.sqlite.prepare('UPDATE games SET current_release_id = ?, promoted_at = ? WHERE id = ?').run(releaseId, now(), gameId);
   }
 
   audit(actor: string, action: string, target: string, detail?: unknown) {

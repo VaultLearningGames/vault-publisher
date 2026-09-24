@@ -11,6 +11,8 @@ export interface GitHubIdentity {
   sha: string;
   actor: string;
   eventName: string;
+  // Set when the job runs in a GitHub deployment environment (e.g. "production" with required reviewers).
+  environment?: string;
 }
 
 export interface Verifier {
@@ -48,6 +50,7 @@ export function createVerifier(opts: { githubAudience: string; googleAudience: s
         sha: claim(p, 'sha'),
         actor: claim(p, 'actor'),
         eventName: claim(p, 'event_name'),
+        environment: typeof p.environment === 'string' ? p.environment : undefined,
       };
     },
 

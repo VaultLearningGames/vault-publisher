@@ -109,6 +109,23 @@ this repo as a submodule.
 [fielddaylab/vault-publisher-test](https://github.com/fielddaylab/vault-publisher-test) is a working example that
 uses a seconds-long simulated Unity build.
 
+## Releasing to classrooms (production)
+
+Production (`https://cdn.vaultlearninggames.org/STUDIO/GAME/`) is written only by the service, and only when Vault
+staff run the **Release** workflow in this repo (Actions → Release → Run workflow). It runs in the `production`
+GitHub environment, which requires a reviewer to approve each run.
+
+1. A studio pushes a version tag (e.g. `m3.2`); its build appears on staging at `…-staging.org/STUDIO/GAME/m3.2/`.
+2. Vault tests that staging build.
+3. Run **Release** with action `approve-and-promote`, game `aqualab`, version `m3.2`:
+   - **approve** copies the staging build to `cdn.vaultlearninggames.org/STUDIO/GAME/m3.2/`, labelled cacheable for a
+     year. A version can be approved only once; releases are never overwritten.
+   - **promote** points `cdn.vaultlearninggames.org/STUDIO/GAME/` at it (a tiny redirect page plus `current.json`,
+     both uncached, keeping query strings).
+4. **Roll back** by running Release with action `promote` and an earlier version.
+
+`GET /v1/releases/STUDIO/GAME` lists a game's releases and which one is current.
+
 ## API
 
 All `/v1/previews*` calls need `Authorization: Bearer <GitHub Actions OIDC token>` with audience `vault-publisher`.
@@ -118,6 +135,9 @@ All `/v1/previews*` calls need `Authorization: Bearer <GitHub Actions OIDC token
 | `POST /v1/previews` | `{ game, files: [{ path, size }] }` | Starts an upload for the token's branch/tag; returns a presigned URL + headers per file |
 | `POST /v1/previews/:id/finalize` | — | Verifies every file arrived, deletes files left from the previous build, records the preview |
 | `POST /v1/previews/delete` | `{ game, ref }` | Deletes a preview |
+| `POST /v1/admin/releases/approve` | `{ studio, game, version, ref? }` | Release workflow only: copy a staging build to production |
+| `POST /v1/admin/releases/promote` | `{ studio, game, version }` | Release workflow only: make a release current (or roll back) |
+| `GET /v1/releases/:studio/:game` | — | Public: releases and the current one |
 | `POST /v1/tasks/cleanup` | — | Nightly expiry; Cloud Scheduler only (Google ID token) |
 | `GET /health` | — | Health check |
 

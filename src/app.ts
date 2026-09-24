@@ -4,10 +4,12 @@ import { bodyLimit } from 'hono/body-limit';
 import { randomUUID } from 'node:crypto';
 import { bearerToken, type GitHubIdentity, type Verifier } from './auth.ts';
 import type { Db, Game, ManifestFile, Studio } from './db.ts';
+import { copyRelease, writePointer } from './releases.ts';
 import {
   headersFor,
   isSafeFilePath,
   isSlug,
+  isVersionName,
   MAX_FILE_BYTES,
   MAX_FILES,
   MAX_TOTAL_BYTES,
@@ -19,8 +21,13 @@ import { requestHeaders, type Storage } from './storage.ts';
 export interface AppDeps {
   db: Db;
   staging: Storage;
+  // null until the production R2 key is configured; release endpoints then answer 503.
+  production: Storage | null;
   verifier: Verifier;
   stagingPublicUrl: string;
+  prodPublicUrl: string;
+  adminRepository: string;
+  adminEnvironment: string;
   previewRetentionDays: number;
   taskInvokerEmail: string;
 }
@@ -30,7 +37,7 @@ const UPLOAD_TTL_MS = 2 * 60 * 60 * 1000;
 // Events whose OIDC `ref` names the branch or tag being built.
 const PUBLISH_EVENTS = new Set(['push', 'workflow_dispatch']);
 
-function fail(status: 400 | 401 | 403 | 404 | 409 | 410, message: string, detail?: unknown): never {
+function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 503, message: string, detail?: unknown): never {
   throw new HTTPException(status, { res: Response.json({ error: message, detail }, { status }) });
 }
 
@@ -109,7 +116,87 @@ export function createApp(deps: AppDeps) {
     return game;
   }
 
+  // Release actions come only from the admin repository's Release workflow, running in the protected
+  // GitHub environment (which requires a Vault reviewer to approve each run).
+  async function admin(c: Context): Promise<GitHubIdentity> {
+    const id = await github(c);
+    if (id.repository !== deps.adminRepository || id.environment !== deps.adminEnvironment) {
+      fail(403, `release actions must come from ${deps.adminRepository} in the "${deps.adminEnvironment}" environment`);
+    }
+    return id;
+  }
+
+  function productionStorage(): Storage {
+    if (!deps.production) fail(503, 'production storage is not configured yet');
+    return deps.production;
+  }
+
+  function releaseTarget(body: Record<string, unknown>) {
+    if (!isSlug(body.studio)) fail(400, 'studio must be a studio slug');
+    if (!isSlug(body.game)) fail(400, 'game must be a game slug');
+    if (!isVersionName(body.version)) fail(400, 'version must look like "m3.2" or "legacy-2026-09"');
+    const studio = db.studioBySlug(body.studio);
+    if (!studio) fail(404, `unknown studio ${body.studio}`);
+    const game = db.game(studio.id, body.game);
+    if (!game) fail(404, `unknown game ${studio.slug}/${body.game}`);
+    return { studio, game, version: body.version };
+  }
+
   app.get('/health', (c) => c.json({ ok: true }));
+
+  // Approve: copy a live staging build to production as an immutable release.
+  // Body: { studio, game, version, ref } where ref is the staging branch/tag (defaults to version).
+  app.post('/v1/admin/releases/approve', async (c) => {
+    const id = await admin(c);
+    const production = productionStorage();
+    const body = await jsonBody(c);
+    const { studio, game, version } = releaseTarget(body);
+    const ref = sanitizeRefName(typeof body.ref === 'string' && body.ref ? body.ref.replace(/^refs\/(heads|tags)\//, '') : version);
+    if (!ref) fail(400, 'ref must be a branch or tag name');
+    const build = db.build(game.id, ref);
+    if (!build || build.status !== 'live') fail(404, `no live staging build ${studio.slug}/${game.slug}/${ref}`);
+    if (db.release(game.id, version)) fail(409, `release ${version} already exists and can't be changed`);
+    const dstPrefix = `${studio.slug}/${game.slug}/${version}/`;
+    if ((await production.list(dstPrefix)).length > 0) fail(409, `production already has files under ${dstPrefix}`);
+
+    const copied = await copyRelease({ staging, production, srcPrefix: previewPrefix(studio, game, ref), dstPrefix });
+    const release = db.createRelease({
+      game_id: game.id, version, source_ref: ref, commit_sha: build.commit_sha,
+      file_count: copied.files, total_bytes: copied.bytes, approved_by: `github:${id.actor}`,
+    });
+    db.audit(`github:${id.actor}`, 'release.approve', dstPrefix, { from: ref, sha: build.commit_sha, ...copied });
+    return c.json({ release, url: `${deps.prodPublicUrl}/${dstPrefix}` });
+  });
+
+  // Promote (or roll back): make an approved release the one players get at STUDIO/GAME/.
+  // Body: { studio, game, version }
+  app.post('/v1/admin/releases/promote', async (c) => {
+    const id = await admin(c);
+    const production = productionStorage();
+    const { studio, game, version } = releaseTarget(await jsonBody(c));
+    const release = db.release(game.id, version);
+    if (!release) fail(404, `${version} hasn't been approved for ${studio.slug}/${game.slug}`);
+    const previous = db.currentRelease(game.id);
+    const gamePrefix = `${studio.slug}/${game.slug}/`;
+    await writePointer(production, gamePrefix, version, game.slug);
+    db.setCurrentRelease(game.id, release.id);
+    const rollback = previous !== undefined && previous.id > release.id;
+    db.audit(`github:${id.actor}`, rollback ? 'release.rollback' : 'release.promote', gamePrefix, { from: previous?.version ?? null, to: version });
+    return c.json({ current: version, previous: previous?.version ?? null, rollback, url: `${deps.prodPublicUrl}/${gamePrefix}` });
+  });
+
+  // Public: a game's releases and which one is current.
+  app.get('/v1/releases/:studio/:game', (c) => {
+    const studio = db.studioBySlug(c.req.param('studio'));
+    const game = studio && db.game(studio.id, c.req.param('game'));
+    if (!studio || !game) fail(404, 'unknown game');
+    const current = db.currentRelease(game.id);
+    return c.json({
+      current: current?.version ?? null,
+      url: `${deps.prodPublicUrl}/${studio.slug}/${game.slug}/`,
+      releases: db.releases(game.id).map((r) => ({ version: r.version, source_ref: r.source_ref, commit_sha: r.commit_sha, files: r.file_count, bytes: r.total_bytes, approved_by: r.approved_by, approved_at: r.approved_at })),
+    });
+  });
 
   // Start a preview upload for the branch or tag in the caller's OIDC token.
   // Body: { game, files: [{ path, size }] }. Returns a presigned PUT URL and headers per file.

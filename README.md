@@ -30,6 +30,17 @@ GitHub Actions ──OIDC token──► vault-publisher (Cloud Run, 1 instance,
 
 ## Using it from a game repo
 
+Building and publishing are separate reusable workflows, connected by a GitHub artifact:
+
+| Workflow | Does |
+|---|---|
+| [`unity-build.yml`](.github/workflows/unity-build.yml) | Builds a Unity project with game-ci and uploads the build as an artifact. Knows nothing about CDNs. |
+| [`publish-preview.yml`](.github/workflows/publish-preview.yml) | Publishes any build artifact to the staging CDN; on a branch `delete` event, removes that preview. |
+| [`unity-webgl.yml`](.github/workflows/unity-webgl.yml) | Both of the above, for repos that don't need anything in between. |
+| *(Stage 2)* | Production releases aren't uploaded; an approved staging build is copied to the production CDN. |
+
+All-in-one:
+
 ```yaml
 # .github/workflows/webgl.yml
 name: WebGL
@@ -42,7 +53,32 @@ jobs:
     secrets: inherit
 ```
 
-Non-Unity builds can call the action directly after their own build step:
+Split, so other jobs can use the same build (e.g. an existing deploy that should keep running):
+
+```yaml
+jobs:
+  build:
+    if: github.event_name != 'delete'
+    uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@main
+    secrets: inherit
+  preview:
+    needs: build
+    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@main
+    with: { game: aqualab, artifact: "${{ needs.build.outputs.artifact }}" }
+  remove-preview:
+    if: github.event_name == 'delete'
+    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@main
+    with: { game: aqualab }
+  other-deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: "${{ needs.build.outputs.artifact }}", path: build }
+      # ...
+```
+
+Non-GitHub-artifact builds can call the action directly after their own build step:
 
 ```yaml
 - uses: fielddaylab/vault-publisher/action@main
@@ -51,6 +87,9 @@ Non-Unity builds can call the action directly after their own build step:
     path: dist
     publisher-url: ${{ vars.VAULT_PUBLISHER_URL }}
 ```
+
+[fielddaylab/vault-publisher-test](https://github.com/fielddaylab/vault-publisher-test) is a working example that
+uses a seconds-long simulated Unity build.
 
 ## API
 

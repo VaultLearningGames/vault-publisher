@@ -1,0 +1,103 @@
+name: Unity build
+
+# Reusable: builds a Unity project with game-ci and uploads the result as a workflow artifact.
+# It knows nothing about CDNs; pass the `artifact` output to publish-preview.yml (or anything else,
+# e.g. an existing deploy job) to ship it.
+#
+#   jobs:
+#     build:
+#       uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@main
+#       secrets: inherit          # UNITY_EMAIL, UNITY_PASSWORD, UNITY_SERIAL
+on:
+  workflow_call:
+    inputs:
+      target-platform:
+        description: game-ci targetPlatform.
+        type: string
+        default: WebGL
+      project-path:
+        description: Folder containing the Unity project (Assets/, ProjectSettings/).
+        type: string
+        default: .
+      unity-version:
+        description: Overrides the version in ProjectSettings/ProjectVersion.txt.
+        type: string
+        default: ''
+      custom-parameters:
+        description: Extra Unity command-line parameters passed to game-ci.
+        type: string
+        default: ''
+      retention-days:
+        type: number
+        default: 14
+    secrets:
+      UNITY_EMAIL:
+        required: false
+      UNITY_PASSWORD:
+        required: false
+      UNITY_SERIAL:
+        required: false
+      UNITY_LICENSE:
+        required: false
+    outputs:
+      artifact:
+        description: Name of the uploaded artifact containing the build (index.html at its root for WebGL).
+        value: ${{ jobs.build.outputs.artifact }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: unity-build-${{ github.repository }}-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    outputs:
+      artifact: ${{ steps.names.outputs.artifact }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+        submodules: recursive
+
+    - name: Resolve Unity version and names
+      id: names
+      env:
+        PROJECT: ${{ inputs.project-path }}
+        OVERRIDE: ${{ inputs.unity-version }}
+        PLATFORM: ${{ inputs.target-platform }}
+      run: |
+        version="${OVERRIDE:-$(sed -n 's/^m_EditorVersion: //p' "$PROJECT/ProjectSettings/ProjectVersion.txt")}"
+        if [ -z "$version" ]; then echo "::error::No Unity version found in $PROJECT/ProjectSettings/ProjectVersion.txt"; exit 1; fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "artifact=${PLATFORM,,}-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@v4
+      with:
+        path: ${{ inputs.project-path }}/Library
+        key: Library-${{ inputs.target-platform }}-${{ steps.names.outputs.version }}-${{ hashFiles(format('{0}/Assets/**', inputs.project-path), format('{0}/Packages/**', inputs.project-path), format('{0}/ProjectSettings/**', inputs.project-path)) }}
+        restore-keys: |
+          Library-${{ inputs.target-platform }}-${{ steps.names.outputs.version }}-
+
+    - uses: game-ci/unity-builder@v4
+      env:
+        UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+        UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+      with:
+        projectPath: ${{ inputs.project-path }}
+        unityVersion: ${{ steps.names.outputs.version }}
+        targetPlatform: ${{ inputs.target-platform }}
+        customParameters: ${{ inputs.custom-parameters }}
+
+    # game-ci writes to build/<platform>/<platform>/.
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.names.outputs.artifact }}
+        path: build/${{ inputs.target-platform }}/${{ inputs.target-platform }}
+        retention-days: ${{ inputs.retention-days }}
+        if-no-files-found: error
+        # Unity output is mostly already compressed (.br/.gz/.unityweb).
+        compression-level: 1

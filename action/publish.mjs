@@ -62,6 +62,19 @@ function summary(markdown) {
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
 }
 
+// Makes the result impossible to miss: a boxed line in the log, a notice annotation at the top of the
+// run page, and a job summary section.
+function announce(title, url, rows) {
+  const line = '═'.repeat(Math.max(title.length, url.length) + 4);
+  console.log(`\n╔${line}╗\n║  ${title.padEnd(line.length - 4)}  ║\n║  ${url.padEnd(line.length - 4)}  ║\n╚${line}╝\n`);
+  console.log(`::notice title=${title}::${url}`);
+  const table = rows.map(([k, v]) => `| ${k} | ${v} |`).join('\n');
+  summary(`## ${title}\n\n### ${url.startsWith('http') ? `[${url}](${url})` : url}\n\n| | |\n|---|---|\n${table}\n`);
+}
+
+const commit = (env.GITHUB_SHA || '').slice(0, 7);
+const repoLink = env.GITHUB_SERVER_URL && env.GITHUB_REPOSITORY ? `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}` : '';
+
 if (!game) die('input "game" is required');
 if (!publisher) die('input "publisher-url" is required');
 const token = await oidcToken();
@@ -69,8 +82,11 @@ const token = await oidcToken();
 if (mode === 'delete') {
   if (!env.INPUT_REF) die('input "ref" is required for mode "delete"');
   const { deleted } = await api(token, '/v1/previews/delete', { game, ref: env.INPUT_REF });
-  console.log(`Deleted preview ${game}/${env.INPUT_REF} (${deleted} files)`);
-  summary(`🗑️ Deleted preview **${game}/${env.INPUT_REF}** (${deleted} files)`);
+  announce('🗑️ Preview removed', `${game} / ${env.INPUT_REF}`, [
+    ['Game', `\`${game}\``],
+    ['Branch/tag', `\`${env.INPUT_REF}\``],
+    ['Files removed', String(deleted)],
+  ]);
 } else if (mode === 'publish') {
   const root = env.INPUT_PATH || 'build/WebGL/WebGL';
   const files = await listFiles(root).catch((err) => die(`Cannot read build folder ${root}: ${err.message}`));
@@ -89,9 +105,13 @@ if (mode === 'delete') {
 
   // The finalize call needs a fresh token only if the upload took longer than the token's lifetime (~5 min).
   const { url } = await api(await oidcToken(), `/v1/previews/${upload.upload_id}/finalize`);
-  console.log(`Preview: ${url}`);
   output('url', url);
-  summary(`🎮 Preview published: ${url}`);
+  announce('🎮 Preview published', url, [
+    ['Game', `\`${game}\``],
+    ['Branch/tag', `\`${env.GITHUB_REF_NAME || '?'}\``],
+    ['Commit', repoLink && commit ? `[\`${commit}\`](${repoLink}/commit/${env.GITHUB_SHA})` : commit || '?'],
+    ['Files', `${files.length} (${(total / 1e6).toFixed(1)} MB)`],
+  ]);
 } else {
   die(`unknown mode "${mode}"`);
 }

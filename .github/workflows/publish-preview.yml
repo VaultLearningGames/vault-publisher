@@ -49,6 +49,11 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    # Shows the preview URL on the workflow graph, as "View deployment" on pull requests,
+    # and under the repository's Deployments.
+    environment:
+      name: vault-staging
+      url: ${{ steps.publish.outputs.url }}
     outputs:
       url: ${{ steps.publish.outputs.url }}
     steps:

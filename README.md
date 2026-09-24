@@ -62,7 +62,7 @@ All `/v1/previews*` calls need `Authorization: Bearer <GitHub Actions OIDC token
 | `POST /v1/previews/:id/finalize` | — | Verifies every file arrived, deletes files left from the previous build, records the preview |
 | `POST /v1/previews/delete` | `{ game, ref }` | Deletes a preview |
 | `POST /v1/tasks/cleanup` | — | Nightly expiry; Cloud Scheduler only (Google ID token) |
-| `GET /healthz` | — | Health check |
+| `GET /health` | — | Health check |
 
 ## Development
 

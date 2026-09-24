@@ -109,7 +109,7 @@ export function createApp(deps: AppDeps) {
     return game;
   }
 
-  app.get('/healthz', (c) => c.json({ ok: true }));
+  app.get('/health', (c) => c.json({ ok: true }));
 
   // Start a preview upload for the branch or tag in the caller's OIDC token.
   // Body: { game, files: [{ path, size }] }. Returns a presigned PUT URL and headers per file.

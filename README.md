@@ -48,7 +48,7 @@ on: { push: {}, delete: {}, workflow_dispatch: {} }
 permissions: { contents: read, id-token: write }
 jobs:
   webgl:
-    uses: fielddaylab/vault-publisher/.github/workflows/unity-webgl.yml@main
+    uses: fielddaylab/vault-publisher/.github/workflows/unity-webgl.yml@v1
     with: { game: aqualab }
     secrets: inherit
 ```
@@ -59,15 +59,15 @@ Split, so other jobs can use the same build (e.g. an existing deploy that should
 jobs:
   build:
     if: github.event_name != 'delete'
-    uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@main
+    uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@v1
     secrets: inherit
   preview:
     needs: build
-    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@main
+    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
     with: { game: aqualab, artifact: "${{ needs.build.outputs.artifact }}" }
   remove-preview:
     if: github.event_name == 'delete'
-    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@main
+    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
     with: { game: aqualab }
   other-deploy:
     needs: build
@@ -78,15 +78,33 @@ jobs:
       # ...
 ```
 
-Non-GitHub-artifact builds can call the action directly after their own build step:
+Games whose WebGL build is **committed to the repository** (no CI build) publish that folder directly;
+one job handles both pushes and branch deletes:
 
 ```yaml
-- uses: fielddaylab/vault-publisher/action@main
+on: { push: {}, delete: {}, workflow_dispatch: {} }
+permissions: { contents: read, id-token: write }
+jobs:
+  preview:
+    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+    with: { game: bloom, path: WebGL }   # folder containing index.html
+```
+
+Other build systems (npm, etc.) can call the action directly after their own build step:
+
+```yaml
+- uses: fielddaylab/vault-publisher/action@v1
   with:
     game: my-game
     path: dist
     publisher-url: ${{ vars.VAULT_PUBLISHER_URL }}
 ```
+
+Games that only exist as old builds on the DoIT server (no build in any repo) don't get a workflow; they're
+imported once into the production CDN.
+
+Game repos reference these files remotely (`uses: fielddaylab/vault-publisher/...@v1`); don't copy them or add
+this repo as a submodule.
 
 [fielddaylab/vault-publisher-test](https://github.com/fielddaylab/vault-publisher-test) is a working example that
 uses a seconds-long simulated Unity build.
@@ -102,6 +120,21 @@ All `/v1/previews*` calls need `Authorization: Bearer <GitHub Actions OIDC token
 | `POST /v1/previews/delete` | `{ game, ref }` | Deletes a preview |
 | `POST /v1/tasks/cleanup` | — | Nightly expiry; Cloud Scheduler only (Google ID token) |
 | `GET /health` | — | Health check |
+
+## Releasing
+
+Game repos use `@v1`, a tag that always points at the latest compatible release, so fixes reach every game
+without editing ~30 repositories. Workflows in this repo also reference each other and `action/` at `@v1`.
+
+- **Compatible change** (fix, new optional input): merge to `main`, then tag and move `v1`:
+  ```bash
+  git tag v1.2.0 && git tag -f v1 && git push origin v1.2.0 && git push -f origin v1
+  ```
+- **Breaking change** (renamed/removed input, different URLs): release as `v2.0.0` + `v2`, update the internal
+  `@v1` references to `@v2` in that release, and move games over one at a time.
+- Test changes first from a branch, e.g. by pointing `vault-publisher-test` at `@your-branch`.
+
+Pushes to `main` redeploy the service; the tags only affect the workflows and action game repos run.
 
 ## Development
 

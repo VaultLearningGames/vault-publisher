@@ -6,7 +6,7 @@ name: Unity build
 #
 #   jobs:
 #     build:
-#       uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@main
+#       uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@v1
 #       secrets: inherit          # UNITY_EMAIL, UNITY_PASSWORD, UNITY_SERIAL
 on:
   workflow_call:
@@ -30,6 +30,10 @@ on:
       retention-days:
         type: number
         default: 14
+      free-disk-space:
+        description: Delete preinstalled SDKs on the runner first (needed for large Unity 2022+ projects).
+        type: boolean
+        default: true
     secrets:
       UNITY_EMAIL:
         required: false
@@ -56,6 +60,14 @@ jobs:
       artifact: ${{ steps.names.outputs.artifact }}
 
     steps:
+    - name: Free disk space
+      if: inputs.free-disk-space
+      run: |
+        df -h / | tail -1
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+        sudo docker image prune --all --force > /dev/null
+        df -h / | tail -1
+
     - uses: actions/checkout@v7
       with:
         lfs: true

@@ -1,23 +1,37 @@
 name: Publish preview
 
-# Reusable: publishes a build artifact (from unity-build.yml or any other build) to the staging CDN at
+# Reusable: publishes a build to the staging CDN at
 #   https://cdn.vaultlearninggames-staging.org/STUDIO/GAME/<branch or tag>/
+# The build comes from either
+#   - `artifact`: a workflow artifact from an earlier job (e.g. unity-build.yml), or
+#   - `path`: a folder committed to the repository (older games whose WebGL build is checked in).
 # When the calling workflow was triggered by a branch/tag `delete` event, it removes that preview instead.
 #
 # The caller must grant `permissions: id-token: write`.
 #
+# Committed build (one job handles push and delete):
+#
+#   on: { push: {}, delete: {}, workflow_dispatch: {} }
+#   permissions: { contents: read, id-token: write }
+#   jobs:
+#     preview:
+#       uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+#       with: { game: bloom, path: WebGL }
+#
+# Artifact from a build job:
+#
 #   jobs:
 #     build:
 #       if: github.event_name != 'delete'
-#       uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@main
+#       uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@v1
 #       secrets: inherit
 #     preview:
 #       needs: build
-#       uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@main
+#       uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
 #       with: { game: aqualab, artifact: "${{ needs.build.outputs.artifact }}" }
 #     remove-preview:
 #       if: github.event_name == 'delete'
-#       uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@main
+#       uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
 #       with: { game: aqualab }
 on:
   workflow_call:
@@ -27,7 +41,11 @@ on:
         required: true
         type: string
       artifact:
-        description: Name of the artifact holding the build (index.html at its root). Not needed for delete events.
+        description: Name of a workflow artifact holding the build (index.html at its root).
+        type: string
+        default: ''
+      path:
+        description: Folder in the repository holding a committed build (index.html at its root). Used when `artifact` is empty.
         type: string
         default: ''
       publisher-url:
@@ -58,22 +76,30 @@ jobs:
       url: ${{ steps.publish.outputs.url }}
     steps:
     - name: Check inputs
-      if: inputs.artifact == ''
+      if: inputs.artifact == '' && inputs.path == ''
       run: |
-        echo "::error::publish-preview needs the 'artifact' input for ${{ github.event_name }} events"
+        echo "::error::publish-preview needs either the 'artifact' or the 'path' input"
         exit 1
 
-    - uses: actions/download-artifact@v8
+    - name: Download build artifact
+      if: inputs.artifact != ''
+      uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.artifact }}
         path: build
 
+    - name: Check out committed build
+      if: inputs.artifact == ''
+      uses: actions/checkout@v7
+      with:
+        lfs: true
+
     - name: Publish preview
       id: publish
-      uses: fielddaylab/vault-publisher/action@main
+      uses: fielddaylab/vault-publisher/action@v1
       with:
         game: ${{ inputs.game }}
-        path: build
+        path: ${{ inputs.artifact != '' && 'build' || inputs.path }}
         publisher-url: ${{ inputs.publisher-url || vars.VAULT_PUBLISHER_URL }}
 
   delete:
@@ -83,7 +109,7 @@ jobs:
       id-token: write
     steps:
     - name: Delete preview
-      uses: fielddaylab/vault-publisher/action@main
+      uses: fielddaylab/vault-publisher/action@v1
       with:
         game: ${{ inputs.game }}
         mode: delete

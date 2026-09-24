@@ -63,7 +63,7 @@ jobs:
         echo "::error::publish-preview needs the 'artifact' input for ${{ github.event_name }} events"
         exit 1
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.artifact }}
         path: build

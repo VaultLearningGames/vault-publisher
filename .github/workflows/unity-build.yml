@@ -56,7 +56,7 @@ jobs:
       artifact: ${{ steps.names.outputs.artifact }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         lfs: true
         submodules: recursive
@@ -73,7 +73,7 @@ jobs:
         echo "version=$version" >> "$GITHUB_OUTPUT"
         echo "artifact=${PLATFORM,,}-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       with:
         path: ${{ inputs.project-path }}/Library
         key: Library-${{ inputs.target-platform }}-${{ steps.names.outputs.version }}-${{ hashFiles(format('{0}/Assets/**', inputs.project-path), format('{0}/Packages/**', inputs.project-path), format('{0}/ProjectSettings/**', inputs.project-path)) }}
@@ -93,7 +93,7 @@ jobs:
         customParameters: ${{ inputs.custom-parameters }}
 
     # game-ci writes to build/<platform>/<platform>/.
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: ${{ steps.names.outputs.artifact }}
         path: build/${{ inputs.target-platform }}/${{ inputs.target-platform }}

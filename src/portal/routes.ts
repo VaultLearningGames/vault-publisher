@@ -423,15 +423,15 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
         <td class="small">from <span class="mono">${r.source_ref}</span>${r.commit_sha ? html` · <a class="mono" href="https://github.com/${g.repository}/commit/${r.commit_sha}">${r.commit_sha.slice(0, 7)}</a>` : ''}</td>
         <td class="small">${r.approved_at.slice(0, 10)} · ${who(r.approved_by)}</td>
         <td class="small"><a href="${deps.prodPublicUrl}/${s.slug}/${g.slug}/${r.version}/" target="_blank" rel="noopener">Play ↗</a></td>
-        <td class="r">${release && !isCur ? html`<form data-api="${api}/promote" data-confirm="${cur && cur.id > r.id ? `Roll ${g.slug} back to ${r.version}? Classrooms get it immediately.` : `Make ${r.version} the version classrooms get?`}">
-          <input type="hidden" name="version" value="${r.version}"><button class="btn sm">${cur && cur.id > r.id ? 'Roll back to this' : 'Make current'}</button><span class="err"></span></form>` : ''}</td></tr>`;
+        <td class="r">${release && !isCur ? html`<form data-api="${api}/promote" data-busy="Switching…" data-confirm="${cur && cur.id > r.id ? `Roll ${g.slug} back to ${r.version}? Classrooms get it immediately.` : `Make ${r.version} the version classrooms get?`}">
+          <input type="hidden" name="version" value="${r.version}"><button class="btn sm">${cur && cur.id > r.id ? 'Roll back to this' : 'Make current'}</button><span class="err" role="status" aria-live="polite"></span></form>` : ''}</td></tr>`;
     });
     const reqRows = requests.map((r) => html`<tr>
       <td class="mono">${r.version}</td><td class="small">from <span class="mono">${r.ref}</span></td>
       <td>${r.status === 'requested' ? pill('wait', 'Waiting for Vault') : r.status === 'approved' ? pill('ok', 'Approved') : r.status === 'rejected' ? pill('bad', 'Sent back') : pill('off', 'Withdrawn')}</td>
       <td class="small">${who(r.requested_by)} · ${ago(r.created_at)}${r.notes ? html`<br><span class="muted">“${r.notes}”</span>` : ''}${r.decision_note ? html`<br><span class="muted">Vault: “${r.decision_note}”</span>` : ''}</td>
       <td class="r">${r.status === 'requested' && release ? html`<a class="btn sm" href="/vault#req-${r.id}">Review</a>` : ''}
-        ${r.status === 'requested' && (r.requested_by === actor(u) || canManageMembers(u, s)) ? html`<form data-api="/portal/api/requests/${r.id}/withdraw" data-confirm="Withdraw this request?"><button class="btn sm">Withdraw</button><span class="err"></span></form>` : ''}</td></tr>`);
+        ${r.status === 'requested' && (r.requested_by === actor(u) || canManageMembers(u, s)) ? html`<form data-api="/portal/api/requests/${r.id}/withdraw" data-confirm="Withdraw this request?"><button class="btn sm">Withdraw</button><span class="err" role="status" aria-live="polite"></span></form>` : ''}</td></tr>`);
     const body = html`${head(g.slug, html`<a href="https://github.com/${g.repository}">${g.repository}</a> · classrooms play <a href="${stable}" target="_blank" rel="noopener">${stable}</a>`, html`<a class="btn" href="/s/${s.slug}/files?path=${encodeURIComponent(g.slug + '/')}">Browse files</a>`, html`<a href="/s/${s.slug}">${s.name}</a> / ${g.slug}`)}
       <div class="grid g-main">
         <div class="grid">
@@ -452,14 +452,14 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
             <li>Vault copies that exact build to production and makes it current. Earlier releases stay available for rollback.</li></ol></div>
         </div>
       </div>
-      ${release ? html`<dialog id="release"><form data-api="${api}/release" class="dlg" data-then="reload">
+      ${release ? html`<dialog id="release"><form data-api="${api}/release" class="dlg" data-then="reload" data-busy="Copying the build to production. This can take a few minutes; keep this page open.">
         <h2>Release to classrooms</h2>
         <p class="small">Copies the staging build <b class="mono" data-fill="ref"></b> to production. A version name can be used only once.</p>
         <input type="hidden" name="ref">
         <label class="field"><span class="lab">Version name</span><input name="version" required pattern="[A-Za-z0-9][A-Za-z0-9._\\-]{0,63}" placeholder="v1.2"><span class="hint">Shown to Vault and in the release history.</span></label>
         <label class="check"><input type="checkbox" name="makeCurrent" checked> Make it the version classrooms get now</label>
         <p class="warn-branch small" hidden>This is a branch, not a tag, so it may change after you test it. A tag is safer.</p>
-        <div class="dlg-foot"><span class="err"></span><button type="button" class="btn" data-close>Cancel</button><button class="btn brass">Release</button></div>
+        <div class="dlg-foot"><span class="err" role="status" aria-live="polite"></span><button type="button" class="btn" data-close>Cancel</button><button class="btn brass">Release</button></div>
       </form></dialog>` : ''}
       ${request && !release ? html`<dialog id="request"><form data-api="${api}/request" class="dlg" data-then="reload">
         <h2>Request a release</h2>
@@ -467,7 +467,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
         <input type="hidden" name="ref">
         <label class="field"><span class="lab">Version name</span><input name="version" required pattern="[A-Za-z0-9][A-Za-z0-9._\\-]{0,63}" placeholder="v1.2"></label>
         <label class="field"><span class="lab">Notes for Vault</span><textarea name="notes" placeholder="What changed, what to check"></textarea></label>
-        <div class="dlg-foot"><span class="err"></span><button type="button" class="btn" data-close>Cancel</button><button class="btn pri">Send request</button></div>
+        <div class="dlg-foot"><span class="err" role="status" aria-live="polite"></span><button type="button" class="btn" data-close>Cancel</button><button class="btn pri">Send request</button></div>
       </form></dialog>` : ''}`;
     return page(c, g.slug, body, { studio: s, active: 'studio' });
   });
@@ -522,9 +522,9 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       const known = users.get(m.github_login.toLowerCase());
       return html`<tr>
         <td class="proj"><b>${m.github_login}</b><span>${known ? (known.name || 'signed in ' + ago(known.last_login_at)) : 'hasn’t signed in yet'}</span></td>
-        <td>${manage ? html`<form data-api="${api}" data-autosubmit><input type="hidden" name="login" value="${m.github_login}"><select name="role" aria-label="Role for ${m.github_login}">${(['viewer', 'maintainer', 'admin'] as StudioRole[]).map((r) => html`<option value="${r}" ${r === m.role ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`)}</select><span class="err"></span></form>` : ROLE_LABEL[m.role]}</td>
+        <td>${manage ? html`<form data-api="${api}" data-autosubmit><input type="hidden" name="login" value="${m.github_login}"><select name="role" aria-label="Role for ${m.github_login}">${(['viewer', 'maintainer', 'admin'] as StudioRole[]).map((r) => html`<option value="${r}" ${r === m.role ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`)}</select><span class="err" role="status" aria-live="polite"></span></form>` : ROLE_LABEL[m.role]}</td>
         <td class="small">${who(m.added_by)} · ${m.created_at.slice(0, 10)}</td>
-        <td class="r">${manage ? html`<form data-api="${api}/remove" data-confirm="Remove ${m.github_login} from ${s.name}?"><input type="hidden" name="login" value="${m.github_login}"><button class="btn sm">Remove</button><span class="err"></span></form>` : ''}</td></tr>`;
+        <td class="r">${manage ? html`<form data-api="${api}/remove" data-confirm="Remove ${m.github_login} from ${s.name}?"><input type="hidden" name="login" value="${m.github_login}"><button class="btn sm">Remove</button><span class="err" role="status" aria-live="polite"></span></form>` : ''}</td></tr>`;
     });
     const body = html`${head('Members', `People who can see ${s.name}’s games. They sign in with GitHub.`, '', html`<a href="/s/${s.slug}">${s.name}</a> / Members`)}
       <div class="grid g-main"><div class="grid">
@@ -532,7 +532,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
         ${manage ? html`<div class="card"><h2>Add someone</h2><form data-api="${api}" data-then="reload" class="inline-form">
           <label class="field"><span class="lab">GitHub username</span><input name="login" required autocomplete="off" placeholder="octocat"></label>
           <label class="field"><span class="lab">Role</span><select name="role"><option value="viewer">Viewer</option><option value="maintainer" selected>Maintainer</option><option value="admin">Studio admin</option></select></label>
-          <button class="btn pri">Add</button><span class="err"></span></form>
+          <button class="btn pri">Add</button><span class="err" role="status" aria-live="polite"></span></form>
           <p class="small muted">They can sign in right away; nothing is emailed.</p></div>` : ''}
       </div>
       <div class="card small" style="align-self:start"><h2>Roles</h2><ul class="tight">
@@ -561,8 +561,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
           ${r.notes ? html`<tr><th>Notes</th><td>${r.notes}</td></tr>` : ''}
         </tbody></table>
         ${canRelease(u) ? html`<div class="req-actions">
-          <form data-api="/portal/api/requests/${r.id}/approve" data-then="reload" data-confirm="Release ${g.slug} ${r.version} to production?"><label class="check"><input type="checkbox" name="makeCurrent" checked> Make it current</label><button class="btn brass">Approve and release</button><span class="err"></span></form>
-          <form data-api="/portal/api/requests/${r.id}/reject" data-then="reload" class="inline-form"><input name="note" placeholder="Why it’s being sent back" required aria-label="Reason"><button class="btn">Send back</button><span class="err"></span></form>
+          <form data-api="/portal/api/requests/${r.id}/approve" data-then="reload" data-confirm="Release ${g.slug} ${r.version} to production?" data-busy="Copying ${b ? mb(b.total_bytes) : 'the build'} to production. This can take a few minutes; keep this page open."><label class="check"><input type="checkbox" name="makeCurrent" checked> Make it current</label><button class="btn brass">Approve and release</button><span class="err" role="status" aria-live="polite"></span></form>
+          <form data-api="/portal/api/requests/${r.id}/reject" data-then="reload" class="inline-form"><input name="note" placeholder="Why it’s being sent back" required aria-label="Reason"><button class="btn">Send back</button><span class="err" role="status" aria-live="polite"></span></form>
         </div>` : ''}</div>`;
     });
     const hist = decided.map((r) => html`<tr><td>${r.studio_slug}/${r.game_slug}</td><td class="mono">${r.version}</td><td>${r.status === 'approved' ? pill('ok', 'Approved') : r.status === 'rejected' ? pill('bad', 'Sent back') : pill('off', 'Withdrawn')}</td><td class="small">${r.decided_by ? who(r.decided_by) : '—'} · ${ago(r.decided_at)}</td></tr>`);
@@ -579,7 +579,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const rows = db.users().map((x) => {
       const studios = db.membershipsForLogin(x.login).map((m) => `${m.studio_slug} (${ROLE_LABEL[m.role]})`).join(', ');
       return html`<tr><td class="proj"><b>${x.login}</b><span>${x.name ?? ''}</span></td><td class="small">${studios || '—'}</td>
-        <td>${admin && x.id !== u.id ? html`<form data-api="/portal/api/vault/users/${x.id}/role" data-autosubmit><select name="role" aria-label="Vault role for ${x.login}">${(['none', 'release_manager', 'admin'] as VaultRole[]).map((r) => html`<option value="${r}" ${r === x.vault_role ? 'selected' : ''}>${r === 'none' ? 'No Vault role' : VAULT_LABEL[r]}</option>`)}</select><span class="err"></span></form>` : VAULT_LABEL[x.vault_role]}</td>
+        <td>${admin && x.id !== u.id ? html`<form data-api="/portal/api/vault/users/${x.id}/role" data-autosubmit><select name="role" aria-label="Vault role for ${x.login}">${(['none', 'release_manager', 'admin'] as VaultRole[]).map((r) => html`<option value="${r}" ${r === x.vault_role ? 'selected' : ''}>${r === 'none' ? 'No Vault role' : VAULT_LABEL[r]}</option>`)}</select><span class="err" role="status" aria-live="polite"></span></form>` : VAULT_LABEL[x.vault_role]}</td>
         <td class="small">${ago(x.last_login_at)}</td></tr>`;
     });
     const body = html`${head('People', 'Everyone who has signed in. Vault roles are for Vault staff; studio roles are managed on each studio’s Members page.')}

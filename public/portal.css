@@ -333,6 +333,8 @@ details.data-table td, details.data-table th { padding: 5px 8px; }
 .big-rel { font: 700 30px/1.1 var(--display); color: var(--brass); margin: 4px 0; }
 .err { color: var(--bad); font-size: 12.5px; }
 .err:empty { display: none; }
+.err.status { color: var(--ink-2); }
+.btn .spin { vertical-align: -1px; margin-right: 4px; }
 ol.tight, ul.tight { padding-left: 18px; margin: 0; }
 .tight li { margin: 5px 0; }
 .check { display: flex; gap: 8px; align-items: center; font-size: 13px; }

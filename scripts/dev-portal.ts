@@ -15,6 +15,7 @@ class MemoryStorage implements Storage {
   async browse(prefix: string) { return browseKeys([...this.objects].map(([k, v]) => [k, v.byteLength] as [string, number]), prefix); }
   async get(key: string) { return this.objects.get(key)!; }
   async put(key: string, body: Readable | Uint8Array, _size: number, _h: ObjectHeaders) {
+    await new Promise((r) => setTimeout(r, 400)); // feel like a real copy, so busy states show
     this.objects.set(key, body instanceof Uint8Array ? body : new Uint8Array(Buffer.concat(await (body as Readable).toArray())));
   }
 }

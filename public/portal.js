@@ -13,25 +13,44 @@
     return out;
   }
 
+  // While a request runs: spinner on the button, a status line (data-busy text) and every other button in the
+  // same card/dialog disabled, so a slow production copy can't be double-submitted or contradicted mid-way.
+  let busy = 0;
+  window.addEventListener('beforeunload', (e) => { if (busy) e.preventDefault(); });
   async function submit(form) {
     const err = form.querySelector('.err');
     const btn = form.querySelector('button:not([type=button])');
-    if (err) err.textContent = '';
-    if (btn) { btn.setAttribute('aria-busy', 'true'); btn.disabled = true; btn.dataset.label = btn.dataset.label || btn.textContent; btn.textContent = 'Working…'; }
+    const scope = form.closest('.card, dialog') || form;
+    const locked = [...scope.querySelectorAll('button, input, select')].filter((el) => !el.disabled);
+    if (err) { err.textContent = ''; err.classList.remove('status'); }
+    if (btn) { btn.dataset.armed = ''; btn.dataset.label = btn.dataset.label || btn.textContent; }
+    const fields = formJson(form);
+    locked.forEach((el) => { el.disabled = true; });
+    if (btn) { btn.setAttribute('aria-busy', 'true'); btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Working…'; }
+    if (err && form.dataset.busy) { err.classList.add('status'); err.textContent = form.dataset.busy; }
+    busy++;
     try {
       const res = await fetch(form.dataset.api, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
-        body: JSON.stringify(formJson(form)),
+        body: JSON.stringify(fields),
         credentials: 'same-origin',
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `Something went wrong (HTTP ${res.status}).`);
-      if (form.dataset.then === 'reload' || !form.hasAttribute('data-autosubmit')) location.reload();
-      else if (btn) btn.textContent = 'Saved';
+      busy--;
+      if (form.dataset.then === 'reload' || !form.hasAttribute('data-autosubmit')) {
+        if (btn) btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Done, refreshing…';
+        location.reload();
+      } else {
+        locked.forEach((el) => { el.disabled = false; });
+        if (btn) { btn.removeAttribute('aria-busy'); btn.textContent = 'Saved'; }
+      }
     } catch (e) {
-      if (err) err.textContent = e.message; else alert(e.message);
-      if (btn) { btn.removeAttribute('aria-busy'); btn.disabled = false; btn.textContent = btn.dataset.label; }
+      busy--;
+      locked.forEach((el) => { el.disabled = false; });
+      if (err) { err.classList.remove('status'); err.textContent = e.message; } else alert(e.message);
+      if (btn) { btn.removeAttribute('aria-busy'); btn.textContent = btn.dataset.label; }
     }
   }
 

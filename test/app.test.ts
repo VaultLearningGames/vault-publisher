@@ -311,3 +311,42 @@ describe('production releases', () => {
     assert.equal((await approve('index.html')).status, 400);
   });
 });
+
+describe('release check (shown to reviewers before approval)', () => {
+  const check = async (q: string) => (await (await app.request(`/v1/releases/fielddaylab/aqualab/check?${q}`)).json()) as any;
+  async function publishTag(tag: string) {
+    identities.tag = { ...wake, ref: `refs/tags/${tag}` };
+    const { json } = await start('tag');
+    uploadAll(json);
+    await post(`/v1/previews/${json.upload_id}/finalize`, 'tag');
+  }
+
+  test('describes a releasable tag', async () => {
+    await publishTag('m3.2');
+    const r = await check('version=m3.2');
+    assert.equal(r.ok, true);
+    assert.equal(r.staging.url, 'https://cdn.example-staging.org/fielddaylab/aqualab/m3.2/');
+    assert.equal(r.staging.commit_sha, 'abc123');
+    assert.equal(r.staging.files, 2);
+    assert.deepEqual(r.warnings, []);
+  });
+
+  test('stops the run before approval on problems, and warns about branches', async () => {
+    const { json } = await start();                                            // a branch build
+    uploadAll(json);
+    await post(`/v1/previews/${json.upload_id}/finalize`, 'wake');
+    assert.equal((await check('version=m9')).ok, false);                       // nothing on staging
+    assert.equal((await check('action=promote&version=m9')).ok, false);       // never approved
+    const r = await check('version=legacy-1&ref=feature/new-map');
+    assert.equal(r.ok, true);
+    assert.match(r.warnings[0], /is a branch/);
+  });
+
+  test('refuses to approve a version twice', async () => {
+    await publishTag('m3.2');
+    await post('/v1/admin/releases/approve', 'releaser', { studio: 'fielddaylab', game: 'aqualab', version: 'm3.2' });
+    const r = await check('version=m3.2');
+    assert.equal(r.ok, false);
+    assert.match(r.problems[0], /already approved/);
+  });
+});

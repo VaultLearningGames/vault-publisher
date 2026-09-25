@@ -1,7 +1,8 @@
 name: Release
 
 # Vault staff release a tested staging build to classrooms (https://cdn.vaultlearninggames.org).
-# Runs in the "production" environment, so a required reviewer must approve each run.
+# A check job first shows the reviewer the staging build, its commit and size, and what's live now; then the
+# release job runs in the "production" environment, so a required reviewer must approve it.
 # The publisher only accepts release actions from this workflow in that environment.
 #
 #   approve              copy a staging build (usually a tag) into production as an immutable release
@@ -41,7 +42,61 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Runs before the approval gate: shows the reviewer exactly what they're approving, and stops the run
+  # (no approval requested) if it can't succeed.
+  check:
+    runs-on: ubuntu-latest
+    env:
+      PUBLISHER: ${{ vars.VAULT_PUBLISHER_URL }}
+      ACTION: ${{ inputs.action }}
+      STUDIO: ${{ inputs.studio }}
+      GAME: ${{ inputs.game }}
+      VERSION: ${{ inputs.version }}
+      REF: ${{ inputs.ref }}
+    steps:
+    - name: Check what would be released
+      run: |
+        set -euo pipefail
+        q="action=$(jq -rn --arg v "$ACTION" '$v|@uri')&version=$(jq -rn --arg v "$VERSION" '$v|@uri')&ref=$(jq -rn --arg v "$REF" '$v|@uri')"
+        res=$(curl -sS -w '\n%{http_code}' "$PUBLISHER/v1/releases/$STUDIO/$GAME/check?$q")
+        code=$(echo "$res" | tail -1); c=$(echo "$res" | sed '$d')
+        if [ "$code" != 200 ]; then echo "::error::$(echo "$c" | jq -r '.error // .')"; exit 1; fi
+        echo "$c" | jq .
+        S="$GITHUB_STEP_SUMMARY"
+        {
+          echo "## Release check: \`$GAME\` $VERSION ($ACTION)"
+          echo
+          if [ "$ACTION" != promote ]; then
+            url=$(echo "$c" | jq -r '.staging.url // empty')
+            if [ -n "$url" ]; then
+              status=$(curl -s -o /dev/null -w '%{http_code}' "$url?check=$GITHUB_RUN_ID")
+              echo "### ▶ Play the build before approving: $url"
+              echo
+              echo "| | |"; echo "|---|---|"
+              echo "$c" | jq -r '"| Staging build | `\(.staging.ref)` (\(.staging.ref_type)) · commit `\(.staging.commit_sha[0:7])` |",
+                                  "| Size | \(.staging.files) files · \((.staging.bytes/1048576*10|floor)/10) MB |",
+                                  "| Published | \(.staging.updated_at[0:16] | sub("T"; " ")) UTC by \(.staging.published_by) from `\(.repository)` |"'
+              if [ "$status" = 200 ]; then echo "| Loads on staging | ✅ HTTP 200 |"; else echo "| Loads on staging | ❌ HTTP $status |"; fi
+              echo "$c" | jq -r '"| Will be released at | \(.release_url) |"'
+            fi
+          fi
+          echo "$c" | jq -r '"| Live for classrooms now | \(if .current then "`\(.current.version)` (approved \(.current.approved_at[0:10]))" else "nothing yet" end) |"'
+          if [ "$ACTION" != approve ]; then
+            echo "$c" | jq -r '"| After this run | `\(.version)` at \(.play_url)\(if .rollback then " (rollback)" else "" end) |"'
+          fi
+          echo
+          echo "$c" | jq -r '.warnings[] | "> ⚠️ \(.)"'
+          echo "$c" | jq -r '.problems[] | "> ❌ \(.)"'
+        } >> "$S"
+        if [ "$ACTION" != promote ] && [ "${status:-200}" != 200 ]; then echo "::error::The staging build doesn't load (HTTP $status)"; exit 1; fi
+        if [ "$(echo "$c" | jq -r .ok)" != true ]; then
+          echo "$c" | jq -r '.problems[] | "::error::\(.)"'
+          exit 1
+        fi
+        echo "$c" | jq -r '.warnings[] | "::warning::\(.)"'
+
   release:
+    needs: check
     runs-on: ubuntu-latest
     environment:
       name: production

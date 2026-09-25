@@ -185,6 +185,47 @@ export function createApp(deps: AppDeps) {
     return c.json({ current: version, previous: previous?.version ?? null, rollback, url: `${deps.prodPublicUrl}/${gamePrefix}` });
   });
 
+  // Public, read-only: what a Release run is about to do, and whether it can. The Release workflow's
+  // check job shows this to the reviewer before the approval gate, and stops the run on a problem.
+  // Query: ?action=approve|promote|approve-and-promote&version=m3.2&ref=m3.2
+  app.get('/v1/releases/:studio/:game/check', (c) => {
+    const action = c.req.query('action') ?? 'approve-and-promote';
+    const version = c.req.query('version') ?? '';
+    const studio = db.studioBySlug(c.req.param('studio'));
+    const game = studio && db.game(studio.id, c.req.param('game'));
+    if (!studio || !game) fail(404, `unknown game ${c.req.param('studio')}/${c.req.param('game')}`);
+    const problems: string[] = [];
+    const warnings: string[] = [];
+    if (!isVersionName(version)) problems.push('version must look like "m3.2" or "legacy-2026-09"');
+    const approving = action !== 'promote';
+    const ref = sanitizeRefName((c.req.query('ref') || version).replace(/^refs\/(heads|tags)\//, '')) ?? '';
+    const build = approving ? db.build(game.id, ref) : undefined;
+    const existing = isVersionName(version) ? db.release(game.id, version) : undefined;
+    const current = db.currentRelease(game.id);
+    if (approving) {
+      if (!build || build.status !== 'live') problems.push(`there is no live staging build "${ref}" for ${game.slug}`);
+      if (existing) problems.push(`${version} was already approved on ${existing.approved_at.slice(0, 10)}; releases can't be replaced`);
+      if (build && build.ref_type === 'branch') warnings.push(`"${ref}" is a branch, so it may have changed since it was tested; a version tag is safer`);
+    } else if (!existing) {
+      problems.push(`${version} hasn't been approved yet, so it can't be promoted`);
+    }
+    if (current && current.version === version && action !== 'approve') warnings.push(`${version} is already the current release`);
+    const rollback = !approving && existing && current ? existing.id < current.id : false;
+    if (!deps.production) problems.push('production storage is not configured yet');
+    return c.json({
+      ok: problems.length === 0, problems, warnings, action, rollback,
+      game: `${studio.slug}/${game.slug}`, repository: game.repository, version,
+      current: current ? { version: current.version, approved_at: current.approved_at } : null,
+      staging: build ? {
+        ref: build.ref_name, ref_type: build.ref_type, status: build.status, commit_sha: build.commit_sha,
+        files: build.file_count, bytes: build.total_bytes, published_by: build.actor, updated_at: build.updated_at,
+        url: `${deps.stagingPublicUrl}/${previewPrefix(studio, game, build.ref_name)}`,
+      } : null,
+      release_url: `${deps.prodPublicUrl}/${studio.slug}/${game.slug}/${version}/`,
+      play_url: `${deps.prodPublicUrl}/${studio.slug}/${game.slug}/`,
+    });
+  });
+
   // Public: a game's releases and which one is current.
   app.get('/v1/releases/:studio/:game', (c) => {
     const studio = db.studioBySlug(c.req.param('studio'));

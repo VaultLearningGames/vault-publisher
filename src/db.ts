@@ -130,6 +130,8 @@ export interface Build {
   ref_type: RefType;
   commit_sha: string;
   file_count: number;
+  total_bytes: number;
+  actor: string;
   status: 'live' | 'deleted';
   updated_at: string;
 }

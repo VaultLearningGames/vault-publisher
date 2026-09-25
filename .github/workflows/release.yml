@@ -72,7 +72,7 @@ jobs:
               status=$(curl -s -o /dev/null -w '%{http_code}' "$url?check=$GITHUB_RUN_ID")
               echo "### ▶ Play the build before approving: $url"
               echo
-              echo "| | |"; echo "|---|---|"
+              echo "| | |"; echo "|---|---|"; table=1
               echo "$c" | jq -r '"| Staging build | `\(.staging.ref)` (\(.staging.ref_type)) · commit `\(.staging.commit_sha[0:7])` |",
                                   "| Size | \(.staging.files) files · \((.staging.bytes/1048576*10|floor)/10) MB |",
                                   "| Published | \(.staging.updated_at[0:16] | sub("T"; " ")) UTC by \(.staging.published_by) from `\(.repository)` |"'
@@ -80,6 +80,7 @@ jobs:
               echo "$c" | jq -r '"| Will be released at | \(.release_url) |"'
             fi
           fi
+          if [ -z "${table:-}" ]; then echo "| | |"; echo "|---|---|"; fi
           echo "$c" | jq -r '"| Live for classrooms now | \(if .current then "`\(.current.version)` (approved \(.current.approved_at[0:10]))" else "nothing yet" end) |"'
           if [ "$ACTION" != approve ]; then
             echo "$c" | jq -r '"| After this run | `\(.version)` at \(.play_url)\(if .rollback then " (rollback)" else "" end) |"'

@@ -5,7 +5,7 @@ Inventory as of 2026-09-24, from `fielddaylab/fielddaysite` (`play/` pages and t
 (`https://fielddaylab.wisc.edu/play/NAME/...`).
 
 **Goal of this stage:** every Field Day Unity web game builds with the new pipeline and has its current release branch
-on the staging CDN (`https://cdn.vaultlearninggames-staging.org/fielddaylab/GAME/BRANCH/`); older JavaScript/HTML games
+on the staging CDN (`https://cdn.vaultlearninggames-staging.org/fieldday/GAME/BRANCH/`); older JavaScript/HTML games
 (and builds with no working pipeline) are copied from DoIT as-is.
 
 ## A. Unity WebGL games built in CI → move to the new pipeline
@@ -42,17 +42,18 @@ Notes:
 The Yard's ten games ship together: `fielddaylab/the-yard` is the site, and each game is a git submodule under `game/`
 (`cycle` → carbon, nitrogen, water; `bacteria`, `waves`, `wind`, `magnetism`, `balloon`, `earthquake`, `model`,
 `crystal`). Today it's served from theyardgames.org, not DoIT. It publishes from `the-yard` (committed files, checked out
-with submodules) as one game, `yardgames`: `…/yardgames/<branch>/game/wind.html`, matching theyardgames.org's paths.
+with submodules) as one game, `yardgames`, with each game reachable at `…/fieldday/yardgames/<game>/`. Production has a
+single, replaceable version (no version folders).
 
 ## B. Copy from DoIT as-is (no working build pipeline, or older JS/HTML)
 
 | Game | DoIT source | Repo | Kind | Proposed staging name |
 |---|---|---|---|---|
-| Jo Wilder and the Capitol Case | `/play/jowilder/game/` | `jo_wilder` | JavaScript | `fielddaylab/jowilder/doit/` |
-| Lakeland | `/play/lakeland/game/` | `lakeland` | JavaScript | `fielddaylab/lakeland/doit/` |
-| Lost at the Forever Mine | `/play/forevermine/game/` | `forevermine` | JavaScript | `fielddaylab/forevermine/doit/` |
-| Plants-o-Plenty v2 | `/play/plants-o-plenty-v2/ci/main/` | `plants-o-plenty-v2` | JavaScript (webpack, CI → DoIT) | `fielddaylab/plants-o-plenty-v2/main/` |
-| ThermoVR (desktop) | `/play/thermovr/ci/desktop/` | `thermovr` | Unity 2021.3 WebGL, built by hand (no workflow) | `fielddaylab/thermovr/desktop/` |
+| Jo Wilder and the Capitol Case | `/play/jowilder/game/` | `jo_wilder` | JavaScript | `fieldday/jowilder/doit/` |
+| Lakeland | `/play/lakeland/game/` | `lakeland` | JavaScript | `fieldday/lakeland/doit/` |
+| Lost at the Forever Mine | `/play/forevermine/game/` | `forevermine` | JavaScript | `fieldday/forevermine/doit/` |
+| Plants-o-Plenty v2 | `/play/plants-o-plenty-v2/ci/main/` | `plants-o-plenty-v2` | JavaScript (webpack, CI → DoIT) | `fieldday/plants-o-plenty-v2/main/` |
+| ThermoVR (desktop) | `/play/thermovr/ci/desktop/` | `thermovr` | Unity 2021.3 WebGL, built by hand (no workflow) | `fieldday/thermovr/desktop/` |
 | Shadowspect (MIT Education Arcade) | `/play/partner/shadowspect/ci/main/` | `shadowspect` (Unity 2018.4) | External studio | `mit-education-arcade/shadowspect/main/` |
 | Transformation Quest (University of Calgary) | `/play/transformation-quest/ci/develop/` | `transformation-quest` | External studio, JavaScript | `ucalgary/transformation-quest/develop/` |
 
@@ -86,7 +87,8 @@ The CDN name `project-hercules` matches its repo (DoIT's old `astrogame` path wi
 Renames are safe at any time: the publisher matches repositories by numeric id, and GitHub redirects old URLs and
 submodule links.
 
-## Open questions
+## Decisions
 
-1. Studio slug: `fielddaylab` (used so far) or `fieldday`?
-2. Yard URLs: package paths (`…/yardgames/<version>/game/wind.html`) for now, or per-game short links (`…/yardgames/wind/`)?
+- **Studio slug is `fieldday`** (the GitHub org stays `fielddaylab`): `…/fieldday/GAME/BRANCH/`.
+- **The Yard has one production version, no version folders:** `…/fieldday/yardgames/wind/`, `…/magnetism/`, etc.
+  (a "replace in place" release allowed only for `yardgames`).

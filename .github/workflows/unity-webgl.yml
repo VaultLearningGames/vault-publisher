@@ -1,7 +1,7 @@
 name: Unity WebGL preview
 
 # Reusable all-in-one: unity-build.yml + publish-preview.yml. Every push builds WebGL and publishes it to
-# https://cdn.vaultlearninggames-staging.org/fielddaylab/GAME/BRANCH/ ; deleting a branch removes its preview.
+# https://cdn.vaultlearninggames-staging.org/fieldday/GAME/BRANCH/ ; deleting a branch removes its preview.
 # Use the two workflows directly if you need to add your own jobs between or alongside them.
 #
 # Caller (e.g. .github/workflows/webgl.yml in fielddaylab/wake):

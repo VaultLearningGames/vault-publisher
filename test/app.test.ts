@@ -71,6 +71,7 @@ let app: ReturnType<typeof createApp>;
 beforeEach(() => {
   db = new Db(':memory:');
   db.syncStudios([{ slug: 'fielddaylab', name: 'Field Day Lab', github_owner: 'fielddaylab', github_owner_id: '1881825' }]);
+  db.syncStudios([{ slug: 'fielddaylab', name: 'Field Day Lab', github_owner: 'fielddaylab', github_owner_id: '1881825' }]); // idempotent
   storage = new FakeStorage();
   prod = new FakeStorage();
   app = createApp({
@@ -348,5 +349,24 @@ describe('release check (shown to reviewers before approval)', () => {
     const r = await check('version=m3.2');
     assert.equal(r.ok, false);
     assert.match(r.problems[0], /already approved/);
+  });
+});
+
+describe('studios', () => {
+  test('changing a studio slug renames it in place and keeps its games', async () => {
+    const { json } = await start();
+    uploadAll(json);
+    await post(`/v1/previews/${json.upload_id}/finalize`, 'wake');
+    db.syncStudios([{ slug: 'fieldday', name: 'Field Day Lab', github_owner: 'fielddaylab', github_owner_id: '1881825' }]);
+    assert.equal(db.studioBySlug('fielddaylab'), undefined);
+    assert.equal(db.game(db.studioBySlug('fieldday')!.id, 'aqualab')?.repository, 'fielddaylab/wake');
+    const again = await start();
+    assert.equal(again.json.url, 'https://cdn.example-staging.org/fieldday/aqualab/feature_new-map/');
+  });
+
+  test('Vault-managed studios (no GitHub org) can never be matched by a GitHub token', async () => {
+    db.syncStudios([{ slug: 'ucalgary', name: 'University of Calgary', github_owner: '', github_owner_id: 'vault:ucalgary' }]);
+    assert.equal(db.studioBySlug('ucalgary')?.github_owner_id, 'vault:ucalgary');
+    assert.equal(db.studioByOwnerId('999'), undefined);
   });
 });

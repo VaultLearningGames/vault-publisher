@@ -184,11 +184,14 @@ export class Db {
   }
 
   // studios.json is the source of truth for which GitHub orgs may publish, until there's an admin UI.
+  // A studio is identified by its GitHub owner id, so changing its slug in studios.json renames it in place
+  // (its games stay attached). Studios that only get content through Vault have no GitHub org; they use a
+  // placeholder id like "vault:ucalgary" that can never match a real (numeric) GitHub id.
   syncStudios(studios: Omit<Studio, 'id'>[]) {
     const upsert = this.sqlite.prepare(`
       INSERT INTO studios (slug, name, github_owner, github_owner_id, created_at) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT (slug) DO UPDATE SET name = excluded.name, github_owner = excluded.github_owner,
-        github_owner_id = excluded.github_owner_id`);
+      ON CONFLICT (github_owner_id) DO UPDATE SET slug = excluded.slug, name = excluded.name,
+        github_owner = excluded.github_owner`);
     for (const s of studios) upsert.run(s.slug, s.name, s.github_owner, s.github_owner_id, now());
   }
 

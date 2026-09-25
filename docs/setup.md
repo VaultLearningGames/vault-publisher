@@ -86,7 +86,7 @@ gcloud scheduler jobs create http vault-publisher-cleanup --location=REGION \
 ## 5. Pilot
 
 Add the caller workflow from the README to a branch of `fielddaylab/wake`, push, and open
-`https://cdn.vaultlearninggames-staging.org/fielddaylab/aqualab/<branch>/`. Check:
+`https://cdn.vaultlearninggames-staging.org/fieldday/aqualab/<branch>/`. Check:
 
 - the game loads (Aqualab is Unity 2019 / gzip) in Chrome, Safari and on an iPad;
 - a newer Unity game with Brotli (`.br`) files also loads;

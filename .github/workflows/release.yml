@@ -31,7 +31,7 @@ on:
       studio:
         description: Studio slug
         type: string
-        default: fielddaylab
+        default: fieldday
 
 permissions:
   contents: read

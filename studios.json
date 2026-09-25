@@ -1,8 +1,20 @@
 [
   {
-    "slug": "fielddaylab",
+    "slug": "fieldday",
     "name": "Field Day Lab",
     "github_owner": "fielddaylab",
     "github_owner_id": "1881825"
+  },
+  {
+    "slug": "mit-education-arcade",
+    "name": "MIT Education Arcade",
+    "github_owner": "",
+    "github_owner_id": "vault:mit-education-arcade"
+  },
+  {
+    "slug": "ucalgary",
+    "name": "University of Calgary",
+    "github_owner": "",
+    "github_owner_id": "vault:ucalgary"
   }
 ]

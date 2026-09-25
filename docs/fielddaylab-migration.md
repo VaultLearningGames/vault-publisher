@@ -17,9 +17,9 @@ All of these currently build with game-ci and rsync to DoIT. Each gets the same 
 |---|---|---|---|---|---|---|---|
 | Aqualab | `wake` | 2019.4.40f1 | `production` | 2026-02-13 | `/play/wake/ci/{production,develop,staging}` | `play/wake` | To do |
 | Bloom | `bloom` | 2021.3.40f1 | `production` (live game) | 2025-01-15 | `/play/bloom/ci/{production,develop,staging}` | `play/bloom` | To do |
-| Headlines | `journalism-unity` | 2019.4.34f1 | `production` | 2025-01-15 | `/play/headlines/ci/{production,develop,main,staging}` | `play/headlines` | To do |
+| Headlines | `headlines` | 2019.4.34f1 | `production` | 2025-01-15 | `/play/headlines/ci/{production,develop,main,staging}` | `play/headlines` | To do |
 | Project Hercules (`project-hercules`) | `project-hercules` | 2022.3.47f1 | `production` | 2025-10-07 | `/play/astrogame/ci/{production,develop,staging}` | `play/projecthercules` | To do |
-| The Legend of the Lost Emerald | `lost_emerald` | 2019.4.26f1 | `production` | 2025-01-15 | `/play/emerald/ci/{production,master,staging}` | `play/emerald` | To do |
+| The Legend of the Lost Emerald | `emerald` | 2019.4.26f1 | `production` | 2025-01-15 | `/play/emerald/ci/{production,master,staging}` | `play/emerald` | To do |
 | Spacefab | `spacefab` | 2022.3.62f3 | `develop` (no release branch) | 2026-09-24 | `/play/spacefab/ci/develop` | — | Pilot ✅ ([#2](https://github.com/fielddaylab/spacefab/pull/2) open) |
 | Airborne | `airborne-prototype` | 2022.3.62f3 | `develop` | 2026-09-22 | `/play/airborne-prototype/ci/develop` | — | Pilot ✅ ([#2](https://github.com/fielddaylab/airborne-prototype/pull/2) open) |
 | AIS | `ais-prototype` | 2022.3.62f3 | `develop` | 2026-08-10 | `/play/ais-prototype/ci/develop` | — | Pilot ✅ ([#3](https://github.com/fielddaylab/ais-prototype/pull/3) open) |
@@ -39,9 +39,9 @@ Notes:
 
 ## A2. The Yard (package)
 
-The Yard's ten games ship together: `fielddaylab/the-yard` is the site, and each game is a git submodule under `game/`
+The Yard's ten games ship together: `fielddaylab/yardgames` is the site, and each game is a git submodule under `game/`
 (`cycle` → carbon, nitrogen, water; `bacteria`, `waves`, `wind`, `magnetism`, `balloon`, `earthquake`, `model`,
-`crystal`). Today it's served from theyardgames.org, not DoIT. It publishes from `the-yard` (committed files, checked out
+`crystal`). Today it's served from theyardgames.org, not DoIT. It publishes from `yardgames` (committed files, checked out
 with submodules) as one game, `yardgames`, with each game reachable at `…/fieldday/yardgames/<game>/`. Production has a
 single, replaceable version (no version folders).
 
@@ -49,7 +49,7 @@ single, replaceable version (no version folders).
 
 | Game | DoIT source | Repo | Kind | Proposed staging name |
 |---|---|---|---|---|
-| Jo Wilder and the Capitol Case | `/play/jowilder/game/` | `jo_wilder` | JavaScript | `fieldday/jowilder/doit/` |
+| Jo Wilder and the Capitol Case | `/play/jowilder/game/` | `jowilder` | JavaScript | `fieldday/jowilder/doit/` |
 | Lakeland | `/play/lakeland/game/` | `lakeland` | JavaScript | `fieldday/lakeland/doit/` |
 | Lost at the Forever Mine | `/play/forevermine/game/` | `forevermine` | JavaScript | `fieldday/forevermine/doit/` |
 | Plants-o-Plenty v2 | `/play/plants-o-plenty-v2/ci/main/` | `plants-o-plenty-v2` | JavaScript (webpack, CI → DoIT) | `fieldday/plants-o-plenty-v2/main/` |
@@ -73,19 +73,11 @@ on the publisher yet, so the upload goes through an admin-only path.
 | The Station: Maine | Links to mmsa.org. |
 | Alien Gardener, Journalism (old) | No play link on the site. |
 
-## Repos whose names differ from their CDN name (to rename)
+## Repo names
 
-| GitHub repo | CDN / DoIT name |
-|---|---|
-| `journalism-unity` | `headlines` |
-| `lost_emerald` | `emerald` |
-| `jo_wilder` | `jowilder` |
-| `the-yard` | `yardgames` |
-
-The CDN name `project-hercules` matches its repo (DoIT's old `astrogame` path will redirect to it).
-
-Renames are safe at any time: the publisher matches repositories by numeric id, and GitHub redirects old URLs and
-submodule links.
+Done 2026-09-25: `journalism-unity` → `headlines`, `lost_emerald` → `emerald`, `jo_wilder` → `jowilder`,
+`the-yard` → `yardgames`. Every repo's name now matches its CDN name (`project-hercules` included; DoIT's old
+`astrogame` path will redirect to it). Old names redirect on GitHub, and the publisher matches repos by numeric id.
 
 ## Decisions
 

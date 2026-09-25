@@ -47,11 +47,15 @@ jobs:
           R2_ACCOUNT_ID=${{ vars.R2_ACCOUNT_ID }}
           LITESTREAM_BUCKET=${{ vars.LITESTREAM_BUCKET }}
           TASK_INVOKER_EMAIL=${{ vars.TASK_INVOKER_EMAIL }}
+          GITHUB_CLIENT_ID=${{ vars.PORTAL_GITHUB_CLIENT_ID }}
+          VAULT_ADMINS=${{ vars.VAULT_ADMINS }}
         secrets: |-
           R2_ACCESS_KEY_ID=vault-publisher-r2-access-key-id:latest
           R2_SECRET_ACCESS_KEY=vault-publisher-r2-secret-access-key:latest
           R2_PROD_ACCESS_KEY_ID=vault-publisher-r2-prod-access-key-id:latest
           R2_PROD_SECRET_ACCESS_KEY=vault-publisher-r2-prod-secret-access-key:latest
+          GITHUB_CLIENT_SECRET=vault-portal-github-client-secret:latest
+          SESSION_SECRET=vault-portal-session-secret:latest
         # Exactly one instance: SQLite has a single writer, and it stays warm so Litestream isn't restoring on every request.
         flags: >-
           --service-account=${{ vars.PUBLISHER_SERVICE_ACCOUNT }}

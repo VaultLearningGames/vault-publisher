@@ -14,6 +14,7 @@ class MemoryStorage implements Storage {
   async deleteKeys(keys: string[]) { for (const k of keys) this.objects.delete(k); }
   async browse(prefix: string) { return browseKeys([...this.objects].map(([k, v]) => [k, v.byteLength] as [string, number]), prefix); }
   async get(key: string) { return this.objects.get(key)!; }
+  async copy(src: string, dst: string) { this.objects.set(dst, this.objects.get(src)!); }
   async put(key: string, body: Readable | Uint8Array, _size: number, _h: ObjectHeaders) {
     await new Promise((r) => setTimeout(r, 400)); // feel like a real copy, so busy states show
     this.objects.set(key, body instanceof Uint8Array ? body : new Uint8Array(Buffer.concat(await (body as Readable).toArray())));
@@ -50,6 +51,8 @@ const wake = db.game(fd.id, 'wake')!;
 db.createRelease({ game_id: wake.id, version: 'm3.0', source_ref: 'production', commit_sha: '71c2a90' + '0'.repeat(33), file_count: 208, total_bytes: 138_000_000, approved_by: 'user:boss' });
 db.createRelease({ game_id: wake.id, version: 'm3.1', source_ref: 'production', commit_sha: '9ac0e21' + '0'.repeat(33), file_count: 210, total_bytes: 141_000_000, approved_by: 'user:boss' });
 db.setWithdrawn(db.release(wake.id, 'm3.0')!.id, 'user:boss', 'Sends student names to the log server; fixed in m3.1');
+for (const v of ['m3.0', 'm3.1']) production.objects.set(`fieldday/wake/_releases/${v}/index.html`, new TextEncoder().encode(`<h1>wake ${v}</h1>`));
+production.objects.set('fieldday/wake/index.html', new TextEncoder().encode('<h1>wake m3.1</h1>'));
 db.setCurrentRelease(wake.id, db.release(wake.id, 'm3.1')!.id);
 db.createReleaseRequest({ game_id: wake.id, ref: 'm3.2', version: 'm3.2', notes: 'New kelp job; fixes the iPad save bug.', requested_by: 'user:mia' });
 db.setMembership(fd.id, 'mia', 'maintainer', 'user:boss');

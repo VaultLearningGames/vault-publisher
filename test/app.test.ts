@@ -30,6 +30,10 @@ class FakeStorage implements Storage {
     return [...this.objects].filter(([k]) => k.startsWith(prefix)).map(([key, size]) => ({ key, size }));
   }
   async browse(prefix: string) { return browseKeys(this.objects, prefix); }
+  async copy(src: string, dst: string, headers: ObjectHeaders) {
+    if (!this.objects.has(src)) throw new Error(`no such key ${src}`);
+    await this.put(dst, this.data.get(src) ?? new Uint8Array(this.objects.get(src)!), this.objects.get(src)!, headers);
+  }
   async deleteKeys(keys: string[]) {
     for (const k of keys) this.objects.delete(k);
   }
@@ -249,9 +253,9 @@ describe('production releases', () => {
     await publishTag();
     const res = await approve();
     assert.equal(res.status, 200);
-    assert.equal(((await res.json()) as any).url, 'https://cdn.example.org/fielddaylab/aqualab/m3.2/');
-    assert.deepEqual([...prod.objects.keys()].sort(), ['fielddaylab/aqualab/m3.2/Build/game.wasm.br', 'fielddaylab/aqualab/m3.2/index.html']);
-    const wasm = prod.headers.get('fielddaylab/aqualab/m3.2/Build/game.wasm.br')!;
+    assert.equal(((await res.json()) as any).url, 'https://cdn.example.org/fielddaylab/aqualab/_releases/m3.2/');
+    assert.deepEqual([...prod.objects.keys()].sort(), ['fielddaylab/aqualab/_releases/m3.2/Build/game.wasm.br', 'fielddaylab/aqualab/_releases/m3.2/index.html']);
+    const wasm = prod.headers.get('fielddaylab/aqualab/_releases/m3.2/Build/game.wasm.br')!;
     assert.equal(wasm.cacheControl, 'public, max-age=31536000, immutable');
     assert.equal(wasm.contentEncoding, 'br');
     assert.equal(wasm.contentType, 'application/wasm');
@@ -290,28 +294,77 @@ describe('production releases', () => {
     assert.equal((await promote('m3.2', 'wake')).status, 403);
   });
 
-  test('promote points STUDIO/GAME/ at a release; promoting an older one is a rollback', async () => {
+  test('promote copies a release into STUDIO/GAME/ itself; promoting an older one is a rollback', async () => {
     await publishTag('m3.1');
     await approve('m3.1');
     await publishTag('m3.2');
     await approve('m3.2');
+    const live = () => [...prod.objects.keys()].filter((k) => !k.includes('/_releases/')).sort();
     let res = await promote('m3.2');
     assert.deepEqual(await res.json(), { current: 'm3.2', previous: null, rollback: false, url: 'https://cdn.example.org/fielddaylab/aqualab/' });
-    const html = new TextDecoder().decode(prod.data.get('fielddaylab/aqualab/index.html'));
-    assert.match(html, /location\.replace\("\.\/m3\.2\/" \+ location\.search/);
+    assert.deepEqual(live(), ['fielddaylab/aqualab/Build/game.wasm.br', 'fielddaylab/aqualab/current.json', 'fielddaylab/aqualab/index.html']);
+    const wasm = prod.headers.get('fielddaylab/aqualab/Build/game.wasm.br')!;
+    assert.equal(wasm.cacheControl, 'no-cache');   // overwritten on every switch: revalidate (304s are cheap)
+    assert.equal(wasm.contentEncoding, 'br');
     assert.equal(prod.headers.get('fielddaylab/aqualab/index.html')?.cacheControl, 'no-cache');
+    // index.html is written last, so a visitor mid-switch never gets a page whose files aren't there yet.
+    const order = [...prod.headers.keys()].filter((k) => !k.includes('/_releases/'));
+    assert.ok(order.indexOf('fielddaylab/aqualab/index.html') > order.indexOf('fielddaylab/aqualab/Build/game.wasm.br'));
+    // Files the new release doesn't have are removed; the archive is untouched.
+    prod.objects.set('fielddaylab/aqualab/Build/old-only.js', 1);
     res = await promote('m3.1');
     assert.equal(((await res.json()) as any).rollback, true);
+    assert.ok(!prod.objects.has('fielddaylab/aqualab/Build/old-only.js'));
     assert.match(new TextDecoder().decode(prod.data.get('fielddaylab/aqualab/current.json')), /"version":"m3.1"/);
+    assert.equal(prod.objects.size, 7); // 2 releases × 2 files + 2 live files + current.json
     const list = (await (await app.request('/v1/releases/fielddaylab/aqualab')).json()) as any;
     assert.equal(list.current, 'm3.1');
     assert.deepEqual(list.releases.map((r: any) => r.version), ['m3.2', 'm3.1']);
+  });
+
+  test('a switch that fails part-way puts the previous release back', async () => {
+    await publishTag('m3.1');
+    await approve('m3.1');
+    await publishTag('m3.2');
+    await approve('m3.2');
+    await promote('m3.1');
+    prod.data.set('fielddaylab/aqualab/_releases/m3.2/index.html', new TextEncoder().encode('new'));
+    prod.data.set('fielddaylab/aqualab/_releases/m3.1/index.html', new TextEncoder().encode('old'));
+    await promote('m3.1');
+    prod.failPutAfter = 1; // the first file copies, the second fails
+    const res = await promote('m3.2');
+    assert.equal(res.status, 500);
+    prod.failPutAfter = Infinity;
+    assert.equal(db.currentRelease(1)?.version, 'm3.1');
+    assert.equal(new TextDecoder().decode(prod.data.get('fielddaylab/aqualab/index.html')), 'old');
   });
 
   test('promoting an unapproved version or a bad version name is refused', async () => {
     assert.equal((await promote('m9')).status, 404);
     assert.equal((await approve('../evil')).status, 400);
     assert.equal((await approve('index.html')).status, 400);
+  });
+});
+
+describe('one-time release relayout', () => {
+  test('moves VERSION/ folders under _releases/ and serves the current release in place', async () => {
+    const { relayoutReleases } = await import('../src/releases.ts');
+    const h = { contentType: 'text/html', cacheControl: 'x' };
+    for (const v of ['0.1.0', '0.2.0']) {
+      await prod.put(`fieldday/spacefab/${v}/index.html`, new TextEncoder().encode(v), 5, h);
+      await prod.put(`fieldday/spacefab/${v}/Build/a.wasm.br`, new Uint8Array(9), 9, h);
+    }
+    await prod.put('fieldday/spacefab/index.html', new TextEncoder().encode('redirect'), 8, h);
+    await prod.put('fieldday/spacefab/current.json', new TextEncoder().encode('{}'), 2, h);
+    const rel = [{ gamePrefix: 'fieldday/spacefab/', version: '0.1.0', current: false }, { gamePrefix: 'fieldday/spacefab/', version: '0.2.0', current: true }];
+    await relayoutReleases(prod, rel, () => {});
+    assert.deepEqual([...prod.objects.keys()].sort(), [
+      'fieldday/spacefab/Build/a.wasm.br', 'fieldday/spacefab/_releases/0.1.0/Build/a.wasm.br', 'fieldday/spacefab/_releases/0.1.0/index.html',
+      'fieldday/spacefab/_releases/0.2.0/Build/a.wasm.br', 'fieldday/spacefab/_releases/0.2.0/index.html', 'fieldday/spacefab/current.json', 'fieldday/spacefab/index.html']);
+    assert.equal(new TextDecoder().decode(prod.data.get('fieldday/spacefab/index.html')), '0.2.0');
+    assert.equal(prod.headers.get('fieldday/spacefab/_releases/0.1.0/index.html')?.cacheControl, 'public, max-age=31536000, immutable');
+    await relayoutReleases(prod, rel, () => {}); // safe to run again
+    assert.equal(prod.objects.size, 7);
   });
 });
 

@@ -136,6 +136,10 @@ const MIGRATIONS = [
   ALTER TABLE games ADD COLUMN frozen_by TEXT;
   ALTER TABLE games ADD COLUMN frozen_note TEXT;
   `,
+  // v5: small key/value settings (e.g. one-time storage migrations).
+  `
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `,
 ];
 
 export interface Studio {
@@ -407,6 +411,21 @@ export class Db {
 
   setCurrentRelease(gameId: number, releaseId: number) {
     this.sqlite.prepare('UPDATE games SET current_release_id = ?, promoted_at = ? WHERE id = ?').run(releaseId, now(), gameId);
+  }
+
+  setting(key: string): string | undefined {
+    return (this.sqlite.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined)?.value;
+  }
+
+  setSetting(key: string, value: string) {
+    this.sqlite.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
+  // Every release with its game's storage prefix, for storage migrations.
+  allReleases(): { gamePrefix: string; version: string; current: boolean }[] {
+    return (this.sqlite.prepare(`SELECT s.slug || '/' || g.slug || '/' AS gamePrefix, r.version, (g.current_release_id = r.id) AS current
+      FROM releases r JOIN games g ON g.id = r.game_id JOIN studios s ON s.id = g.studio_id ORDER BY r.id`).all() as unknown as { gamePrefix: string; version: string; current: number }[])
+      .map((r) => ({ ...r, current: !!r.current }));
   }
 
   // Withdraw (by + note) or restore (null) a release.

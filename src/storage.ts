@@ -1,5 +1,6 @@
 import type { Readable } from 'node:stream';
 import {
+  CopyObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   ListObjectsV2Command,
@@ -31,6 +32,8 @@ export interface Storage {
   // Streams one object's body; used to copy approved builds from staging to production.
   get(key: string): Promise<Readable | Uint8Array>;
   put(key: string, body: Readable | Uint8Array, size: number, headers: ObjectHeaders): Promise<void>;
+  // Server-side copy within the bucket (nothing passes through this service), replacing the headers.
+  copy(srcKey: string, dstKey: string, headers: ObjectHeaders): Promise<void>;
 }
 
 // Folder-style listing over a plain key→size map; used by in-memory storage in tests and the dev preview.
@@ -129,6 +132,20 @@ export function createR2Storage(opts: {
           Key: key,
           Body: body,
           ContentLength: size,
+          ContentType: headers.contentType,
+          ContentEncoding: headers.contentEncoding,
+          CacheControl: headers.cacheControl,
+        }),
+      );
+    },
+
+    async copy(srcKey, dstKey, headers) {
+      await client.send(
+        new CopyObjectCommand({
+          Bucket: bucket,
+          Key: dstKey,
+          CopySource: `${bucket}/${srcKey.split('/').map(encodeURIComponent).join('/')}`,
+          MetadataDirective: 'REPLACE',
           ContentType: headers.contentType,
           ContentEncoding: headers.contentEncoding,
           CacheControl: headers.cacheControl,

@@ -14,6 +14,10 @@ class FakeStorage implements Storage {
   async presignPut(key: string) { return `https://r2.test/${key}`; }
   async list(prefix: string) { return [...this.objects].filter(([k]) => k.startsWith(prefix)).map(([key, size]) => ({ key, size })); }
   async browse(prefix: string) { return browseKeys(this.objects, prefix); }
+  async copy(src: string, dst: string, headers: ObjectHeaders) {
+    if (!this.objects.has(src)) throw new Error(`no such key ${src}`);
+    await this.put(dst, this.data.get(src) ?? new Uint8Array(this.objects.get(src)!), this.objects.get(src)!, headers);
+  }
   async deleteKeys(keys: string[]) { for (const k of keys) this.objects.delete(k); }
   async get(key: string) { return this.data.get(key) ?? new Uint8Array(this.objects.get(key)!); }
   async put(key: string, body: Readable | Uint8Array, size: number, _h: ObjectHeaders) {
@@ -138,8 +142,9 @@ describe('releasing from the web', () => {
     r = await rita.post(`/portal/api/requests/${id}/approve`, { makeCurrent: true });
     assert.equal(r.status, 200);
     assert.equal(db.releaseRequest(id)?.status, 'approved');
-    assert.ok(prod.objects.has('fieldday/aqualab/v1.0/index.html'));
-    assert.match(new TextDecoder().decode(prod.data.get('fieldday/aqualab/index.html')), /\.\/v1\.0\//);
+    assert.ok(prod.objects.has('fieldday/aqualab/_releases/v1.0/index.html'));
+    assert.match(new TextDecoder().decode(prod.data.get('fieldday/aqualab/current.json')), /"version":"v1\.0"/);
+    assert.ok(prod.objects.has('fieldday/aqualab/index.html')); // served in place
     assert.equal(db.releases(db.game(1, 'aqualab')!.id)[0].approved_by, 'user:rita');
   });
 

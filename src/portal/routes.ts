@@ -424,7 +424,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       const back = !!cur && cur.id > r.id;
       const status = isCur ? pill('brass', '★ Current') : r.withdrawn_at ? html`<span title="${r.withdrawn_note ?? ''}">${pill('bad', 'Withdrawn')}</span>` : pill('off', 'Previous');
       const actions: Html[] = [];
-      if (switcher && !isCur && !r.withdrawn_at) actions.push(html`<form data-api="${api}/promote" data-busy="Switching…" data-confirm="${back ? `Roll ${g.slug} back to ${r.version}? Classrooms get it immediately.` : `Make ${r.version} the version classrooms get?`}">
+      if (switcher && !isCur && !r.withdrawn_at) actions.push(html`<form data-api="${api}/promote" data-busy="Copying ${r.version} into place (${mb(r.total_bytes)}). This can take a minute; keep this page open." data-confirm="${back ? `Roll ${g.slug} back to ${r.version}? Classrooms get it immediately.` : `Make ${r.version} the version classrooms get?`}">
           <input type="hidden" name="version" value="${r.version}"><button class="btn sm">${back ? 'Roll back to this' : 'Make current'}</button><span class="err" role="status" aria-live="polite"></span></form>`);
       if (release && !isCur && !r.withdrawn_at) actions.push(html`<button class="btn sm" data-open="withdraw" data-ref="${r.version}">Withdraw…</button>`);
       if (release && r.withdrawn_at) actions.push(html`<form data-api="${api}/withdraw" data-then="reload" data-confirm="Allow ${r.version} to be made current again?"><input type="hidden" name="ref" value="${r.version}"><input type="hidden" name="restore" value="1"><button class="btn sm">Restore</button><span class="err" role="status" aria-live="polite"></span></form>`);
@@ -433,7 +433,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
         <td>${status}${r.withdrawn_at && r.withdrawn_note ? html`<br><span class="small muted">“${r.withdrawn_note}”</span>` : ''}</td>
         <td class="small">from <span class="mono">${r.source_ref}</span>${r.commit_sha ? html` · <a class="mono" href="https://github.com/${g.repository}/commit/${r.commit_sha}">${r.commit_sha.slice(0, 7)}</a>` : ''}</td>
         <td class="small">${r.approved_at.slice(0, 10)} · ${who(r.approved_by)}</td>
-        <td class="small"><a href="${deps.prodPublicUrl}/${s.slug}/${g.slug}/${r.version}/" target="_blank" rel="noopener">Play ↗</a></td>
+        <td class="small"><a href="${deps.prodPublicUrl}/${s.slug}/${g.slug}/_releases/${r.version}/" target="_blank" rel="noopener">Play ↗</a></td>
         <td class="r"><div class="row-actions">${actions}</div></td></tr>`;
     });
     const reqRows = requests.map((r) => html`<tr>

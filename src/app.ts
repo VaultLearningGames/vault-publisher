@@ -4,7 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { randomUUID } from 'node:crypto';
 import { bearerToken, type GitHubIdentity, type Verifier } from './auth.ts';
 import type { Db, Game, ManifestFile, Studio } from './db.ts';
-import { copyRelease, writePointer } from './releases.ts';
+import { copyRelease, makeLive, releasePrefix } from './releases.ts';
 import { registerPortal, type PortalConfig } from './portal/routes.ts';
 import {
   headersFor,
@@ -156,7 +156,7 @@ export function createApp(deps: AppDeps) {
     const build = db.build(game.id, ref);
     if (!build || build.status !== 'live') fail(404, `no live staging build ${studio.slug}/${game.slug}/${ref}`);
     if (db.release(game.id, version)) fail(409, `release ${version} already exists and can't be changed`);
-    const dstPrefix = `${studio.slug}/${game.slug}/${version}/`;
+    const dstPrefix = releasePrefix(`${studio.slug}/${game.slug}/`, version);
     if ((await production.list(dstPrefix)).length > 0) fail(409, `production already has files under ${dstPrefix}`);
     const copied = await copyRelease({ staging, production, srcPrefix: previewPrefix(studio, game, ref), dstPrefix });
     const release = db.createRelease({
@@ -168,18 +168,32 @@ export function createApp(deps: AppDeps) {
     return { release, url: `${deps.prodPublicUrl}/${dstPrefix}` };
   }
 
+  // Switch the release players get at STUDIO/GAME/ by copying it into place. One switch per game at a time;
+  // if a copy fails part-way, the previous release is put back so players never keep a mixed folder.
+  const switching = new Set<number>();
   async function promoteRelease(studio: Studio, game: Game, version: string, actor: string) {
     const production = productionStorage();
     const release = db.release(game.id, version);
     if (!release) fail(404, `${version} hasn't been approved for ${studio.slug}/${game.slug}`);
     if (release.withdrawn_at) fail(409, `${version} was withdrawn by Vault${release.withdrawn_note ? `: ${release.withdrawn_note}` : ''}. Restore it before making it current.`);
-    const previous = db.currentRelease(game.id);
-    const gamePrefix = `${studio.slug}/${game.slug}/`;
-    await writePointer(production, gamePrefix, version, game.slug);
-    db.setCurrentRelease(game.id, release.id);
-    const rollback = previous !== undefined && previous.id > release.id;
-    db.audit(actor, rollback ? 'release.rollback' : 'release.promote', gamePrefix, { from: previous?.version ?? null, to: version });
-    return { current: version, previous: previous?.version ?? null, rollback, url: `${deps.prodPublicUrl}/${gamePrefix}` };
+    if (switching.has(game.id)) fail(409, `${studio.slug}/${game.slug} is already switching versions; try again in a minute`);
+    switching.add(game.id);
+    try {
+      const previous = db.currentRelease(game.id);
+      const gamePrefix = `${studio.slug}/${game.slug}/`;
+      try {
+        await makeLive(production, gamePrefix, version);
+      } catch (err) {
+        if (previous) await makeLive(production, gamePrefix, previous.version).catch(() => {});
+        throw err;
+      }
+      db.setCurrentRelease(game.id, release.id);
+      const rollback = previous !== undefined && previous.id > release.id;
+      db.audit(actor, rollback ? 'release.rollback' : 'release.promote', gamePrefix, { from: previous?.version ?? null, to: version });
+      return { current: version, previous: previous?.version ?? null, rollback, url: `${deps.prodPublicUrl}/${gamePrefix}` };
+    } finally {
+      switching.delete(game.id);
+    }
   }
 
   // Approve: copy a live staging build to production as an immutable release.
@@ -235,7 +249,7 @@ export function createApp(deps: AppDeps) {
         files: build.file_count, bytes: build.total_bytes, published_by: build.actor, updated_at: build.updated_at,
         url: `${deps.stagingPublicUrl}/${previewPrefix(studio, game, build.ref_name)}`,
       } : null,
-      release_url: `${deps.prodPublicUrl}/${studio.slug}/${game.slug}/${version}/`,
+      release_url: `${deps.prodPublicUrl}/${releasePrefix(`${studio.slug}/${game.slug}/`, version)}`,
       play_url: `${deps.prodPublicUrl}/${studio.slug}/${game.slug}/`,
     });
   });

@@ -48,7 +48,8 @@ preview; previews idle for 90 days are removed.
 ## Release
 
 Push a version tag, test it on staging, then **Request release** in the portal. Vault copies that exact build to
-production and makes it current. Studio maintainers can then switch between approved releases or roll back
+production (kept at `STUDIO/GAME/_releases/VERSION/`) and makes it current: copied into `STUDIO/GAME/` itself, so
+bookmarks always get the current release. Studio maintainers can then switch between approved releases or roll back
 themselves, unless Vault has frozen the game (e.g. during a study) or withdrawn that release.
 
 ## Develop

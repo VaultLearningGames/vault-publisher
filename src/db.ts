@@ -87,6 +87,45 @@ const MIGRATIONS = [
   ALTER TABLE games ADD COLUMN current_release_id INTEGER REFERENCES releases(id);
   ALTER TABLE games ADD COLUMN promoted_at TEXT;
   `,
+  `
+  -- People who sign in to the portal (with GitHub). vault_role is for Vault staff.
+  CREATE TABLE users (
+    id            INTEGER PRIMARY KEY,
+    github_id     TEXT NOT NULL UNIQUE,
+    login         TEXT NOT NULL,
+    name          TEXT,
+    avatar_url    TEXT,
+    vault_role    TEXT NOT NULL DEFAULT 'none' CHECK (vault_role IN ('none', 'release_manager', 'admin')),
+    created_at    TEXT NOT NULL,
+    last_login_at TEXT
+  );
+
+  -- Studio membership by GitHub username, so people can be added before they first sign in.
+  CREATE TABLE memberships (
+    id           INTEGER PRIMARY KEY,
+    studio_id    INTEGER NOT NULL REFERENCES studios(id),
+    github_login TEXT NOT NULL COLLATE NOCASE,
+    role         TEXT NOT NULL CHECK (role IN ('viewer', 'maintainer', 'admin')),
+    added_by     TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    UNIQUE (studio_id, github_login)
+  );
+
+  -- A studio asks Vault to release one of its staging builds.
+  CREATE TABLE release_requests (
+    id            INTEGER PRIMARY KEY,
+    game_id       INTEGER NOT NULL REFERENCES games(id),
+    ref           TEXT NOT NULL,
+    version       TEXT NOT NULL,
+    notes         TEXT,
+    status        TEXT NOT NULL CHECK (status IN ('requested', 'approved', 'rejected', 'withdrawn')),
+    requested_by  TEXT NOT NULL,
+    decided_by    TEXT,
+    decision_note TEXT,
+    created_at    TEXT NOT NULL,
+    decided_at    TEXT
+  );
+  `,
 ];
 
 export interface Studio {
@@ -146,6 +185,42 @@ export interface Release {
   total_bytes: number;
   approved_by: string;
   approved_at: string;
+}
+
+export type VaultRole = 'none' | 'release_manager' | 'admin';
+export type StudioRole = 'viewer' | 'maintainer' | 'admin';
+
+export interface User {
+  id: number;
+  github_id: string;
+  login: string;
+  name: string | null;
+  avatar_url: string | null;
+  vault_role: VaultRole;
+  last_login_at: string | null;
+}
+
+export interface Membership {
+  id: number;
+  studio_id: number;
+  github_login: string;
+  role: StudioRole;
+  added_by: string;
+  created_at: string;
+}
+
+export interface ReleaseRequest {
+  id: number;
+  game_id: number;
+  ref: string;
+  version: string;
+  notes: string | null;
+  status: 'requested' | 'approved' | 'rejected' | 'withdrawn';
+  requested_by: string;
+  decided_by: string | null;
+  decision_note: string | null;
+  created_at: string;
+  decided_at: string | null;
 }
 
 export interface StaleBuild {
@@ -316,6 +391,118 @@ export class Db {
 
   setCurrentRelease(gameId: number, releaseId: number) {
     this.sqlite.prepare('UPDATE games SET current_release_id = ?, promoted_at = ? WHERE id = ?').run(releaseId, now(), gameId);
+  }
+
+  // ----- portal: studios, games, builds -----
+  studios(): Studio[] {
+    return this.sqlite.prepare('SELECT * FROM studios ORDER BY name').all() as unknown as Studio[];
+  }
+
+  gamesForStudio(studioId: number): Game[] {
+    return this.sqlite.prepare('SELECT * FROM games WHERE studio_id = ? ORDER BY slug').all(studioId) as unknown as Game[];
+  }
+
+  liveBuilds(gameId: number): Build[] {
+    return this.sqlite
+      .prepare("SELECT * FROM builds WHERE game_id = ? AND status = 'live' ORDER BY updated_at DESC")
+      .all(gameId) as unknown as Build[];
+  }
+
+  // ----- portal: users and roles -----
+  upsertUser(u: { github_id: string; login: string; name: string | null; avatar_url: string | null }): User {
+    this.sqlite
+      .prepare(`INSERT INTO users (github_id, login, name, avatar_url, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (github_id) DO UPDATE SET login = excluded.login, name = excluded.name,
+                  avatar_url = excluded.avatar_url, last_login_at = excluded.last_login_at`)
+      .run(u.github_id, u.login, u.name, u.avatar_url, now(), now());
+    return this.sqlite.prepare('SELECT * FROM users WHERE github_id = ?').get(u.github_id) as unknown as User;
+  }
+
+  userById(id: number): User | undefined {
+    return this.sqlite.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
+  }
+
+  users(): User[] {
+    return this.sqlite.prepare('SELECT * FROM users ORDER BY login COLLATE NOCASE').all() as unknown as User[];
+  }
+
+  setVaultRole(userId: number, role: VaultRole) {
+    this.sqlite.prepare('UPDATE users SET vault_role = ? WHERE id = ?').run(role, userId);
+  }
+
+  memberships(studioId: number): Membership[] {
+    return this.sqlite
+      .prepare('SELECT * FROM memberships WHERE studio_id = ? ORDER BY github_login COLLATE NOCASE')
+      .all(studioId) as unknown as Membership[];
+  }
+
+  membershipsForLogin(login: string): (Membership & { studio_slug: string; studio_name: string })[] {
+    return this.sqlite
+      .prepare(`SELECT m.*, s.slug AS studio_slug, s.name AS studio_name FROM memberships m JOIN studios s ON s.id = m.studio_id
+                WHERE m.github_login = ? ORDER BY s.name`)
+      .all(login) as unknown as (Membership & { studio_slug: string; studio_name: string })[];
+  }
+
+  roleIn(studioId: number, login: string): StudioRole | undefined {
+    const row = this.sqlite.prepare('SELECT role FROM memberships WHERE studio_id = ? AND github_login = ?').get(studioId, login) as
+      | { role: StudioRole }
+      | undefined;
+    return row?.role;
+  }
+
+  setMembership(studioId: number, login: string, role: StudioRole, addedBy: string) {
+    this.sqlite
+      .prepare(`INSERT INTO memberships (studio_id, github_login, role, added_by, created_at) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (studio_id, github_login) DO UPDATE SET role = excluded.role`)
+      .run(studioId, login, role, addedBy, now());
+  }
+
+  removeMembership(studioId: number, login: string) {
+    this.sqlite.prepare('DELETE FROM memberships WHERE studio_id = ? AND github_login = ?').run(studioId, login);
+  }
+
+  // ----- portal: release requests -----
+  createReleaseRequest(r: { game_id: number; ref: string; version: string; notes: string | null; requested_by: string }): ReleaseRequest {
+    const res = this.sqlite
+      .prepare(`INSERT INTO release_requests (game_id, ref, version, notes, status, requested_by, created_at)
+                VALUES (?, ?, ?, ?, 'requested', ?, ?)`)
+      .run(r.game_id, r.ref, r.version, r.notes, r.requested_by, now());
+    return this.releaseRequest(Number(res.lastInsertRowid))!;
+  }
+
+  releaseRequest(id: number): ReleaseRequest | undefined {
+    return this.sqlite.prepare('SELECT * FROM release_requests WHERE id = ?').get(id) as ReleaseRequest | undefined;
+  }
+
+  releaseRequests(filter: { gameId?: number; status?: string }): (ReleaseRequest & { game_slug: string; studio_slug: string })[] {
+    const where: string[] = [];
+    const args: (string | number)[] = [];
+    if (filter.gameId !== undefined) { where.push('r.game_id = ?'); args.push(filter.gameId); }
+    if (filter.status) { where.push('r.status = ?'); args.push(filter.status); }
+    return this.sqlite
+      .prepare(`SELECT r.*, g.slug AS game_slug, s.slug AS studio_slug FROM release_requests r
+                JOIN games g ON g.id = r.game_id JOIN studios s ON s.id = g.studio_id
+                ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY r.id DESC LIMIT 100`)
+      .all(...args) as unknown as (ReleaseRequest & { game_slug: string; studio_slug: string })[];
+  }
+
+  decideReleaseRequest(id: number, status: 'approved' | 'rejected' | 'withdrawn', by: string, note: string | null) {
+    this.sqlite
+      .prepare("UPDATE release_requests SET status = ?, decided_by = ?, decision_note = ?, decided_at = ? WHERE id = ? AND status = 'requested'")
+      .run(status, by, note, now(), id);
+  }
+
+  // A version released by any route (portal, Release workflow) satisfies open requests for it.
+  closeRequestsForVersion(gameId: number, version: string, by: string) {
+    this.sqlite
+      .prepare("UPDATE release_requests SET status = 'approved', decided_by = ?, decided_at = ? WHERE game_id = ? AND version = ? AND status = 'requested'")
+      .run(by, now(), gameId, version);
+  }
+
+  recentAudit(limit = 50): { at: string; actor: string; action: string; target: string }[] {
+    return this.sqlite.prepare('SELECT at, actor, action, target FROM audit_log ORDER BY id DESC LIMIT ?').all(limit) as unknown as {
+      at: string; actor: string; action: string; target: string;
+    }[];
   }
 
   audit(actor: string, action: string, target: string, detail?: unknown) {

@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { bearerToken, type GitHubIdentity, type Verifier } from './auth.ts';
 import type { Db, Game, ManifestFile, Studio } from './db.ts';
 import { copyRelease, writePointer } from './releases.ts';
+import { registerPortal, type PortalConfig } from './portal/routes.ts';
 import {
   headersFor,
   isSafeFilePath,
@@ -28,6 +29,7 @@ export interface AppDeps {
   prodPublicUrl: string;
   adminRepository: string;
   adminEnvironment: string;
+  portal: PortalConfig;
   previewRetentionDays: number;
   taskInvokerEmail: string;
 }
@@ -37,11 +39,11 @@ const UPLOAD_TTL_MS = 2 * 60 * 60 * 1000;
 // Events whose OIDC `ref` names the branch or tag being built.
 const PUBLISH_EVENTS = new Set(['push', 'workflow_dispatch']);
 
-function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 503, message: string, detail?: unknown): never {
+export function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 503, message: string, detail?: unknown): never {
   throw new HTTPException(status, { res: Response.json({ error: message, detail }, { status }) });
 }
 
-async function jsonBody(c: Context): Promise<Record<string, unknown>> {
+export async function jsonBody(c: Context): Promise<Record<string, unknown>> {
   const body = await c.req.json().catch(() => null);
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'expected a JSON object body');
   return body as Record<string, unknown>;
@@ -146,34 +148,28 @@ export function createApp(deps: AppDeps) {
 
   // Approve: copy a live staging build to production as an immutable release.
   // Body: { studio, game, version, ref } where ref is the staging branch/tag (defaults to version).
-  app.post('/v1/admin/releases/approve', async (c) => {
-    const id = await admin(c);
+  // Shared by the Release workflow (OIDC) and the web portal (signed-in release managers).
+  async function approveRelease(studio: Studio, game: Game, version: string, rawRef: string | undefined, actor: string) {
     const production = productionStorage();
-    const body = await jsonBody(c);
-    const { studio, game, version } = releaseTarget(body);
-    const ref = sanitizeRefName(typeof body.ref === 'string' && body.ref ? body.ref.replace(/^refs\/(heads|tags)\//, '') : version);
+    const ref = sanitizeRefName(rawRef ? rawRef.replace(/^refs\/(heads|tags)\//, '') : version);
     if (!ref) fail(400, 'ref must be a branch or tag name');
     const build = db.build(game.id, ref);
     if (!build || build.status !== 'live') fail(404, `no live staging build ${studio.slug}/${game.slug}/${ref}`);
     if (db.release(game.id, version)) fail(409, `release ${version} already exists and can't be changed`);
     const dstPrefix = `${studio.slug}/${game.slug}/${version}/`;
     if ((await production.list(dstPrefix)).length > 0) fail(409, `production already has files under ${dstPrefix}`);
-
     const copied = await copyRelease({ staging, production, srcPrefix: previewPrefix(studio, game, ref), dstPrefix });
     const release = db.createRelease({
       game_id: game.id, version, source_ref: ref, commit_sha: build.commit_sha,
-      file_count: copied.files, total_bytes: copied.bytes, approved_by: `github:${id.actor}`,
+      file_count: copied.files, total_bytes: copied.bytes, approved_by: actor,
     });
-    db.audit(`github:${id.actor}`, 'release.approve', dstPrefix, { from: ref, sha: build.commit_sha, ...copied });
-    return c.json({ release, url: `${deps.prodPublicUrl}/${dstPrefix}` });
-  });
+    db.closeRequestsForVersion(game.id, version, actor);
+    db.audit(actor, 'release.approve', dstPrefix, { from: ref, sha: build.commit_sha, ...copied });
+    return { release, url: `${deps.prodPublicUrl}/${dstPrefix}` };
+  }
 
-  // Promote (or roll back): make an approved release the one players get at STUDIO/GAME/.
-  // Body: { studio, game, version }
-  app.post('/v1/admin/releases/promote', async (c) => {
-    const id = await admin(c);
+  async function promoteRelease(studio: Studio, game: Game, version: string, actor: string) {
     const production = productionStorage();
-    const { studio, game, version } = releaseTarget(await jsonBody(c));
     const release = db.release(game.id, version);
     if (!release) fail(404, `${version} hasn't been approved for ${studio.slug}/${game.slug}`);
     const previous = db.currentRelease(game.id);
@@ -181,8 +177,25 @@ export function createApp(deps: AppDeps) {
     await writePointer(production, gamePrefix, version, game.slug);
     db.setCurrentRelease(game.id, release.id);
     const rollback = previous !== undefined && previous.id > release.id;
-    db.audit(`github:${id.actor}`, rollback ? 'release.rollback' : 'release.promote', gamePrefix, { from: previous?.version ?? null, to: version });
-    return c.json({ current: version, previous: previous?.version ?? null, rollback, url: `${deps.prodPublicUrl}/${gamePrefix}` });
+    db.audit(actor, rollback ? 'release.rollback' : 'release.promote', gamePrefix, { from: previous?.version ?? null, to: version });
+    return { current: version, previous: previous?.version ?? null, rollback, url: `${deps.prodPublicUrl}/${gamePrefix}` };
+  }
+
+  // Approve: copy a live staging build to production as an immutable release.
+  // Body: { studio, game, version, ref } where ref is the staging branch/tag (defaults to version).
+  app.post('/v1/admin/releases/approve', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const { studio, game, version } = releaseTarget(body);
+    return c.json(await approveRelease(studio, game, version, typeof body.ref === 'string' ? body.ref : undefined, `github:${id.actor}`));
+  });
+
+  // Promote (or roll back): make an approved release the one players get at STUDIO/GAME/.
+  // Body: { studio, game, version }
+  app.post('/v1/admin/releases/promote', async (c) => {
+    const id = await admin(c);
+    const { studio, game, version } = releaseTarget(await jsonBody(c));
+    return c.json(await promoteRelease(studio, game, version, `github:${id.actor}`));
   });
 
   // Public, read-only: what a Release run is about to do, and whether it can. The Release workflow's
@@ -354,5 +367,6 @@ export function createApp(deps: AppDeps) {
     return c.json({ removed, expired_uploads: expiredUploads });
   });
 
+  registerPortal(app, { ...deps, approveRelease, promoteRelease, previewUrl: (studio: Studio, game: Game, ref: string) => `${deps.stagingPublicUrl}/${previewPrefix(studio, game, ref)}` });
   return app;
 }

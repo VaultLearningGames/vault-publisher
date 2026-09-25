@@ -126,6 +126,25 @@ GitHub environment, which requires a reviewer to approve each run.
 
 `GET /v1/releases/STUDIO/GAME` lists a game's releases and which one is current.
 
+## Studio portal (web)
+
+The same service serves the Vault Studio Portal at `/`: sign in with GitHub (profile only), see each game's test
+versions on staging and releases on production, register games (instructions and generated workflows), request
+releases, and, for Vault release managers, release a staging branch or tag, make a release current and roll back.
+
+| Role | Can |
+|---|---|
+| Studio viewer | see the studio's games, staging versions and releases |
+| Studio maintainer | also request releases |
+| Studio admin | also add, change and remove members (by GitHub username) |
+| Vault release manager | release, promote, roll back, approve or send back requests, for every studio |
+| Vault admin | also set Vault roles and manage every studio's members |
+
+GitHub logins in `VAULT_ADMINS` become Vault admins when they sign in. Configuration: `GITHUB_CLIENT_ID`,
+`GITHUB_CLIENT_SECRET` (a GitHub OAuth app whose callback is `PORTAL_URL/auth/callback`), `SESSION_SECRET`,
+`PORTAL_URL`. Preview locally with example data and a fake sign-in: `node scripts/dev-portal.ts`
+(http://localhost:4181).
+
 ## API
 
 All `/v1/previews*` calls need `Authorization: Bearer <GitHub Actions OIDC token>` with audience `vault-publisher`.

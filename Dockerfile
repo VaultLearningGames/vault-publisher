@@ -14,6 +14,7 @@ COPY --from=litestream /usr/local/bin/litestream /usr/local/bin/litestream
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY src ./src
+COPY public ./public
 COPY studios.json litestream.yml docker-entrypoint.sh ./
 
 EXPOSE 8080

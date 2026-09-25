@@ -32,6 +32,13 @@ const app = createApp({
   prodPublicUrl: config.prodPublicUrl,
   adminRepository: config.adminRepository,
   adminEnvironment: config.adminEnvironment,
+  portal: {
+    githubClientId: config.githubClientId,
+    githubClientSecret: config.githubClientSecret,
+    sessionSecret: config.sessionSecret,
+    baseUrl: config.portalUrl,
+    vaultAdmins: config.vaultAdmins,
+  },
   previewRetentionDays: config.previewRetentionDays,
   taskInvokerEmail: config.taskInvokerEmail,
 });

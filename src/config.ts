@@ -17,6 +17,12 @@ export interface Config {
   // Release actions are accepted only from this repository's workflow, in this GitHub environment.
   adminRepository: string;
   adminEnvironment: string;
+  // Web portal: GitHub OAuth app, session signing key, public URL, bootstrap Vault admins.
+  githubClientId?: string;
+  githubClientSecret?: string;
+  sessionSecret?: string;
+  portalUrl: string;
+  vaultAdmins: string[];
   previewRetentionDays: number;
   // Cloud Scheduler calls /v1/tasks/cleanup with a Google-signed ID token for this service account.
   taskInvokerEmail: string;
@@ -47,6 +53,11 @@ export function loadConfig(): Config {
     prodPublicUrl: (process.env.PROD_PUBLIC_URL ?? 'https://cdn.vaultlearninggames.org').replace(/\/+$/, ''),
     adminRepository: process.env.ADMIN_REPOSITORY ?? 'fielddaylab/vault-publisher',
     adminEnvironment: process.env.ADMIN_ENVIRONMENT ?? 'production',
+    githubClientId: process.env.GITHUB_CLIENT_ID?.trim() || undefined,
+    githubClientSecret: process.env.GITHUB_CLIENT_SECRET?.trim() || undefined,
+    sessionSecret: process.env.SESSION_SECRET?.trim() || undefined,
+    portalUrl: (process.env.PORTAL_URL ?? 'https://vault-publisher-3rlcoyes6a-uc.a.run.app').replace(/\/+$/, ''),
+    vaultAdmins: (process.env.VAULT_ADMINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     previewRetentionDays: Number(process.env.PREVIEW_RETENTION_DAYS ?? 90),
     taskInvokerEmail: required('TASK_INVOKER_EMAIL'),
     taskAudience: process.env.TASK_AUDIENCE ?? 'vault-publisher-tasks',

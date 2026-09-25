@@ -83,6 +83,7 @@ beforeEach(() => {
     prodPublicUrl: 'https://cdn.example.org',
     adminRepository: 'fielddaylab/vault-publisher',
     adminEnvironment: 'production',
+    portal: { baseUrl: 'https://portal.test', vaultAdmins: [] },
     previewRetentionDays: 90,
     taskInvokerEmail: 'scheduler@example.iam.gserviceaccount.com',
   });

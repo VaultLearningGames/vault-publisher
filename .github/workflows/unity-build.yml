@@ -6,7 +6,7 @@ name: Unity build
 #
 #   jobs:
 #     build:
-#       uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@v1
+#       uses: VaultLearningGames/vault-publisher/.github/workflows/unity-build.yml@v1
 #       secrets: inherit          # UNITY_EMAIL, UNITY_PASSWORD, UNITY_SERIAL
 on:
   workflow_call:

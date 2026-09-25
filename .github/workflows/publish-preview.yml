@@ -15,7 +15,7 @@ name: Publish preview
 #   permissions: { contents: read, id-token: write }
 #   jobs:
 #     preview:
-#       uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+#       uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
 #       with: { game: bloom, path: WebGL }
 #
 # Artifact from a build job:
@@ -23,15 +23,15 @@ name: Publish preview
 #   jobs:
 #     build:
 #       if: github.event_name != 'delete'
-#       uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@v1
+#       uses: VaultLearningGames/vault-publisher/.github/workflows/unity-build.yml@v1
 #       secrets: inherit
 #     preview:
 #       needs: build
-#       uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+#       uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
 #       with: { game: aqualab, artifact: "${{ needs.build.outputs.artifact }}" }
 #     remove-preview:
 #       if: github.event_name == 'delete'
-#       uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+#       uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
 #       with: { game: aqualab }
 on:
   workflow_call:
@@ -96,7 +96,7 @@ jobs:
 
     - name: Publish preview
       id: publish
-      uses: fielddaylab/vault-publisher/action@v1
+      uses: VaultLearningGames/vault-publisher/action@v1
       with:
         game: ${{ inputs.game }}
         path: ${{ inputs.artifact != '' && 'build' || inputs.path }}
@@ -109,7 +109,7 @@ jobs:
       id-token: write
     steps:
     - name: Delete preview
-      uses: fielddaylab/vault-publisher/action@v1
+      uses: VaultLearningGames/vault-publisher/action@v1
       with:
         game: ${{ inputs.game }}
         mode: delete

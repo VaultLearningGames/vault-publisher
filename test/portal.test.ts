@@ -35,7 +35,7 @@ beforeEach(async () => {
   app = createApp({
     db, staging, production: prod, verifier,
     stagingPublicUrl: 'https://stg.test', prodPublicUrl: 'https://prod.test',
-    adminRepository: 'fielddaylab/vault-publisher', adminEnvironment: 'production',
+    adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production',
     previewRetentionDays: 90, taskInvokerEmail: 'x@y',
     portal: {
       baseUrl: 'https://portal.test', sessionSecret: SECRET, vaultAdmins: ['boss'],

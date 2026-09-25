@@ -55,7 +55,7 @@ const app = createApp({
   db, staging, production,
   verifier: { async github() { throw new Error('no CI in dev'); }, async google() { throw new Error('no'); } },
   stagingPublicUrl: 'https://cdn.vaultlearninggames-staging.org', prodPublicUrl: 'https://cdn.vaultlearninggames.org',
-  adminRepository: 'fielddaylab/vault-publisher', adminEnvironment: 'production',
+  adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production',
   previewRetentionDays: 90, taskInvokerEmail: 'dev@example.org',
   portal: {
     baseUrl: `http://localhost:${PORT}`, sessionSecret: 'dev-only-secret', vaultAdmins: ['boss'],

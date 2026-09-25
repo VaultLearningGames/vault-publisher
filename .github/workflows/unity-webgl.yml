@@ -10,7 +10,7 @@ name: Unity WebGL preview
 #   permissions: { contents: read, id-token: write }
 #   jobs:
 #     webgl:
-#       uses: fielddaylab/vault-publisher/.github/workflows/unity-webgl.yml@v1
+#       uses: VaultLearningGames/vault-publisher/.github/workflows/unity-webgl.yml@v1
 #       with: { game: aqualab }
 #       secrets: inherit
 on:
@@ -44,14 +44,14 @@ on:
 jobs:
   build:
     if: github.event_name != 'delete'
-    uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/unity-build.yml@v1
     with:
       project-path: ${{ inputs.project-path }}
     secrets: inherit
 
   preview:
     needs: build
-    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
     with:
       game: ${{ inputs.game }}
       artifact: ${{ needs.build.outputs.artifact }}
@@ -59,7 +59,7 @@ jobs:
 
   remove-preview:
     if: github.event_name == 'delete'
-    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
     with:
       game: ${{ inputs.game }}
       publisher-url: ${{ inputs.publisher-url }}

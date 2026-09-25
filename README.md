@@ -48,7 +48,7 @@ on: { push: {}, delete: {}, workflow_dispatch: {} }
 permissions: { contents: read, id-token: write }
 jobs:
   webgl:
-    uses: fielddaylab/vault-publisher/.github/workflows/unity-webgl.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/unity-webgl.yml@v1
     with: { game: aqualab }
     secrets: inherit
 ```
@@ -59,15 +59,15 @@ Split, so other jobs can use the same build (e.g. an existing deploy that should
 jobs:
   build:
     if: github.event_name != 'delete'
-    uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/unity-build.yml@v1
     secrets: inherit
   preview:
     needs: build
-    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
     with: { game: aqualab, artifact: "${{ needs.build.outputs.artifact }}" }
   remove-preview:
     if: github.event_name == 'delete'
-    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
     with: { game: aqualab }
   other-deploy:
     needs: build
@@ -86,14 +86,14 @@ on: { push: {}, delete: {}, workflow_dispatch: {} }
 permissions: { contents: read, id-token: write }
 jobs:
   preview:
-    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
     with: { game: bloom, path: WebGL }   # folder containing index.html
 ```
 
 Other build systems (npm, etc.) can call the action directly after their own build step:
 
 ```yaml
-- uses: fielddaylab/vault-publisher/action@v1
+- uses: VaultLearningGames/vault-publisher/action@v1
   with:
     game: my-game
     path: dist
@@ -103,10 +103,10 @@ Other build systems (npm, etc.) can call the action directly after their own bui
 Games that only exist as old builds on the DoIT server (no build in any repo) don't get a workflow; they're
 imported once into the production CDN.
 
-Game repos reference these files remotely (`uses: fielddaylab/vault-publisher/...@v1`); don't copy them or add
+Game repos reference these files remotely (`uses: VaultLearningGames/vault-publisher/...@v1`); don't copy them or add
 this repo as a submodule.
 
-[fielddaylab/vault-publisher-test](https://github.com/fielddaylab/vault-publisher-test) is a working example that
+[VaultLearningGames/vault-publisher-test](https://github.com/VaultLearningGames/vault-publisher-test) is a working example that
 uses a seconds-long simulated Unity build.
 
 ## Releasing to classrooms (production)

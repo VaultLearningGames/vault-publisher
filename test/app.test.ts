@@ -48,7 +48,7 @@ const otherRepo: GitHubIdentity = { ...wake, repository: 'fielddaylab/bloom', re
 const otherOrg: GitHubIdentity = { ...wake, owner: 'acme', ownerId: '999', repository: 'acme/wake', repositoryId: '300' };
 
 // Tokens in tests are just keys into this table.
-const releaser: GitHubIdentity = { ...wake, repository: 'fielddaylab/vault-publisher', repositoryId: '900', ref: 'refs/heads/main', eventName: 'workflow_dispatch', environment: 'production' };
+const releaser: GitHubIdentity = { ...wake, repository: 'VaultLearningGames/vault-publisher', repositoryId: '900', ref: 'refs/heads/main', eventName: 'workflow_dispatch', environment: 'production' };
 const releaserNoEnv: GitHubIdentity = { ...releaser, environment: undefined };
 const identities: Record<string, GitHubIdentity> = { wake, otherRepo, otherOrg, releaser, releaserNoEnv };
 const verifier: Verifier = {
@@ -81,7 +81,7 @@ beforeEach(() => {
     verifier,
     stagingPublicUrl: 'https://cdn.example-staging.org',
     prodPublicUrl: 'https://cdn.example.org',
-    adminRepository: 'fielddaylab/vault-publisher',
+    adminRepository: 'VaultLearningGames/vault-publisher',
     adminEnvironment: 'production',
     portal: { baseUrl: 'https://portal.test', vaultAdmins: [] },
     previewRetentionDays: 90,

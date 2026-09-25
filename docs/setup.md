@@ -49,12 +49,12 @@ gcloud iam service-accounts add-iam-policy-binding vault-publisher@PROJECT.iam.g
 
 **Workload Identity Federation:** the fielddaysite provider may only trust `fielddaylab/fielddaysite`.
 Check its attribute condition (`gcloud iam workload-identity-pools providers describe ...`) and, if needed,
-allow `fielddaylab/vault-publisher` too, e.g. `assertion.repository in ['fielddaylab/fielddaysite', 'fielddaylab/vault-publisher']`,
+allow `VaultLearningGames/vault-publisher` too, e.g. `assertion.repository in ['fielddaylab/fielddaysite', 'VaultLearningGames/vault-publisher']`,
 and grant `roles/iam.workloadIdentityUser` on the deploy service account for the new repo's principal.
 
 ## 3. GitHub
 
-**Repository variables** on `fielddaylab/vault-publisher` (Settings → Secrets and variables → Actions → Variables),
+**Repository variables** on `VaultLearningGames/vault-publisher` (Settings → Secrets and variables → Actions → Variables),
 unless they're already organization variables:
 
 | Variable | Value |

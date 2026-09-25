@@ -51,7 +51,7 @@ export function loadConfig(): Config {
     prodSecretAccessKey: process.env.R2_PROD_SECRET_ACCESS_KEY?.trim() || undefined,
     prodBucket: process.env.PROD_BUCKET ?? 'cdn-vaultlearninggames',
     prodPublicUrl: (process.env.PROD_PUBLIC_URL ?? 'https://cdn.vaultlearninggames.org').replace(/\/+$/, ''),
-    adminRepository: process.env.ADMIN_REPOSITORY ?? 'fielddaylab/vault-publisher',
+    adminRepository: process.env.ADMIN_REPOSITORY ?? 'VaultLearningGames/vault-publisher',
     adminEnvironment: process.env.ADMIN_ENVIRONMENT ?? 'production',
     githubClientId: process.env.GITHUB_CLIENT_ID?.trim() || undefined,
     githubClientSecret: process.env.GITHUB_CLIENT_SECRET?.trim() || undefined,

@@ -130,15 +130,15 @@ permissions: { contents: read, id-token: write }
 jobs:
   build:
     if: github.event_name != 'delete'
-    uses: fielddaylab/vault-publisher/.github/workflows/unity-build.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/unity-build.yml@v1
     secrets: inherit          # UNITY_EMAIL, UNITY_PASSWORD, UNITY_SERIAL
   preview:
     needs: build
-    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
     with: { game: ${game}, artifact: "\${{ needs.build.outputs.artifact }}" }
   remove-preview:
     if: github.event_name == 'delete'
-    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
     with: { game: ${game} }
 # Publishes every branch and tag to https://cdn.vaultlearninggames-staging.org/${studio}/${game}/<branch>/`,
   committed: (studio: string, game: string) => `# .github/workflows/vault.yml
@@ -147,14 +147,14 @@ on: { push: {}, delete: {}, workflow_dispatch: {} }
 permissions: { contents: read, id-token: write }
 jobs:
   preview:
-    uses: fielddaylab/vault-publisher/.github/workflows/publish-preview.yml@v1
+    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
     with: { game: ${game}, path: WebGL }   # the folder that contains index.html
 # Publishes every branch and tag to https://cdn.vaultlearninggames-staging.org/${studio}/${game}/<branch>/`,
   action: (studio: string, game: string) => `# In an existing workflow, after your own build step:
     permissions: { contents: read, id-token: write }
     steps:
       # ... your build writes the web build to ./dist ...
-      - uses: fielddaylab/vault-publisher/action@v1
+      - uses: VaultLearningGames/vault-publisher/action@v1
         with:
           game: ${game}
           path: dist

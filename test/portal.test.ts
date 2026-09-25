@@ -6,13 +6,14 @@ import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db } from '../src/db.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import { signSession } from '../src/portal/session.ts';
-import type { Storage } from '../src/storage.ts';
+import { browseKeys, type Storage } from '../src/storage.ts';
 
 class FakeStorage implements Storage {
   objects = new Map<string, number>();
   data = new Map<string, Uint8Array>();
   async presignPut(key: string) { return `https://r2.test/${key}`; }
   async list(prefix: string) { return [...this.objects].filter(([k]) => k.startsWith(prefix)).map(([key, size]) => ({ key, size })); }
+  async browse(prefix: string) { return browseKeys(this.objects, prefix); }
   async deleteKeys(keys: string[]) { for (const k of keys) this.objects.delete(k); }
   async get(key: string) { return this.data.get(key) ?? new Uint8Array(this.objects.get(key)!); }
   async put(key: string, body: Readable | Uint8Array, size: number, _h: ObjectHeaders) {
@@ -182,6 +183,35 @@ describe('releasing from the web', () => {
     assert.equal(db.releaseRequest(id1)?.status, 'rejected');
     assert.equal((await mia.post(`/portal/api/requests/${id2}/withdraw`)).status, 200);
     assert.equal((await rita.post(`/portal/api/requests/${id2}/approve`, {})).status, 409);
+  });
+});
+
+describe('file browser', () => {
+  test('members browse their studio’s staging and production folders', async () => {
+    staging.objects.set('fieldday/aqualab/v1.0/Build/game.wasm.br', 2_000_000);
+    staging.objects.set('ucalgary/tq/develop/index.html', 5);
+    const mia = as('mia', 'none', 'viewer');
+    const root = await (await mia.get('/s/fieldday/files')).text();
+    assert.match(root, /aqualab\//);
+    assert.doesNotMatch(root, /ucalgary|tq\//);
+    const build = await (await mia.get('/s/fieldday/files?path=aqualab/v1.0/')).text();
+    assert.match(build, /Build\//);
+    assert.match(build, /index\.html/);
+    assert.match(build, /https:\/\/stg\.test\/fieldday\/aqualab\/v1\.0\/index\.html/);
+    const wasm = await (await mia.get('/s/fieldday/files?path=aqualab/v1.0/Build/')).text();
+    assert.match(wasm, /application\/wasm · br/);
+    assert.match(wasm, /1\.9 MB/);
+    const prodPage = await (await mia.get('/s/fieldday/files?env=production')).text();
+    assert.match(prodPage, /Nothing released to production yet/);
+  });
+
+  test('other studios and odd paths are refused', async () => {
+    const mia = as('mia', 'none', 'viewer');
+    assert.equal((await mia.get('/s/ucalgary/files')).status, 404);
+    assert.equal((await mia.get('/s/fieldday/files?path=../ucalgary/')).status, 404);
+    assert.equal((await mia.get('/s/fieldday/files?path=aqualab//')).status, 404);
+    const out = await app.request('/s/fieldday/files?path=aqualab/');
+    assert.equal(out.headers.get('location'), '/login?next=%2Fs%2Ffieldday%2Ffiles%3Fpath%3Daqualab%2F');
   });
 });
 

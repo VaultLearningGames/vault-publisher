@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createApp } from '../src/app.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db } from '../src/db.ts';
-import type { Storage } from '../src/storage.ts';
+import { browseKeys, type Storage } from '../src/storage.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import type { Readable } from 'node:stream';
 
@@ -29,6 +29,7 @@ class FakeStorage implements Storage {
   async list(prefix: string) {
     return [...this.objects].filter(([k]) => k.startsWith(prefix)).map(([key, size]) => ({ key, size }));
   }
+  async browse(prefix: string) { return browseKeys(this.objects, prefix); }
   async deleteKeys(keys: string[]) {
     for (const k of keys) this.objects.delete(k);
   }

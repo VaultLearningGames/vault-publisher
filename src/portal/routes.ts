@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import type { AppDeps } from '../app.ts';
 import { fail, jsonBody } from '../app.ts';
 import type { Build, Game, Membership, Release, StudioRole, Studio, User, VaultRole } from '../db.ts';
-import { isVersionName, sanitizeRefName } from '../paths.ts';
+import { headersFor, isSafeFilePath, isVersionName, sanitizeRefName } from '../paths.ts';
 import { escape, html, raw, type Html } from './html.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
@@ -95,6 +95,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
       <nav class="nav">
         ${cur ? html`
           <a href="/s/${cur.slug}" class="${active === 'studio' ? 'on' : ''}">Games</a>
+          <a href="/s/${cur.slug}/files" class="${active === 'files' ? 'on' : ''}">Files</a>
           <a href="/s/${cur.slug}/register" class="${active === 'register' ? 'on' : ''}">Register a game</a>
           <a href="/s/${cur.slug}/members" class="${active === 'members' ? 'on' : ''}">Members</a>` : ''}
         ${staff ? html`
@@ -210,7 +211,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   function signedIn(c: Context): User | Response {
     const u = currentUser(c);
     if (u) return u;
-    return c.redirect(`/login?next=${encodeURIComponent(c.req.path)}`);
+    const url = new URL(c.req.url);
+    return c.redirect(`/login?next=${encodeURIComponent(url.pathname + url.search)}`);
   }
   function studioFor(c: Context, u: User): Studio | Response {
     const s = db.studioBySlug(c.req.param('studio') ?? '');
@@ -334,6 +336,51 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     return page(c, s.name, body, { studio: s, active: 'studio' });
   });
 
+  // ---------- file browser ----------
+  // Read-only view of the studio's folder on the staging or production CDN, one folder level at a time.
+  app.get('/s/:studio/files', async (c) => {
+    const u = signedIn(c); if (u instanceof Response) return u;
+    const s = studioFor(c, u); if (s instanceof Response) return s;
+    const env = c.req.query('env') === 'production' ? 'production' : 'staging';
+    const store = env === 'production' ? deps.production : deps.staging;
+    const publicUrl = env === 'production' ? deps.prodPublicUrl : deps.stagingPublicUrl;
+    // `path` is relative to the studio folder: "" or "game/ref/Build/".
+    let path = c.req.query('path') ?? '';
+    if (path && !path.endsWith('/')) path += '/';
+    if (path && !isSafeFilePath(path.slice(0, -1))) return denied(c, 'That isn’t a valid folder.', 404);
+    const link = (p: string, e = env) => `/s/${s.slug}/files?${new URLSearchParams({ ...(e === 'production' ? { env: e } : {}), ...(p ? { path: p } : {}) })}`;
+    const parts = path.split('/').filter(Boolean);
+    const crumbs = html`<a href="${link('')}">${s.slug}</a>${parts.map((part, i) => html` / ${i === parts.length - 1 ? part : html`<a href="${link(parts.slice(0, i + 1).join('/') + '/')}">${part}</a>`}`)}`;
+    const toggle = html`<div class="seg" role="group" aria-label="Bucket">
+      <a href="${link(path, 'staging')}" class="${env === 'staging' ? 'on' : ''}">Staging</a>
+      <a href="${link(path, 'production')}" class="${env === 'production' ? 'on' : ''}">Production</a></div>`;
+    const title = html`Files`;
+    const sub = html`<span class="mono">${publicUrl}/${s.slug}/${path}</span>`;
+    if (!store) return page(c, 'Files', html`${head(title, sub, toggle, crumbs)}<div class="card"><p class="muted">Production isn’t configured on this server.</p></div>`, { studio: s, active: 'files' });
+
+    const prefix = `${s.slug}/${path}`;
+    const token = c.req.query('next') || undefined;
+    const listing = await store.browse(prefix, token);
+    const name = (key: string) => key.slice(prefix.length);
+    const kind = (key: string) => {
+      const h = headersFor(key);
+      return h.contentType.split(';')[0] + (h.contentEncoding ? ` · ${h.contentEncoding}` : '');
+    };
+    const rows = [
+      ...(parts.length ? [html`<tr><td colspan="5"><a href="${link(parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : '')}">↰ Up</a></td></tr>`] : []),
+      ...listing.folders.map((f) => html`<tr><td class="mono"><a href="${link(f.slice(s.slug.length + 1))}">📁 ${name(f)}</a></td><td class="muted">Folder</td><td class="r muted">—</td><td class="r muted">—</td><td></td></tr>`),
+      ...listing.files.map((f) => html`<tr><td class="mono">${name(f.key)}</td><td class="small muted">${kind(f.key)}</td><td class="r">${mb(f.size)}</td>
+        <td class="r small" title="${f.modified ?? ''}">${f.modified ? ago(f.modified) : '—'}</td>
+        <td class="r"><a href="${publicUrl}/${f.key}" target="_blank" rel="noopener" aria-label="Open ${name(f.key)}">Open ↗</a></td></tr>`),
+    ];
+    const empty = !listing.folders.length && !listing.files.length;
+    const more = listing.next ? html`<p><a class="btn" href="${link(path)}&amp;next=${encodeURIComponent(listing.next)}">Show more</a></p>` : '';
+    const body = html`${head(title, sub, toggle, crumbs)}
+      ${empty && !token ? html`<div class="card"><p class="muted">${parts.length ? 'This folder is empty.' : env === 'production' ? 'Nothing released to production yet.' : 'Nothing on staging yet.'}</p></div>`
+        : html`<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Type</th><th class="r">Size</th><th class="r">Modified</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>${more}`}`;
+    return page(c, 'Files', body, { studio: s, active: 'files' });
+  });
+
   // ---------- game page ----------
   app.get('/s/:studio/g/:game', (c) => {
     const u = signedIn(c); if (u instanceof Response) return u;
@@ -373,7 +420,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       <td class="small">${who(r.requested_by)} · ${ago(r.created_at)}${r.notes ? html`<br><span class="muted">“${r.notes}”</span>` : ''}${r.decision_note ? html`<br><span class="muted">Vault: “${r.decision_note}”</span>` : ''}</td>
       <td class="r">${r.status === 'requested' && release ? html`<a class="btn sm" href="/vault#req-${r.id}">Review</a>` : ''}
         ${r.status === 'requested' && (r.requested_by === actor(u) || canManageMembers(u, s)) ? html`<form data-api="/portal/api/requests/${r.id}/withdraw" data-confirm="Withdraw this request?"><button class="btn sm">Withdraw</button><span class="err"></span></form>` : ''}</td></tr>`);
-    const body = html`${head(g.slug, html`<a href="https://github.com/${g.repository}">${g.repository}</a> · classrooms play <a href="${stable}" target="_blank" rel="noopener">${stable}</a>`, '', html`<a href="/s/${s.slug}">${s.name}</a> / ${g.slug}`)}
+    const body = html`${head(g.slug, html`<a href="https://github.com/${g.repository}">${g.repository}</a> · classrooms play <a href="${stable}" target="_blank" rel="noopener">${stable}</a>`, html`<a class="btn" href="/s/${s.slug}/files?path=${encodeURIComponent(g.slug + '/')}">Browse files</a>`, html`<a href="/s/${s.slug}">${s.name}</a> / ${g.slug}`)}
       <div class="grid g-main">
         <div class="grid">
           <div class="card"><h2>Staging · test versions <small>every branch and tag your builds publish · kept 90 days after the last push</small></h2>

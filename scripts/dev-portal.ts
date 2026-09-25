@@ -5,13 +5,14 @@ import type { Readable } from 'node:stream';
 import { createApp } from '../src/app.ts';
 import { Db } from '../src/db.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
-import type { Storage } from '../src/storage.ts';
+import { browseKeys, type Storage } from '../src/storage.ts';
 
 class MemoryStorage implements Storage {
   objects = new Map<string, Uint8Array>();
   async presignPut(key: string) { return `memory://${key}`; }
   async list(prefix: string) { return [...this.objects].filter(([k]) => k.startsWith(prefix)).map(([key, v]) => ({ key, size: v.byteLength })); }
   async deleteKeys(keys: string[]) { for (const k of keys) this.objects.delete(k); }
+  async browse(prefix: string) { return browseKeys([...this.objects].map(([k, v]) => [k, v.byteLength] as [string, number]), prefix); }
   async get(key: string) { return this.objects.get(key)!; }
   async put(key: string, body: Readable | Uint8Array, _size: number, _h: ObjectHeaders) {
     this.objects.set(key, body instanceof Uint8Array ? body : new Uint8Array(Buffer.concat(await (body as Readable).toArray())));
@@ -40,7 +41,8 @@ for (const [slug, repo, builds] of seed) {
     const id = `${slug}-${ref}`;
     db.createUpload({ id, game_id: g.id, ref_name: ref, ref_type: type, commit_sha: sha + '0'.repeat(33), actor: 'fielddaylab-ci', manifest: [], expires_at: '2999-01-01' });
     db.upsertBuild(db.upload(id)!, files, bytes);
-    staging.objects.set(`fieldday/${slug}/${ref}/index.html`, new TextEncoder().encode(`<h1>${slug} ${ref}</h1>`));
+    for (const f of ['index.html', 'Build/game.loader.js', 'Build/game.framework.js.br', 'Build/game.wasm.br', 'Build/game.data.br', 'TemplateData/style.css', 'TemplateData/favicon.ico'])
+      staging.objects.set(`fieldday/${slug}/${ref}/${f}`, new TextEncoder().encode(f === 'index.html' ? `<h1>${slug} ${ref}</h1>` : 'x'.repeat(f.includes('data') ? 4096 : 512)));
   }
 }
 const wake = db.game(fd.id, 'wake')!;

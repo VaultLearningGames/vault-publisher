@@ -12,7 +12,10 @@ name: Unity WebGL preview
 #     webgl:
 #       uses: VaultLearningGames/vault-publisher/.github/workflows/unity-webgl.yml@v1
 #       with: { game: aqualab }
-#       secrets: inherit
+#       secrets:                # explicit: `secrets: inherit` doesn't cross GitHub orgs
+#         UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+#         UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+#         UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
 on:
   workflow_call:
     inputs:

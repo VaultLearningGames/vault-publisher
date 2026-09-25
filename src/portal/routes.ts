@@ -131,7 +131,10 @@ jobs:
   build:
     if: github.event_name != 'delete'
     uses: VaultLearningGames/vault-publisher/.github/workflows/unity-build.yml@v1
-    secrets: inherit          # UNITY_EMAIL, UNITY_PASSWORD, UNITY_SERIAL
+    secrets:                  # explicit: \`secrets: inherit\` doesn't cross GitHub orgs
+      UNITY_EMAIL: "\${{ secrets.UNITY_EMAIL }}"
+      UNITY_PASSWORD: "\${{ secrets.UNITY_PASSWORD }}"
+      UNITY_SERIAL: "\${{ secrets.UNITY_SERIAL }}"
   preview:
     needs: build
     uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1

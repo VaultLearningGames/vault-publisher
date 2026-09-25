@@ -50,7 +50,10 @@ jobs:
   webgl:
     uses: VaultLearningGames/vault-publisher/.github/workflows/unity-webgl.yml@v1
     with: { game: aqualab }
-    secrets: inherit
+    secrets:                  # passed explicitly: `secrets: inherit` doesn't cross GitHub orgs
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
 ```
 
 Split, so other jobs can use the same build (e.g. an existing deploy that should keep running):
@@ -60,7 +63,10 @@ jobs:
   build:
     if: github.event_name != 'delete'
     uses: VaultLearningGames/vault-publisher/.github/workflows/unity-build.yml@v1
-    secrets: inherit
+    secrets:                  # passed explicitly: `secrets: inherit` doesn't cross GitHub orgs
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
   preview:
     needs: build
     uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
@@ -108,6 +114,10 @@ this repo as a submodule.
 
 [VaultLearningGames/vault-publisher-test](https://github.com/VaultLearningGames/vault-publisher-test) is a working example that
 uses a seconds-long simulated Unity build.
+
+**Unity secrets:** pass `UNITY_EMAIL`, `UNITY_PASSWORD` and `UNITY_SERIAL` explicitly as above. `secrets: inherit`
+only works when the calling repository is in the same GitHub organization as this one (VaultLearningGames), so it
+silently passes nothing from studio organizations and the build fails with "Missing Unity License File".
 
 ## Releasing to classrooms (production)
 

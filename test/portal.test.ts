@@ -237,3 +237,14 @@ describe('user management', () => {
     assert.equal((await as('rita', 'release_manager').post(`/portal/api/vault/users/${me.id}/role`, { role: 'none' })).status, 403);
   });
 });
+
+describe('portal address', () => {
+  test('browsers on the default run.app address go to the portal address; the API still answers there', async () => {
+    const page = await app.request('https://vault-publisher-abc-uc.a.run.app/s/fieldday?x=1', { headers: { host: 'vault-publisher-abc-uc.a.run.app' } });
+    assert.equal(page.status, 301);
+    assert.equal(page.headers.get('location'), 'https://portal.test/s/fieldday?x=1');
+    const api = await app.request('https://vault-publisher-abc-uc.a.run.app/v1/releases/fieldday/aqualab', { headers: { host: 'vault-publisher-abc-uc.a.run.app' } });
+    assert.equal(api.status, 200);
+    assert.equal((await app.request('/health', { headers: { host: 'vault-publisher-abc-uc.a.run.app' } })).status, 200);
+  });
+});

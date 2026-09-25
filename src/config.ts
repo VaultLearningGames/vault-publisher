@@ -56,7 +56,7 @@ export function loadConfig(): Config {
     githubClientId: process.env.GITHUB_CLIENT_ID?.trim() || undefined,
     githubClientSecret: process.env.GITHUB_CLIENT_SECRET?.trim() || undefined,
     sessionSecret: process.env.SESSION_SECRET?.trim() || undefined,
-    portalUrl: (process.env.PORTAL_URL ?? 'https://vault-publisher-3rlcoyes6a-uc.a.run.app').replace(/\/+$/, ''),
+    portalUrl: (process.env.PORTAL_URL ?? 'https://portal.vaultlearninggames.org').replace(/\/+$/, ''),
     vaultAdmins: (process.env.VAULT_ADMINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     previewRetentionDays: Number(process.env.PREVIEW_RETENTION_DAYS ?? 90),
     taskInvokerEmail: required('TASK_INVOKER_EMAIL'),

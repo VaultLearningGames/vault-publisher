@@ -24,7 +24,7 @@ export interface PortalConfig {
   githubClientId?: string;
   githubClientSecret?: string;
   sessionSecret?: string;
-  // Public base URL of this service, used for the OAuth callback (e.g. https://…run.app).
+  // Public base URL of the portal, used for the OAuth callback (https://portal.vaultlearninggames.org).
   baseUrl: string;
   // GitHub logins that become Vault admins when they sign in (bootstrap).
   vaultAdmins: string[];
@@ -174,6 +174,18 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const callbackUrl = `${cfg.baseUrl.replace(/\/+$/, '')}/auth/callback`;
   const secure = cfg.baseUrl.startsWith('https://');
   const admins = new Set(cfg.vaultAdmins.map((l) => l.toLowerCase()));
+
+  // Browsers that reach the portal on the service's default *.run.app address are sent to the portal's
+  // real address (GitHub sign-in only returns there). The API and health check keep answering on both.
+  const canonical = new URL(cfg.baseUrl);
+  app.use('*', async (c, next) => {
+    const host = (c.req.header('host') ?? '').toLowerCase();
+    if (host.endsWith('.run.app') && host !== canonical.host && (c.req.method === 'GET' || c.req.method === 'HEAD')) {
+      const url = new URL(c.req.url);
+      return c.redirect(`${canonical.origin}${url.pathname}${url.search}`, 301);
+    }
+    return next();
+  });
 
   // Static assets, read once at startup.
   const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));

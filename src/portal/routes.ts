@@ -207,6 +207,9 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const roleIn = (u: User, s: Studio) => db.roleIn(s.id, u.login);
   const canView = (u: User, s: Studio) => isStaff(u) || !!roleIn(u, s);
   const canRequest = (u: User, s: Studio) => canRelease(u) || ['maintainer', 'admin'].includes(roleIn(u, s) ?? '');
+  // Switching between approved releases (make current / roll back): Vault release staff always; studio
+  // maintainers and admins unless Vault has frozen the game.
+  const canSwitch = (u: User, s: Studio, g: Game) => canRelease(u) || (!g.frozen_at && ['maintainer', 'admin'].includes(roleIn(u, s) ?? ''));
   const canManageMembers = (u: User, s: Studio) => isVaultAdmin(u) || roleIn(u, s) === 'admin';
   const navFor = (u: User, studio?: Studio): Nav => ({ user: u, studio, memberships: db.membershipsForLogin(u.login), allStudios: db.studios() });
   const actor = (u: User) => `user:${u.login}`;
@@ -415,16 +418,23 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       <td class="r">${release
         ? html`<button class="btn sm brass" data-open="release" data-ref="${b.ref_name}" data-type="${b.ref_type}">Release…</button>`
         : request ? html`<button class="btn sm" data-open="request" data-ref="${b.ref_name}" data-type="${b.ref_type}">Request release…</button>` : ''}</td></tr>`);
+    const switcher = canSwitch(u, s, g);
     const relRows = releases.map((r) => {
       const isCur = cur?.id === r.id;
+      const back = !!cur && cur.id > r.id;
+      const status = isCur ? pill('brass', '★ Current') : r.withdrawn_at ? html`<span title="${r.withdrawn_note ?? ''}">${pill('bad', 'Withdrawn')}</span>` : pill('off', 'Previous');
+      const actions: Html[] = [];
+      if (switcher && !isCur && !r.withdrawn_at) actions.push(html`<form data-api="${api}/promote" data-busy="Switching…" data-confirm="${back ? `Roll ${g.slug} back to ${r.version}? Classrooms get it immediately.` : `Make ${r.version} the version classrooms get?`}">
+          <input type="hidden" name="version" value="${r.version}"><button class="btn sm">${back ? 'Roll back to this' : 'Make current'}</button><span class="err" role="status" aria-live="polite"></span></form>`);
+      if (release && !isCur && !r.withdrawn_at) actions.push(html`<button class="btn sm" data-open="withdraw" data-ref="${r.version}">Withdraw…</button>`);
+      if (release && r.withdrawn_at) actions.push(html`<form data-api="${api}/withdraw" data-then="reload" data-confirm="Allow ${r.version} to be made current again?"><input type="hidden" name="ref" value="${r.version}"><input type="hidden" name="restore" value="1"><button class="btn sm">Restore</button><span class="err" role="status" aria-live="polite"></span></form>`);
       return html`<tr>
         <td class="mono">${r.version}</td>
-        <td>${isCur ? pill('brass', '★ Current') : pill('off', 'Previous')}</td>
+        <td>${status}${r.withdrawn_at && r.withdrawn_note ? html`<br><span class="small muted">“${r.withdrawn_note}”</span>` : ''}</td>
         <td class="small">from <span class="mono">${r.source_ref}</span>${r.commit_sha ? html` · <a class="mono" href="https://github.com/${g.repository}/commit/${r.commit_sha}">${r.commit_sha.slice(0, 7)}</a>` : ''}</td>
         <td class="small">${r.approved_at.slice(0, 10)} · ${who(r.approved_by)}</td>
         <td class="small"><a href="${deps.prodPublicUrl}/${s.slug}/${g.slug}/${r.version}/" target="_blank" rel="noopener">Play ↗</a></td>
-        <td class="r">${release && !isCur ? html`<form data-api="${api}/promote" data-busy="Switching…" data-confirm="${cur && cur.id > r.id ? `Roll ${g.slug} back to ${r.version}? Classrooms get it immediately.` : `Make ${r.version} the version classrooms get?`}">
-          <input type="hidden" name="version" value="${r.version}"><button class="btn sm">${cur && cur.id > r.id ? 'Roll back to this' : 'Make current'}</button><span class="err" role="status" aria-live="polite"></span></form>` : ''}</td></tr>`;
+        <td class="r"><div class="row-actions">${actions}</div></td></tr>`;
     });
     const reqRows = requests.map((r) => html`<tr>
       <td class="mono">${r.version}</td><td class="small">from <span class="mono">${r.ref}</span></td>
@@ -438,20 +448,30 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
           <div class="card"><h2>Staging · test versions <small>every branch and tag your builds publish · kept 90 days after the last push</small></h2>
             ${builds.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Version</th><th>Commit</th><th>Size</th><th>Published</th><th>Preview</th><th></th></tr></thead><tbody>${buildRows}</tbody></table></div>`
               : html`<p class="muted">Nothing on staging yet. Push to a branch once the workflow is in place (<a href="/s/${s.slug}/register">instructions</a>).</p>`}</div>
-          <div class="card"><h2>Production · released versions <small>immutable; only Vault can release, promote or roll back</small></h2>
+          <div class="card"><h2>Production · released versions <small>immutable; only Vault releases new versions${g.frozen_at ? '; frozen by Vault' : '; maintainers choose which approved version is current'}</small></h2>
             ${releases.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Release</th><th>Status</th><th>Built from</th><th>Approved</th><th>Link</th><th></th></tr></thead><tbody>${relRows}</tbody></table></div>`
               : html`<p class="muted">Nothing released yet.${request ? ' Choose “Request release” on a test version above.' : ''}</p>`}</div>
           ${requests.length ? html`<div class="card"><h2>Release requests</h2><div class="tbl-wrap"><table><thead><tr><th>Version</th><th>Build</th><th>Status</th><th>Requested</th><th></th></tr></thead><tbody>${reqRows}</tbody></table></div></div>` : ''}
         </div>
         <div class="grid" style="align-content:start">
           <div class="card"><h2>Live for classrooms</h2>${cur ? html`<div class="big-rel">${cur.version}</div><p class="small muted">approved ${cur.approved_at.slice(0, 10)} by ${who(cur.approved_by)}</p>` : html`<p class="muted">Nothing yet.</p>`}
-            <p class="small">Stable link (always the current release):<br><a class="mono" href="${stable}" target="_blank" rel="noopener">${stable}</a></p></div>
+            <p class="small">Stable link (always the current release):<br><a class="mono" href="${stable}" target="_blank" rel="noopener">${stable}</a></p>
+            ${g.frozen_at ? html`<p class="small">${pill('wait', 'Frozen')} by ${who(g.frozen_by ?? '')} ${ago(g.frozen_at)}${g.frozen_note ? html`: “${g.frozen_note}”` : ''}. Only Vault can change the current release.</p>` : ''}
+            ${release ? (g.frozen_at
+              ? html`<form data-api="${api}/freeze" data-then="reload" data-confirm="Let ${s.name} switch versions again?"><input type="hidden" name="frozen" value=""><button class="btn sm">Unfreeze</button><span class="err" role="status" aria-live="polite"></span></form>`
+              : html`<form data-api="${api}/freeze" data-then="reload" class="inline-form"><input type="hidden" name="frozen" value="1"><input name="note" required placeholder="Why (e.g. study until Dec 15)" aria-label="Reason for freezing"><button class="btn sm">Freeze</button><span class="err" role="status" aria-live="polite"></span></form>`) : ''}</div>
           <div class="card small"><h2>How releasing works</h2><ol class="tight">
             <li>Push a version tag (e.g. <code>v1.2</code>); it appears above as a test version.</li>
             <li>Test it on staging, then ${release ? html`choose <b>Release…</b>` : request ? html`choose <b>Request release…</b>` : 'a maintainer requests a release'}.</li>
-            <li>Vault copies that exact build to production and makes it current. Earlier releases stay available for rollback.</li></ol></div>
+            <li>Vault copies that exact build to production and makes it current. Earlier releases stay available for rollback.</li>
+            <li>Maintainers can switch between approved releases or roll back at any time, unless Vault has frozen the game or withdrawn a release.</li></ol></div>
         </div>
       </div>
+      ${release ? html`<dialog id="withdraw"><form data-api="${api}/withdraw" class="dlg" data-then="reload">
+        <h2>Withdraw a release</h2>
+        <p class="small"><b class="mono" data-fill="ref"></b> stays on production at its version link, but nobody can make it current again until Vault restores it.</p>
+        <input type="hidden" name="ref"><label class="field"><span>Why</span><input name="note" required placeholder="e.g. logs student names; fixed in 0.1.2"></label>
+        <div class="dlg-foot"><span class="err" role="status" aria-live="polite"></span><button type="button" class="btn" data-close>Cancel</button><button class="btn">Withdraw</button></div></form></dialog>` : ''}
       ${release ? html`<dialog id="release"><form data-api="${api}/release" class="dlg" data-then="reload" data-busy="Copying the build to production. This can take a few minutes; keep this page open.">
         <h2>Release to classrooms</h2>
         <p class="small">Copies the staging build <b class="mono" data-fill="ref"></b> to production. A version name can be used only once.</p>
@@ -565,9 +585,14 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
           <form data-api="/portal/api/requests/${r.id}/reject" data-then="reload" class="inline-form"><input name="note" placeholder="Why it’s being sent back" required aria-label="Reason"><button class="btn">Send back</button><span class="err" role="status" aria-live="polite"></span></form>
         </div>` : ''}</div>`;
     });
+    const switches = db.auditFor(['release.promote', 'release.rollback'], 10).map((a) => {
+      const d = a.detail_json ? JSON.parse(a.detail_json) as { from: string | null; to: string } : null;
+      return html`<tr><td>${a.target.replace(/\/$/, '')}</td><td>${a.action === 'release.rollback' ? pill('wait', 'Rolled back') : pill('ok', 'Made current')} <span class="mono">${d?.from ?? '—'} → ${d?.to ?? '?'}</span></td><td class="small">${who(a.actor)} · ${ago(a.at)}</td></tr>`;
+    });
     const hist = decided.map((r) => html`<tr><td>${r.studio_slug}/${r.game_slug}</td><td class="mono">${r.version}</td><td>${r.status === 'approved' ? pill('ok', 'Approved') : r.status === 'rejected' ? pill('bad', 'Sent back') : pill('off', 'Withdrawn')}</td><td class="small">${r.decided_by ? who(r.decided_by) : '—'} · ${ago(r.decided_at)}</td></tr>`);
     const body = html`${head('Release requests', 'Studios ask for releases here. Test the staging build before approving; approval copies that exact build to production.')}
       ${open.length ? cards : html`<div class="card"><p class="muted">No open requests.</p></div>`}
+      ${switches.length ? html`<h3 class="sec">Recent version switches</h3><div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Change</th><th>By</th></tr></thead><tbody>${switches}</tbody></table></div>` : ''}
       ${hist.length ? html`<h3 class="sec">Recently decided</h3><div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Version</th><th>Decision</th><th>By</th></tr></thead><tbody>${hist}</tbody></table></div>` : ''}`;
     return page(c, 'Release requests', body, { active: 'vault' });
   });
@@ -611,9 +636,54 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
 
   app.post('/portal/api/s/:studio/g/:game/promote', async (c) => {
     const u = apiUser(c);
-    if (!canRelease(u)) fail(403, 'Only Vault release managers can change the current release.');
     const { studio, game } = apiStudioGame(c, u);
+    if (!canSwitch(u, studio, game)) {
+      fail(403, game.frozen_at && roleIn(u, studio) && roleIn(u, studio) !== 'viewer'
+        ? `Vault has frozen ${game.slug}${game.frozen_note ? ` (${game.frozen_note})` : ''}; ask Vault to change the current release.`
+        : 'Only maintainers can change the current release.');
+    }
     return c.json({ ok: true, ...(await deps.promoteRelease(studio, game, versionOf((await jsonBody(c)).version), actor(u))) });
+  });
+
+  // Vault: withdraw a release so it can't be made current (or restore it). Body: { ref: version, note, restore? }
+  app.post('/portal/api/s/:studio/g/:game/withdraw', async (c) => {
+    const u = apiUser(c);
+    if (!canRelease(u)) fail(403, 'Only Vault release managers can withdraw releases.');
+    const { studio, game } = apiStudioGame(c, u);
+    const b = await jsonBody(c);
+    const r = db.release(game.id, versionOf(b.ref));
+    if (!r) fail(404, 'unknown release');
+    const target = `${studio.slug}/${game.slug}/${r.version}`;
+    if (b.restore) {
+      db.setWithdrawn(r.id, null, null);
+      db.audit(actor(u), 'release.restore', target);
+    } else {
+      if (db.currentRelease(game.id)?.id === r.id) fail(409, `${r.version} is current. Make another release current first.`);
+      const note = typeof b.note === 'string' ? b.note.trim().slice(0, 300) : '';
+      if (!note) fail(400, 'Say why it’s being withdrawn; the studio sees this.');
+      db.setWithdrawn(r.id, actor(u), note);
+      db.audit(actor(u), 'release.withdraw', target, { note });
+    }
+    return c.json({ ok: true });
+  });
+
+  // Vault: freeze a game so only Vault can switch its current release (e.g. during a study). Body: { frozen, note }
+  app.post('/portal/api/s/:studio/g/:game/freeze', async (c) => {
+    const u = apiUser(c);
+    if (!canRelease(u)) fail(403, 'Only Vault release managers can freeze games.');
+    const { studio, game } = apiStudioGame(c, u);
+    const b = await jsonBody(c);
+    const target = `${studio.slug}/${game.slug}/`;
+    if (b.frozen) {
+      const note = typeof b.note === 'string' ? b.note.trim().slice(0, 300) : '';
+      if (!note) fail(400, 'Say why it’s frozen; the studio sees this.');
+      db.setFrozen(game.id, actor(u), note);
+      db.audit(actor(u), 'game.freeze', target, { note });
+    } else {
+      db.setFrozen(game.id, null, null);
+      db.audit(actor(u), 'game.unfreeze', target);
+    }
+    return c.json({ ok: true });
   });
 
   app.post('/portal/api/s/:studio/g/:game/request', async (c) => {

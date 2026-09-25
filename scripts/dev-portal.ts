@@ -47,7 +47,9 @@ for (const [slug, repo, builds] of seed) {
   }
 }
 const wake = db.game(fd.id, 'wake')!;
+db.createRelease({ game_id: wake.id, version: 'm3.0', source_ref: 'production', commit_sha: '71c2a90' + '0'.repeat(33), file_count: 208, total_bytes: 138_000_000, approved_by: 'user:boss' });
 db.createRelease({ game_id: wake.id, version: 'm3.1', source_ref: 'production', commit_sha: '9ac0e21' + '0'.repeat(33), file_count: 210, total_bytes: 141_000_000, approved_by: 'user:boss' });
+db.setWithdrawn(db.release(wake.id, 'm3.0')!.id, 'user:boss', 'Sends student names to the log server; fixed in m3.1');
 db.setCurrentRelease(wake.id, db.release(wake.id, 'm3.1')!.id);
 db.createReleaseRequest({ game_id: wake.id, ref: 'm3.2', version: 'm3.2', notes: 'New kelp job; fixes the iPad save bug.', requested_by: 'user:mia' });
 db.setMembership(fd.id, 'mia', 'maintainer', 'user:boss');

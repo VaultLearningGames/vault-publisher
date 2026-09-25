@@ -172,6 +172,7 @@ export function createApp(deps: AppDeps) {
     const production = productionStorage();
     const release = db.release(game.id, version);
     if (!release) fail(404, `${version} hasn't been approved for ${studio.slug}/${game.slug}`);
+    if (release.withdrawn_at) fail(409, `${version} was withdrawn by Vault${release.withdrawn_note ? `: ${release.withdrawn_note}` : ''}. Restore it before making it current.`);
     const previous = db.currentRelease(game.id);
     const gamePrefix = `${studio.slug}/${game.slug}/`;
     await writePointer(production, gamePrefix, version, game.slug);

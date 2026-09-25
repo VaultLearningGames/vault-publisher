@@ -385,3 +385,5 @@ button[aria-busy=true] { opacity: .6; cursor: progress; }
   .g-main { grid-template-columns: minmax(0, 1fr); }
   .req-actions input[name=note] { min-width: 0; width: 100%; }
 }
+
+.row-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }

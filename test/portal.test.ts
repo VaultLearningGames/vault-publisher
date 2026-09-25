@@ -160,7 +160,7 @@ describe('releasing from the web', () => {
   test('studio members can’t release, and requests need the portal header', async () => {
     const mia = as('mia', 'none', 'admin');
     assert.equal((await mia.post(`${G}/release`, { ref: 'v1.0', version: 'v1.0' })).status, 403);
-    assert.equal((await mia.post(`${G}/promote`, { version: 'v1.0' })).status, 403);
+    assert.equal((await as('vera', 'none', 'viewer').post(`${G}/promote`, { version: 'v1.0' })).status, 403);
     assert.equal((await as('vera', 'none', 'viewer').post(`${G}/request`, { ref: 'v1.0', version: 'v1.0' })).status, 403);
     assert.equal((await as('rita', 'release_manager').post(`${G}/release`, { ref: 'v1.0', version: 'v1.0' }, {})).status, 403);
   });
@@ -212,6 +212,61 @@ describe('file browser', () => {
     assert.equal((await mia.get('/s/fieldday/files?path=aqualab//')).status, 404);
     const out = await app.request('/s/fieldday/files?path=aqualab/');
     assert.equal(out.headers.get('location'), '/login?next=%2Fs%2Ffieldday%2Ffiles%3Fpath%3Daqualab%2F');
+  });
+});
+
+describe('studios switching approved releases', () => {
+  async function twoReleases() {
+    const rita = as('rita', 'release_manager');
+    await rita.post(`${G}/release`, { ref: 'v1.0', version: 'v1.0', makeCurrent: true });
+    await rita.post(`${G}/release`, { ref: 'v1.1', version: 'v1.1', makeCurrent: true });
+    return rita;
+  }
+  const current = () => db.currentRelease(db.game(db.studioBySlug('fieldday')!.id, 'aqualab')!.id)?.version;
+
+  test('maintainers roll back and forward; viewers can’t', async () => {
+    await twoReleases();
+    const mia = as('mia', 'none', 'maintainer');
+    const back = await mia.post(`${G}/promote`, { version: 'v1.0' });
+    assert.equal(back.status, 200);
+    assert.equal(((await back.json()) as any).rollback, true);
+    assert.equal(current(), 'v1.0');
+    assert.equal((await as('vera', 'none', 'viewer').post(`${G}/promote`, { version: 'v1.1' })).status, 403);
+    assert.equal((await mia.post(`${G}/promote`, { version: 'v9' })).status, 404); // only approved versions
+    assert.match(await (await as('boss', 'admin').get('/vault')).text(), /Rolled back[\s\S]*v1\.1 → v1\.0[\s\S]*mia/);
+    assert.match(await (await mia.get('/s/fieldday/g/aqualab')).text(), /Make current/);
+    assert.doesNotMatch(await (await mia.get('/s/fieldday/g/aqualab')).text(), /Withdraw…|>Freeze</);
+  });
+
+  test('Vault withdraws a release so nobody can make it current', async () => {
+    const rita = await twoReleases();
+    assert.equal((await rita.post(`${G}/withdraw`, { ref: 'v1.1', note: 'x' })).status, 409); // current
+    assert.equal((await rita.post(`${G}/withdraw`, { ref: 'v1.0' })).status, 400);            // needs a reason
+    const mia = as('mia', 'none', 'admin');
+    assert.equal((await mia.post(`${G}/withdraw`, { ref: 'v1.0', note: 'x' })).status, 403);
+    assert.equal((await rita.post(`${G}/withdraw`, { ref: 'v1.0', note: 'logs names' })).status, 200);
+    const refused = await mia.post(`${G}/promote`, { version: 'v1.0' });
+    assert.equal(refused.status, 409);
+    assert.match(((await refused.json()) as any).error, /withdrawn by Vault: logs names/);
+    assert.equal((await rita.post(`${G}/promote`, { version: 'v1.0' })).status, 409); // Vault too, until restored
+    assert.match(await (await mia.get('/s/fieldday/g/aqualab')).text(), /Withdrawn[\s\S]*logs names/);
+    assert.equal((await rita.post(`${G}/withdraw`, { ref: 'v1.0', restore: '1' })).status, 200);
+    assert.equal((await mia.post(`${G}/promote`, { version: 'v1.0' })).status, 200);
+  });
+
+  test('a frozen game can only be switched by Vault', async () => {
+    const rita = await twoReleases();
+    assert.equal((await rita.post(`${G}/freeze`, { frozen: '1' })).status, 400);
+    assert.equal((await rita.post(`${G}/freeze`, { frozen: '1', note: 'study until Dec 15' })).status, 200);
+    const mia = as('mia', 'none', 'maintainer');
+    const refused = await mia.post(`${G}/promote`, { version: 'v1.0' });
+    assert.equal(refused.status, 403);
+    assert.match(((await refused.json()) as any).error, /frozen aqualab \(study until Dec 15\)/);
+    assert.match(await (await mia.get('/s/fieldday/g/aqualab')).text(), /Frozen[\s\S]*study until Dec 15/);
+    assert.equal((await mia.post(`${G}/freeze`, { frozen: '' })).status, 403);
+    assert.equal((await rita.post(`${G}/promote`, { version: 'v1.0' })).status, 200);
+    assert.equal((await rita.post(`${G}/freeze`, { frozen: '' })).status, 200);
+    assert.equal((await mia.post(`${G}/promote`, { version: 'v1.1' })).status, 200);
   });
 });
 

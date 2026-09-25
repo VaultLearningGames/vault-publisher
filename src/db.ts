@@ -126,6 +126,16 @@ const MIGRATIONS = [
     decided_at    TEXT
   );
   `,
+  // v4: studios switch between approved releases themselves; Vault can withdraw a release (never current again)
+  // or freeze a game (only Vault can switch it, e.g. during a study).
+  `
+  ALTER TABLE releases ADD COLUMN withdrawn_at TEXT;
+  ALTER TABLE releases ADD COLUMN withdrawn_by TEXT;
+  ALTER TABLE releases ADD COLUMN withdrawn_note TEXT;
+  ALTER TABLE games ADD COLUMN frozen_at TEXT;
+  ALTER TABLE games ADD COLUMN frozen_by TEXT;
+  ALTER TABLE games ADD COLUMN frozen_note TEXT;
+  `,
 ];
 
 export interface Studio {
@@ -142,6 +152,9 @@ export interface Game {
   slug: string;
   repository: string;
   repository_id: string;
+  frozen_at?: string | null;
+  frozen_by?: string | null;
+  frozen_note?: string | null;
 }
 
 export interface ManifestFile {
@@ -185,6 +198,9 @@ export interface Release {
   total_bytes: number;
   approved_by: string;
   approved_at: string;
+  withdrawn_at?: string | null;
+  withdrawn_by?: string | null;
+  withdrawn_note?: string | null;
 }
 
 export type VaultRole = 'none' | 'release_manager' | 'admin';
@@ -393,6 +409,18 @@ export class Db {
     this.sqlite.prepare('UPDATE games SET current_release_id = ?, promoted_at = ? WHERE id = ?').run(releaseId, now(), gameId);
   }
 
+  // Withdraw (by + note) or restore (null) a release.
+  setWithdrawn(releaseId: number, by: string | null, note: string | null) {
+    this.sqlite.prepare('UPDATE releases SET withdrawn_at = ?, withdrawn_by = ?, withdrawn_note = ? WHERE id = ?')
+      .run(by ? now() : null, by, by ? note : null, releaseId);
+  }
+
+  // Freeze (by + note) or unfreeze (null) a game's current release.
+  setFrozen(gameId: number, by: string | null, note: string | null) {
+    this.sqlite.prepare('UPDATE games SET frozen_at = ?, frozen_by = ?, frozen_note = ? WHERE id = ?')
+      .run(by ? now() : null, by, by ? note : null, gameId);
+  }
+
   // ----- portal: studios, games, builds -----
   studios(): Studio[] {
     return this.sqlite.prepare('SELECT * FROM studios ORDER BY name').all() as unknown as Studio[];
@@ -503,6 +531,11 @@ export class Db {
     return this.sqlite.prepare('SELECT at, actor, action, target FROM audit_log ORDER BY id DESC LIMIT ?').all(limit) as unknown as {
       at: string; actor: string; action: string; target: string;
     }[];
+  }
+
+  auditFor(actions: string[], limit = 10): { at: string; actor: string; action: string; target: string; detail_json: string | null }[] {
+    return this.sqlite.prepare(`SELECT at, actor, action, target, detail_json FROM audit_log WHERE action IN (${actions.map(() => '?').join(',')}) ORDER BY id DESC LIMIT ?`)
+      .all(...actions, limit) as unknown as { at: string; actor: string; action: string; target: string; detail_json: string | null }[];
   }
 
   audit(actor: string, action: string, target: string, detail?: unknown) {

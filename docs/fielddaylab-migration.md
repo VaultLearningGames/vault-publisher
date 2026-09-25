@@ -18,7 +18,7 @@ All of these currently build with game-ci and rsync to DoIT. Each gets the same 
 | Aqualab | `wake` | 2019.4.40f1 | `production` | 2026-02-13 | `/play/wake/ci/{production,develop,staging}` | `play/wake` | To do |
 | Bloom | `bloom` | 2021.3.40f1 | `production` (live game) | 2025-01-15 | `/play/bloom/ci/{production,develop,staging}` | `play/bloom` | To do |
 | Headlines | `journalism-unity` | 2019.4.34f1 | `production` | 2025-01-15 | `/play/headlines/ci/{production,develop,main,staging}` | `play/headlines` | To do |
-| Project Hercules (`hercules`) | `project-hercules` | 2022.3.47f1 | `production` | 2025-10-07 | `/play/astrogame/ci/{production,develop,staging}` | `play/projecthercules` | To do |
+| Project Hercules (`project-hercules`) | `project-hercules` | 2022.3.47f1 | `production` | 2025-10-07 | `/play/astrogame/ci/{production,develop,staging}` | `play/projecthercules` | To do |
 | The Legend of the Lost Emerald | `lost_emerald` | 2019.4.26f1 | `production` | 2025-01-15 | `/play/emerald/ci/{production,master,staging}` | `play/emerald` | To do |
 | Spacefab | `spacefab` | 2022.3.62f3 | `develop` (no release branch) | 2026-09-24 | `/play/spacefab/ci/develop` | — | Pilot ✅ ([#2](https://github.com/fielddaylab/spacefab/pull/2) open) |
 | Airborne | `airborne-prototype` | 2022.3.62f3 | `develop` | 2026-09-22 | `/play/airborne-prototype/ci/develop` | — | Pilot ✅ ([#2](https://github.com/fielddaylab/airborne-prototype/pull/2) open) |
@@ -77,10 +77,11 @@ on the publisher yet, so the upload goes through an admin-only path.
 | GitHub repo | CDN / DoIT name |
 |---|---|
 | `journalism-unity` | `headlines` |
-| `project-hercules` | `hercules` (DoIT path was `astrogame`; site page is `play/projecthercules`) |
 | `lost_emerald` | `emerald` |
 | `jo_wilder` | `jowilder` |
 | `the-yard` | `yardgames` |
+
+The CDN name `project-hercules` matches its repo (DoIT's old `astrogame` path will redirect to it).
 
 Renames are safe at any time: the publisher matches repositories by numeric id, and GitHub redirects old URLs and
 submodule links.

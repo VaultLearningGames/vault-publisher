@@ -25,9 +25,6 @@ All of these currently build with game-ci and rsync to DoIT. Each gets the same 
 | AIS | `ais-prototype` | 2022.3.62f3 | `develop` | 2026-08-10 | `/play/ais-prototype/ci/develop` | — | Pilot ✅ ([#3](https://github.com/fielddaylab/ais-prototype/pull/3) open) |
 | Spacefab prototype | `spacefab-prototype` | 2022.3.62f3 | `develop` | 2026-04-14 | `/play/spacefab-prototype/ci/develop` | — | To do |
 | Astrolab prototype | `astrolab-prototype` | 2021.3.27f1 | `develop` | 2024-09-30 | `/play/astrolab-prototype/ci/develop` | — | To do |
-| Censio: Stack | `censio-stack` | 2021.3.29f1 | `develop` | 2024-07-30 | `/play/censio-stack/ci/{develop,staging}` | — | To do |
-| Censio: Match | `censio-match` | 2021.3.29f1 | `develop` | 2024-07-30 | `/play/censio-match/ci/{develop,staging}` | — | To do |
-| Censio: Slide | `censio-slide` | 2021.3.23f1 | `develop` | 2024-07-26 | `/play/censio-slide/ci/{develop,staging}` | — | To do |
 | Art testbed | `art-testbed` | 2022.3.47f1 | `develop` | 2024-10-24 | `/play/art-testbed/ci/develop` | — | To do |
 
 Notes:
@@ -69,7 +66,7 @@ on the publisher yet, so the upload goes through an admin-only path.
 |---|---|
 | Waddle (`Waddle`), On the Ice: Hatched (`pennycookvr`), On the Ice: Weather Station (`weather-station`) | VR; not hosted on the CDN. |
 | Discover IceCube (`ICECUBEVR`, `DiscoverIceCube`) | VR; no web build or CI. |
-| Zavala prototype (`zavala-prototype`), Mashopolis | Dead projects; not moving. |
+| Zavala prototype (`zavala-prototype`), Mashopolis, Censio (`censio-stack`, `censio-match`, `censio-slide`) | Not moving. |
 | Atom Touch (`atomtouch`) | Mobile app (App Store / Google Play). |
 | Lost Emerald simulations (carbon-sim, currents, food-webs, force-fields, living-cell, plant-growth, plate-tectonics, rock-sim, water-sim) | Link to PBS Wisconsin. |
 | The Station: Maine | Links to mmsa.org. |

@@ -15,14 +15,14 @@ All of these currently build with game-ci and rsync to DoIT. Each gets the same 
 
 | Game | Repo | Unity | Branch to put on staging | Latest commit on it | DoIT today | Site page | Status |
 |---|---|---|---|---|---|---|---|
-| Aqualab | `wake` | 2019.4.40f1 | `production` | 2026-02-13 | `/play/wake/ci/{production,develop,staging}` | `play/wake` | To do |
+| Aqualab | `wake` | 2019.4.40f1 | `production` | 2026-02-13 | `/play/wake/ci/{production,develop,staging}` | `play/wake` | PRs open: [#47](https://github.com/fielddaylab/wake/pull/47) → develop, [#48](https://github.com/fielddaylab/wake/pull/48) → production (both test builds passed) |
 | Bloom | `bloom` | 2021.3.40f1 | `production` (live game) | 2025-01-15 | `/play/bloom/ci/{production,develop,staging}` | `play/bloom` | To do |
 | Headlines | `headlines` | 2019.4.34f1 | `production` | 2025-01-15 | `/play/headlines/ci/{production,develop,main,staging}` | `play/headlines` | To do |
 | Project Hercules (`project-hercules`) | `project-hercules` | 2022.3.47f1 | `production` | 2025-10-07 | `/play/astrogame/ci/{production,develop,staging}` | `play/projecthercules` | To do |
 | The Legend of the Lost Emerald | `emerald` | 2019.4.26f1 | `production` | 2025-01-15 | `/play/emerald/ci/{production,master,staging}` | `play/emerald` | To do |
-| Spacefab | `spacefab` | 2022.3.62f3 | `develop` (no release branch) | 2026-09-24 | `/play/spacefab/ci/develop` | — | Pilot ✅ ([#2](https://github.com/fielddaylab/spacefab/pull/2) open) |
-| Airborne | `airborne-prototype` | 2022.3.62f3 | `develop` | 2026-09-22 | `/play/airborne-prototype/ci/develop` | — | Pilot ✅ ([#2](https://github.com/fielddaylab/airborne-prototype/pull/2) open) |
-| AIS | `ais-prototype` | 2022.3.62f3 | `develop` | 2026-08-10 | `/play/ais-prototype/ci/develop` | — | Pilot ✅ ([#3](https://github.com/fielddaylab/ais-prototype/pull/3) open) |
+| Spacefab | `spacefab` | 2022.3.62f3 | `develop` (no release branch) | 2026-09-24 | `/play/spacefab/ci/develop` | — | ✅ Done (develop on staging + DoIT) |
+| Airborne | `airborne-prototype` | 2022.3.62f3 | `develop` | 2026-09-22 | `/play/airborne-prototype/ci/develop` | — | ✅ Done (develop on staging + DoIT) |
+| AIS | `ais-prototype` | 2022.3.62f3 | `develop` | 2026-08-10 | `/play/ais-prototype/ci/develop` | — | ✅ Done (develop on staging + DoIT) |
 | Spacefab prototype | `spacefab-prototype` | 2022.3.62f3 | `develop` | 2026-04-14 | `/play/spacefab-prototype/ci/develop` | — | To do |
 | Astrolab prototype | `astrolab-prototype` | 2021.3.27f1 | `develop` | 2024-09-30 | `/play/astrolab-prototype/ci/develop` | — | To do |
 | Art testbed | `art-testbed` | 2022.3.47f1 | `develop` | 2024-10-24 | `/play/art-testbed/ci/develop` | — | To do |

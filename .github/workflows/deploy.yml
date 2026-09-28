@@ -71,6 +71,9 @@ jobs:
         region: ${{ vars.GCP_REGION }}
         project_id: ${{ vars.GCP_PROJECT_ID }}
         source: ./
+        # Replace rather than merge, so a revision never keeps variables or secrets removed from this list.
+        env_vars_update_strategy: overwrite
+        secrets_update_strategy: overwrite
         env_vars: |-
           R2_ACCOUNT_ID=${{ vars.R2_ACCOUNT_ID }}
           BUILDS_BUCKET=${{ vars.BUILDS_BUCKET }}

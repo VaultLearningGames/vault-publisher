@@ -1,7 +1,7 @@
 name: Publish preview
 
 # Reusable: publishes a build to the staging CDN at
-#   https://cdn.vaultlearninggames-staging.org/STUDIO/GAME/<branch or tag>/
+#   https://builds.vaultlearninggames.org/STUDIO/GAME/<branch or tag>/
 # The build comes from either
 #   - `artifact`: a workflow artifact from an earlier job (e.g. unity-build.yml), or
 #   - `path`: a folder committed to the repository (older games whose WebGL build is checked in).

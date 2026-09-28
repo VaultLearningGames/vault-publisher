@@ -1,19 +1,29 @@
 name: Deploy (Cloud Run)
 
-# Deploys main to the vault-publisher Cloud Run service in the same GCP project as fielddaysite.
-# One-time setup (secrets, service accounts, Litestream bucket, variables): docs/setup.md
+# Two separate systems run this same code, each with its own database, R2 buckets, secrets and GitHub OAuth app:
+#   main        → staging     vault-publisher-staging  https://portal.vaultlearninggames-staging.org
+#   production  → production  vault-publisher          https://portal.vaultlearninggames.org
+# Each GitHub environment ("staging", "production") holds that system's variables; Secret Manager secrets are
+# named after its service. One-time setup: docs/setup.md
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: System to deploy
+        type: choice
+        options: [staging, production]
+        default: staging
   push:
-    branches: [ main ]
+    branches: [ main, production ]
 
 jobs:
   deploy:
-    name: Deploy to Cloud Run
+    name: Deploy to Cloud Run (${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }})
     runs-on: ubuntu-latest
-    # Never run two deploys at once: only one instance may write the SQLite database.
+    environment: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
+    # Never run two deploys of one system at once: only one instance may write its SQLite database.
     concurrency:
-      group: ${{ github.workflow }}
+      group: ${{ github.workflow }}-${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
       cancel-in-progress: false
 
     permissions:
@@ -21,6 +31,24 @@ jobs:
       id-token: write
 
     steps:
+    # An environment falls back to repository variables for anything it doesn't set, so a missing staging
+    # variable would quietly pick up production's. Refuse to deploy unless every value belongs to this system.
+    - name: Check the variables belong to this system
+      env:
+        TARGET: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
+        SERVICE: ${{ vars.SERVICE }}
+        PUBLISHER_SERVICE_ACCOUNT: ${{ vars.PUBLISHER_SERVICE_ACCOUNT }}
+        VALUES: ${{ vars.BUILDS_BUCKET }} ${{ vars.BUILDS_PUBLIC_URL }} ${{ vars.CDN_BUCKET }} ${{ vars.CDN_PUBLIC_URL }} ${{ vars.PORTAL_URL }} ${{ vars.LITESTREAM_BUCKET }}
+      run: |
+        set -eu
+        case "$TARGET:$SERVICE" in production:vault-publisher|staging:vault-publisher-staging) ;; *) echo "::error::SERVICE is '$SERVICE' in the $TARGET environment"; exit 1 ;; esac
+        case "$PUBLISHER_SERVICE_ACCOUNT" in "$SERVICE"@*) ;; *) echo "::error::PUBLISHER_SERVICE_ACCOUNT '$PUBLISHER_SERVICE_ACCOUNT' isn't $SERVICE's"; exit 1 ;; esac
+        [ "$(echo $VALUES | wc -w)" -eq 6 ] || { echo "::error::a bucket, URL or LITESTREAM_BUCKET variable is missing"; exit 1; }
+        for v in $VALUES; do
+          case "$TARGET:$v" in staging:*staging*|production:*) ;; *) echo "::error::$v isn't a staging value"; exit 1 ;; esac
+          case "$TARGET:$v" in production:*staging*) echo "::error::$v is a staging value"; exit 1 ;; esac
+        done
+
     - uses: actions/checkout@v7
 
     - uses: actions/setup-node@v7
@@ -39,23 +67,30 @@ jobs:
       id: deploy
       uses: google-github-actions/deploy-cloudrun@v3
       with:
-        service: vault-publisher
+        service: ${{ vars.SERVICE }}
         region: ${{ vars.GCP_REGION }}
         project_id: ${{ vars.GCP_PROJECT_ID }}
         source: ./
         env_vars: |-
           R2_ACCOUNT_ID=${{ vars.R2_ACCOUNT_ID }}
+          BUILDS_BUCKET=${{ vars.BUILDS_BUCKET }}
+          BUILDS_PUBLIC_URL=${{ vars.BUILDS_PUBLIC_URL }}
+          CDN_BUCKET=${{ vars.CDN_BUCKET }}
+          CDN_PUBLIC_URL=${{ vars.CDN_PUBLIC_URL }}
+          PORTAL_URL=${{ vars.PORTAL_URL }}
+          ADMIN_ENVIRONMENT=${{ vars.ADMIN_ENVIRONMENT }}
           LITESTREAM_BUCKET=${{ vars.LITESTREAM_BUCKET }}
+          LITESTREAM_SEED_BUCKET=${{ vars.LITESTREAM_SEED_BUCKET }}
           TASK_INVOKER_EMAIL=${{ vars.TASK_INVOKER_EMAIL }}
           GITHUB_CLIENT_ID=${{ vars.PORTAL_GITHUB_CLIENT_ID }}
           VAULT_ADMINS=${{ vars.VAULT_ADMINS }}
         secrets: |-
-          R2_ACCESS_KEY_ID=vault-publisher-r2-access-key-id:latest
-          R2_SECRET_ACCESS_KEY=vault-publisher-r2-secret-access-key:latest
-          R2_PROD_ACCESS_KEY_ID=vault-publisher-r2-prod-access-key-id:latest
-          R2_PROD_SECRET_ACCESS_KEY=vault-publisher-r2-prod-secret-access-key:latest
-          GITHUB_CLIENT_SECRET=vault-portal-github-client-secret:latest
-          SESSION_SECRET=vault-portal-session-secret:latest
+          R2_BUILDS_ACCESS_KEY_ID=${{ vars.SERVICE }}-r2-builds-access-key-id:latest
+          R2_BUILDS_SECRET_ACCESS_KEY=${{ vars.SERVICE }}-r2-builds-secret-access-key:latest
+          R2_CDN_ACCESS_KEY_ID=${{ vars.SERVICE }}-r2-cdn-access-key-id:latest
+          R2_CDN_SECRET_ACCESS_KEY=${{ vars.SERVICE }}-r2-cdn-secret-access-key:latest
+          GITHUB_CLIENT_SECRET=${{ vars.SERVICE }}-github-client-secret:latest
+          SESSION_SECRET=${{ vars.SERVICE }}-session-secret:latest
         # Exactly one instance: SQLite has a single writer, and it stays warm so Litestream isn't restoring on every request.
         flags: >-
           --service-account=${{ vars.PUBLISHER_SERVICE_ACCOUNT }}

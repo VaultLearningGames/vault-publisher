@@ -5,11 +5,13 @@ export interface Config {
   // Audience GitHub Actions must request for their OIDC token.
   oidcAudience: string;
   r2AccountId: string;
+  // The builds bucket (BUILDS_*) holds studios' test builds; the CDN bucket (CDN_*) holds releases.
+  // Internally these are still "staging" and "prod"; they are not the staging and production systems.
   r2AccessKeyId: string;
   r2SecretAccessKey: string;
   stagingBucket: string;
   stagingPublicUrl: string;
-  // Production is optional so the service still runs (staging only) until its key exists.
+  // The CDN key is optional so the service still runs (builds only) until it exists.
   prodAccessKeyId?: string;
   prodSecretAccessKey?: string;
   prodBucket: string;
@@ -43,20 +45,22 @@ export function loadConfig(): Config {
     studiosFile: process.env.STUDIOS_FILE ?? 'studios.json',
     oidcAudience: process.env.OIDC_AUDIENCE ?? 'vault-publisher',
     r2AccountId: required('R2_ACCOUNT_ID'),
-    r2AccessKeyId: required('R2_ACCESS_KEY_ID'),
-    r2SecretAccessKey: required('R2_SECRET_ACCESS_KEY'),
-    stagingBucket: process.env.STAGING_BUCKET ?? 'cdn-vaultlearninggames-staging',
-    stagingPublicUrl: (process.env.STAGING_PUBLIC_URL ?? 'https://cdn.vaultlearninggames-staging.org').replace(/\/+$/, ''),
-    prodAccessKeyId: process.env.R2_PROD_ACCESS_KEY_ID?.trim() || undefined,
-    prodSecretAccessKey: process.env.R2_PROD_SECRET_ACCESS_KEY?.trim() || undefined,
-    prodBucket: process.env.PROD_BUCKET ?? 'cdn-vaultlearninggames',
-    prodPublicUrl: (process.env.PROD_PUBLIC_URL ?? 'https://cdn.vaultlearninggames.org').replace(/\/+$/, ''),
+    // No defaults for buckets or URLs: the production and staging systems run the same image, and a
+    // missing variable must stop the service rather than point it at the other system's buckets.
+    r2AccessKeyId: required('R2_BUILDS_ACCESS_KEY_ID'),
+    r2SecretAccessKey: required('R2_BUILDS_SECRET_ACCESS_KEY'),
+    stagingBucket: required('BUILDS_BUCKET'),
+    stagingPublicUrl: required('BUILDS_PUBLIC_URL').replace(/\/+$/, ''),
+    prodAccessKeyId: process.env.R2_CDN_ACCESS_KEY_ID?.trim() || undefined,
+    prodSecretAccessKey: process.env.R2_CDN_SECRET_ACCESS_KEY?.trim() || undefined,
+    prodBucket: required('CDN_BUCKET'),
+    prodPublicUrl: required('CDN_PUBLIC_URL').replace(/\/+$/, ''),
     adminRepository: process.env.ADMIN_REPOSITORY ?? 'VaultLearningGames/vault-publisher',
-    adminEnvironment: process.env.ADMIN_ENVIRONMENT ?? 'production',
+    adminEnvironment: process.env.ADMIN_ENVIRONMENT?.trim() || 'production',
     githubClientId: process.env.GITHUB_CLIENT_ID?.trim() || undefined,
     githubClientSecret: process.env.GITHUB_CLIENT_SECRET?.trim() || undefined,
     sessionSecret: process.env.SESSION_SECRET?.trim() || undefined,
-    portalUrl: (process.env.PORTAL_URL ?? 'https://portal.vaultlearninggames.org').replace(/\/+$/, ''),
+    portalUrl: required('PORTAL_URL').replace(/\/+$/, ''),
     vaultAdmins: (process.env.VAULT_ADMINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     previewRetentionDays: Number(process.env.PREVIEW_RETENTION_DAYS ?? 90),
     taskInvokerEmail: required('TASK_INVOKER_EMAIL'),

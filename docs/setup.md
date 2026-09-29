@@ -285,7 +285,7 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
 - **Game availability:** `check-games.yml` runs daily at 11:23 UTC for both systems (or by hand for one, *Run
   workflow* → environment). It fetches every game in the portal's `/v1/catalog`, checks that its play address loads
   and, for games shown in the site's player, that it allows being framed by the site. It posts the run to that
-  system's portal (**Vault → Game availability**, via `POST /v1/admin/game-checks`, OIDC like releases), writes a job
+  system's portal (the availability columns of **Vault → Site games**, via `POST /v1/admin/game-checks`, OIDC like releases), writes a job
   summary, and keeps one open issue per system, *Game availability (staging)* / *(production)*, labelled
   `game-availability`, closed when everything passes. Games being down doesn't fail the run; a portal without
   `/v1/catalog` is skipped. It reads `PORTAL_URL` and the optional `SITE_URL` (the site origin framing is checked

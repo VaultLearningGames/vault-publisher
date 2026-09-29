@@ -77,14 +77,14 @@ if (existsSync(`${rebuild}/migration/games-export.json`)) {
   if (lgl) db.setMembership(lgl.id, 'lee', 'maintainer', 'user:boss');
   // The home page's Featured Games, as on vaultlearninggames.org today (the banners are in vault-rebuild/static/images/featured).
   saveFeatured(db, [
-    { slug: 'project-hercules', blurb: 'In *Project Hercules*, you play Astrid, an astronomer in the distant future, working to identify objects in the night sky and uncover the mystery of an impending celestial event.', image: 'images/featured/project-hercules.webp' },
-    { slug: 'walden-self-reliance', blurb: '', image: 'images/featured/walden-self-reliance.webp' },
-    { slug: 'cozy-river-valley', blurb: '', image: 'images/featured/cozy-river-valley.webp' },
+    { slug: 'project-hercules', blurb: 'In *Project Hercules*, you play Astrid, an astronomer in the distant future, working to identify objects in the night sky and uncover the mystery of an impending celestial event.', image: 'images/featured/project-hercules.webp', sequence: 1 },
+    { slug: 'walden-self-reliance', blurb: '', image: 'images/featured/walden-self-reliance.webp', sequence: 2 },
+    { slug: 'cozy-river-valley', blurb: '', image: 'images/featured/cozy-river-valley.webp', sequence: 3 },
   ], 'user:boss');
 }
 
-// Game availability (Vault → Game availability): a run saved by `node scripts/check-games.ts --out FILE` when
-// $GAME_CHECKS points at one, otherwise a made-up run over the site listings.
+// Game availability (the Loads columns of Vault → Site games): a run saved by
+// `node scripts/check-games.ts --out FILE` when $GAME_CHECKS points at one, otherwise a made-up run over the listings.
 if (process.env.GAME_CHECKS) {
   const run = parseRun(JSON.parse(readFileSync(process.env.GAME_CHECKS, 'utf8')));
   if (typeof run === 'string') throw new Error(`GAME_CHECKS: ${run}`);

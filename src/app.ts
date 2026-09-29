@@ -45,7 +45,7 @@ const UPLOAD_TTL_MS = 2 * 60 * 60 * 1000;
 // Events whose OIDC `ref` names the branch or tag being built.
 const PUBLISH_EVENTS = new Set(['push', 'workflow_dispatch']);
 
-export function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 503, message: string, detail?: unknown): never {
+export function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 413 | 503, message: string, detail?: unknown): never {
   throw new HTTPException(status, { res: Response.json({ error: message, detail }, { status }) });
 }
 
@@ -306,9 +306,9 @@ export function createApp(deps: AppDeps) {
       }
       return catalogEntry(l, f, cdn);
     });
-    // The home page's Featured Games, in order (only games that are on the site).
-    const onSite = new Set(games.map((g) => g.slug));
-    const featured = catalogFeatured(readFeatured(db), (slug) => onSite.has(slug));
+    // The home page's Featured Games, in ascending sequence, ties by title (only games that are on the site).
+    const titles = new Map(games.map((g) => [g.slug, g.title]));
+    const featured = catalogFeatured(readFeatured(db), (slug) => titles.get(slug));
     const studios = [...new Map(published.map((l) => [l.studio_slug, { slug: l.studio_slug, name: l.studio_name, url: l.studio_website || null }])).values()]
       .sort((a, b) => a.name.localeCompare(b.name));
     c.header('Access-Control-Allow-Origin', '*');
@@ -423,14 +423,14 @@ export function createApp(deps: AppDeps) {
   });
 
   // A game availability run from the check-games workflow (scripts/check-games.ts --out), shown on
-  // Vault → Game availability. Only this repository's workflow in this system's environment may post.
+  // Vault → Site games (the latest run's result per game). Only this repository's workflow in this system's environment may post.
   app.post('/v1/admin/game-checks', async (c) => {
     const id = await admin(c);
     const run = parseRun(await jsonBody(c));
     if (typeof run === 'string') fail(400, run);
     const runId = db.addGameCheck(run, `github:${id.actor}`);
     db.audit(`github:${id.actor}`, 'game_checks.post', run.site, { run: runId, ...run.counts, source: run.source });
-    return c.json({ id: runId, counts: run.counts, url: `${deps.portal.baseUrl.replace(/\/+$/, '')}/vault/availability?run=${runId}` });
+    return c.json({ id: runId, counts: run.counts, url: `${deps.portal.baseUrl.replace(/\/+$/, '')}/vault/listings` });
   });
 
   // Delete a preview, e.g. from a workflow triggered by branch deletion.

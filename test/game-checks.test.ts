@@ -197,7 +197,7 @@ describe('POST /v1/admin/game-checks', () => {
     assert.equal(r1.status, 200);
     const j1 = (await r1.json()) as any;
     assert.deepEqual(j1.counts, { ok: 1, warn: 0, fail: 1 });
-    assert.equal(j1.url, `https://portal.test/vault/availability?run=${j1.id}`);
+    assert.equal(j1.url, 'https://portal.test/vault/listings');
     const r2 = await post('checker', posted([game('aqualab', 'ok'), game('bloom', 'warn', ['Slow: 6.0 s to respond'])]));
     const j2 = (await r2.json()) as any;
     const runs = db.gameChecks();
@@ -211,33 +211,7 @@ describe('POST /v1/admin/game-checks', () => {
   });
 });
 
-describe('Vault → Game availability', () => {
-  test('only Vault staff can see it', async () => {
-    assert.equal((await app.request('/vault/availability')).status, 302);
-    assert.equal((await as('vera', 'none', 'viewer')('/vault/availability')).status, 403);
-    const empty = await as('rm', 'release_manager')('/vault/availability');
-    assert.equal(empty.status, 200);
-    assert.match(await empty.text(), /No checks yet/);
-  });
-
-  test('shows the latest run with failing games first, and older runs on request', async () => {
-    const first = await post('checker', posted([game('aqualab', 'fail', ['HTTP 500 Server Error'])], '2026-09-28T11:00:00Z'));
-    const old = (await first.json()) as any;
-    await post('checker', posted([game('aqualab', 'ok'), game('bloom', 'fail', ['HTTP 404 Not Found']), game('wake', 'warn', ['Slow: 6.0 s to respond'])]));
-    const get = as('boss', 'admin');
-    const page = await (await get('/vault/availability')).text();
-    assert.match(page, /Game availability/);
-    const order = ['id="bloom"', 'id="wake"', 'id="aqualab"'].map((s) => page.indexOf(s));
-    assert.ok(order.every((i) => i > 0) && order[0] < order[1] && order[1] < order[2], 'failing, then warnings, then ok');
-    assert.match(page, /HTTP 404 Not Found/);
-    assert.match(page, /href="\/s\/fieldday\/g\/bloom"/);
-    assert.match(page, /actions\/runs\/42/);
-    assert.match(page, /Recent checks/);
-    const older = await (await get(`/vault/availability?run=${old.id}`)).text();
-    assert.match(older, /An older check/);
-    assert.match(older, /HTTP 500 Server Error/);
-  });
-
+describe('game availability in the portal', () => {
   test('a published game’s page shows its latest result', async () => {
     const s = db.studioBySlug('fieldday')!;
     const l = db.createListing(s.id, 'bloom', { ...(await import('../src/listings.ts')).EMPTY_LISTING, title: 'Bloom', play_url: 'https://bloom.test/' }, 'test');
@@ -245,9 +219,9 @@ describe('Vault → Game availability', () => {
     await post('checker', posted([game('bloom', 'fail', ['HTTP 404 Not Found'])]));
     const staff = await (await as('rm', 'release_manager')('/s/fieldday/g/bloom')).text();
     assert.match(staff, /HTTP 404 Not Found · checked/);
-    assert.match(staff, /href="\/vault\/availability#bloom"/);
+    assert.match(staff, /href="\/vault\/listings#game-bloom"/);
     const member = await (await as('vera', 'none', 'viewer')('/s/fieldday/g/bloom')).text();
     assert.match(member, /HTTP 404 Not Found · checked/);
-    assert.doesNotMatch(member, /vault\/availability/);
+    assert.doesNotMatch(member, /vault\/listings/);
   });
 });

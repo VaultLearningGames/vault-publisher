@@ -127,7 +127,7 @@ async function checkAll(games: CatalogGame[]): Promise<GameCheck[]> {
 const ICON = { ok: '✅', warn: '⚠️', fail: '❌' } as const;
 const secs = (ms: number | null) => (ms === null ? '—' : `${(ms / 1000).toFixed(1)} s`);
 const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
-const portalPage = `${portal}/vault/availability`;
+const portalPage = `${portal}/vault/listings`;
 
 function table(run: Run): string {
   const rows = sortForReport(run.games).map((g) => [g.level.toUpperCase(), g.slug, g.status === null ? '—' : String(g.status), secs(g.ms), g.embed ? 'in-page' : 'new tab', g.problems.join('; ') || '']);

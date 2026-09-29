@@ -10,7 +10,8 @@ import { importListings, type ExportedPage, type Override } from '../listings-im
 import { changedFields, FIELD_LABEL, GRADES, isListingSlug, normalize, problems, type ListingFields } from '../listings.ts';
 import { html, type Html } from './html.ts';
 import { ago, head, pill, who } from './routes.ts';
-import { availabilityLine } from './availability.ts';
+import { availabilityCells, availabilityLine, AVAILABILITY_HEADS } from './availability.ts';
+import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '../featured.ts';
 import type { PortalDeps } from './routes.ts';
 
 export interface ListingHelpers {
@@ -170,23 +171,22 @@ export function listingPieces(h: ListingHelpers) {
 export function registerListingPages(app: Hono, h: ListingHelpers) {
   const { db } = h;
   const P = listingPieces(h);
-  const readyForCdn = (l: ListingRow) => { const g = l.game_id ? db.gameById(l.game_id) : null; return !!(g && db.currentRelease(g.id)); };
 
   // Listings live on each game's page now.
   app.get('/s/:studio/listings', (c) => c.redirect(`/s/${c.req.param('studio')}`));
   app.get('/s/:studio/listings/:slug', (c) => c.redirect(`/s/${c.req.param('studio')}/g/${c.req.param('slug')}`));
+  // Featured games and game availability are columns of Site games now.
+  app.get('/vault/featured', (c) => c.redirect('/vault/listings'));
+  app.get('/vault/availability', (c) => c.redirect('/vault/listings'));
 
-  // ---------- Vault: review queue, every game on the site, import ----------
+  // ---------- Vault → Site games: review queue, every game on the site (featured, availability), import ----------
   app.get('/vault/listings', (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isStaff(u)) return h.denied(c, 'Only Vault staff can see this page.');
     const all = db.listings();
     const gameOf = (l: ListingRow) => (l.game_id ? db.gameById(l.game_id) ?? null : null);
     const waiting = all.filter((l) => l.review === 'submitted');
-    const filter = c.req.query('show') ?? 'all';
     const onCdn = (l: ListingRow) => l.published?.play_source === 'cdn';
-    const shown = all.filter((l) => filter === 'all' || (filter === 'changes' && l.published && changedFields(l.published, l.draft).length)
-      || (filter === 'offsite' && !l.published) || (filter === 'cdn' && onCdn(l)) || (filter === 'ready' && readyForCdn(l) && !onCdn(l)));
     const link = (l: ListingRow) => `/s/${l.studio_slug}/g/${l.slug}`;
     const queue = waiting.map((l) => html`<div class="card"><div class="card-h"><a href="${link(l)}"><b>${l.draft.title || l.slug}</b></a> <small>${l.studio_name} · submitted ${ago(l.submitted_at)} by ${who(l.submitted_by ?? '')}</small></div>
       <p class="small">Changes: ${changedFields(l.published, l.draft).map((k) => FIELD_LABEL[k]).join(', ') || 'none'}</p>
@@ -195,15 +195,64 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
         <form data-api="/portal/api/s/${l.studio_slug}/listings/${l.slug}/return" data-then="reload" class="inline-form"><input name="note" placeholder="Why it’s being sent back" aria-label="Why it’s being sent back"><button class="btn sm">Send back</button>${err}</form>
       </div></div>`);
     const count = (f: (l: ListingRow) => boolean) => all.filter(f).length;
-    const tabs = [['all', 'All'], ['cdn', `On the CDN (${count(onCdn)})`], ['ready', `CDN release ready (${count((l) => readyForCdn(l) && !onCdn(l))})`],
-      ['changes', 'Unpublished changes'], ['offsite', 'Not on the site']]
-      .map(([k, t]) => html`<a href="/vault/listings?show=${k}" class="${filter === k ? 'on' : ''}">${t}</a>`);
-    const rows = shown.map((l) => html`<tr><td class="proj"><a href="${link(l)}"><b>${l.draft.title || l.slug}</b></a><span>${l.slug}</span></td>
-      <td>${l.studio_name}</td><td>${P.state(l)}</td><td>${P.playsFrom(l, gameOf(l))}</td><td class="small">${ago(l.updated_at)}</td></tr>`);
-    const body = html`${head('Site games', `${count((l) => !!l.published)} of ${all.length} games are on the site; ${count(onCdn)} play from the Vault CDN. The site is built from /v1/catalog.`, html`<a class="btn" href="/v1/catalog" target="_blank">Catalog JSON ↗</a>`)}
+
+    // Featured: a checkbox per game; a featured game gets a row below it with its sequence, blurb and image.
+    const featuring = h.canRelease(u);
+    const feat = readFeatured(db);
+    const featBy = new Map(feat.games.map((e) => [e.slug, e]));
+    const full = feat.games.length >= MAX_FEATURED;
+    const FA = '/portal/api/vault/featured';
+    const COLS = 9;
+    const featCell = (l: ListingRow, e: FeaturedEntry | undefined) => {
+      const title = l.draft.title || l.slug;
+      const off = !l.published;
+      const why = e ? '' : off ? 'Only games on the site can be featured' : full ? `${MAX_FEATURED} games are featured already` : '';
+      const box = html`<input type="checkbox" name="featured" ${e ? 'checked' : ''} ${!featuring || why ? 'disabled' : ''} aria-label="Feature ${title} on the home page" title="${why}">`;
+      const note = e && off ? html`<span class="err small">Off the site, so the home page skips it</span>` : '';
+      return featuring
+        ? html`<form data-api="${FA}" data-autosubmit data-then="reload" class="feat-toggle"><input type="hidden" name="op" value="feature"><input type="hidden" name="slug" value="${l.slug}">
+            <label class="check">${box}${e ? html` <span class="mono small">#${e.sequence}</span>` : ''}</label>${note}${err}</form>`
+        : html`<label class="check">${box}${e ? html` <span class="mono small">#${e.sequence}</span>` : ''}</label>${note}`;
+    };
+    const imageOf = (e: FeaturedEntry) => (!e.image ? html`<span class="muted small">The listing’s hero image</span>`
+      : /^https:\/\//.test(e.image) ? html`<a href="${e.image}" target="_blank" rel="noopener"><img class="feat-thumb" src="${e.image}" alt="Featured image"></a>`
+      : html`<span class="mono small" title="A path on the site">${e.image}</span>`);
+    const featRow = (l: ListingRow, e: FeaturedEntry) => {
+      const shown = l.published ?? l.draft;
+      if (!featuring) return html`<tr class="feat-edit"><td colspan="${COLS}"><div class="feat"><span class="small">Sequence <b class="mono">${e.sequence}</b></span>
+        <span class="small">${e.blurb || html`<span class="muted">${shown.short_description || 'The listing’s short description'}</span>`}</span>${imageOf(e)}</div></td></tr>`;
+      return html`<tr class="feat-edit"><td colspan="${COLS}"><div class="feat">
+        <form data-api="${FA}" data-then="reload" class="feat-form"><input type="hidden" name="op" value="set"><input type="hidden" name="slug" value="${l.slug}">
+          <label class="field seq"><span class="lab">Sequence</span><input type="number" name="sequence" value="${e.sequence}" min="0" max="9999" step="1" required></label>
+          <label class="field blurb"><span class="lab">Home-page description (optional; *italics* work)</span><textarea name="blurb" rows="2" placeholder="${shown.short_description}">${e.blurb}</textarea></label>
+          <button class="btn sm pri">Save</button>${err}</form>
+        <div class="feat-img"><span class="lab">Home-page image</span>${imageOf(e)}
+          ${h.deps.production ? html`<form data-upload="${FA}/${l.slug}/image" data-then="reload" class="inline-form"><input type="file" name="image" accept="image/png,image/jpeg,image/webp" required aria-label="Image for ${shown.title || l.slug}"><button class="btn sm">Upload</button>${err}</form>`
+            : html`<span class="small muted">Uploads need the Vault CDN storage, which isn’t configured here.</span>`}
+          ${e.image ? html`<form data-api="${FA}" data-then="reload" data-confirm="Use the listing’s hero image instead?"><input type="hidden" name="op" value="set"><input type="hidden" name="slug" value="${l.slug}"><input type="hidden" name="image" value=""><button class="btn sm">Remove image</button>${err}</form>` : ''}
+        </div></div></td></tr>`;
+    };
+
+    // Availability: the latest check-games run's result for each game.
+    const run = db.gameCheck();
+    // Featured games first, in home-page order; then the rest by page address.
+    const bySlug = new Map(all.map((l) => [l.slug, l]));
+    const titleOf = (slug: string) => { const l = bySlug.get(slug); return l ? (l.published ?? l.draft).title : undefined; };
+    const first = sortFeatured(feat.games, titleOf).map((e) => bySlug.get(e.slug)).filter((l) => l !== undefined);
+    const rows = [...first, ...all.filter((l) => !featBy.has(l.slug))].map((l) => {
+      const e = featBy.get(l.slug);
+      return html`<tr id="game-${l.slug}" class="${e ? 'is-feat' : ''}"><td class="proj"><a href="${link(l)}"><b>${l.draft.title || l.slug}</b></a><span>${l.slug}</span></td>
+        <td>${l.studio_name}</td><td>${P.state(l)}</td><td>${featCell(l, e)}</td><td>${P.playsFrom(l, gameOf(l))}</td>
+        ${availabilityCells(run, l.slug)}<td class="small nowrap">${ago(l.updated_at)}</td></tr>${e ? featRow(l, e) : ''}`;
+    });
+    const checked = run ? html` Availability from the latest daily check, ${ago(run.checked_at)}: ${run.fail_count} failing, ${run.warn_count} worth a look (hover a result for why).` : ' No availability checks yet.';
+    const sub = html`${count((l) => !!l.published)} of ${all.length} games are on the site; ${count(onCdn)} play from the Vault CDN. ${feat.games.length} of at most ${MAX_FEATURED} are featured on the home page, in ascending sequence (ties by title); they come first here, in that order.${checked} The site is built from /v1/catalog.`;
+    const actions = html`<a class="btn" href="https://github.com/${h.deps.adminRepository}/actions/workflows/check-games.yml" target="_blank" rel="noopener">Run a check ↗</a><a class="btn" href="/v1/catalog" target="_blank">Catalog JSON ↗</a>`;
+    const body = html`${head('Site games', sub, actions)}
       ${queue.length ? html`<h2>Waiting for Vault (${queue.length})</h2><div class="grid">${queue}</div>` : html`<div class="card"><p class="muted">No site changes are waiting for review.</p></div>`}
-      <div class="tabs" style="margin-top:22px">${tabs}</div>
-      <div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Studio</th><th>Site</th><th>Plays from</th><th>Last edit</th></tr></thead><tbody>${rows.length ? rows : html`<tr><td colspan="5" class="muted">Nothing here.</td></tr>`}</tbody></table></div>
+      <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th>Game</th><th>Studio</th><th>Site</th><th>Featured</th><th>Plays from</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
+        <tbody>${rows.length ? rows : html`<tr><td colspan="${COLS}" class="muted">No games yet.</td></tr>`}</tbody></table></div>
+      ${featuring ? '' : html`<p class="small muted">Only Vault release managers can change the featured games.</p>`}
       ${h.isVaultAdmin(u) ? html`<div class="card" style="margin-top:22px"><h2>Import from the Hugo site prototype</h2>
         <p class="small">Paste <span class="mono">migration/games-export.json</span> and <span class="mono">migration/import-overrides.json</span> from <a href="https://github.com/fielddaylab/vault-rebuild" target="_blank" rel="noopener">vault-rebuild</a>. Games that already have a listing are skipped; studios that don’t exist yet are created as Vault-managed studios.</p>
         <form data-api="/portal/api/vault/listings/import" data-then="reload" class="fields">

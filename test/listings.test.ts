@@ -13,14 +13,16 @@ import { browseKeys, type Storage } from '../src/storage.ts';
 class FakeStorage implements Storage {
   objects = new Map<string, number>();
   data = new Map<string, Uint8Array>();
+  headers = new Map<string, ObjectHeaders>();
   async presignPut(key: string) { return `https://r2.test/${key}`; }
   async list(prefix: string) { return [...this.objects].filter(([k]) => k.startsWith(prefix)).map(([key, size]) => ({ key, size })); }
   async browse(prefix: string) { return browseKeys(this.objects, prefix); }
   async copy(src: string, dst: string, headers: ObjectHeaders) { await this.put(dst, this.data.get(src) ?? new Uint8Array(this.objects.get(src)!), this.objects.get(src)!, headers); }
   async deleteKeys(keys: string[]) { for (const k of keys) this.objects.delete(k); }
   async get(key: string) { return this.data.get(key) ?? new Uint8Array(this.objects.get(key)!); }
-  async put(key: string, body: Readable | Uint8Array, size: number, _h: ObjectHeaders) {
+  async put(key: string, body: Readable | Uint8Array, size: number, h: ObjectHeaders) {
     this.objects.set(key, size);
+    this.headers.set(key, h);
     this.data.set(key, body instanceof Uint8Array ? body : new Uint8Array(Buffer.concat(await (body as Readable).toArray())));
   }
 }
@@ -31,20 +33,22 @@ const adminId: GitHubIdentity = { owner: 'VaultLearningGames', ownerId: '2141367
 const ids: Record<string, GitHubIdentity> = {};
 const verifier: Verifier = { async github(t) { const id = t === 'wake' ? wake : t === 'admin' ? adminId : ids[t]; if (!id) throw new Error('bad'); return id; }, async google() { throw new Error('no'); } };
 
-let db: Db, staging: FakeStorage, app: ReturnType<typeof createApp>;
+let db: Db, staging: FakeStorage, production: FakeStorage, app: ReturnType<typeof createApp>;
+const deps = (): Parameters<typeof createApp>[0] => ({
+  db, staging, production, verifier,
+  stagingPublicUrl: 'https://stg.test', prodPublicUrl: 'https://prod.test',
+  adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production',
+  previewRetentionDays: 90, taskInvokerEmail: 'x@y',
+  portal: { baseUrl: 'https://portal.test', sessionSecret: SECRET, vaultAdmins: ['boss'],
+    oauth: { authorizeUrl: () => 'https://github.test/', exchange: async (code: string) => ({ github_id: `id-${code}`, login: code, name: null, avatar_url: null }) } },
+});
 beforeEach(async () => {
   db = new Db(':memory:');
   db.syncStudios([{ slug: 'fieldday', name: 'Field Day Lab', github_owner: 'fielddaylab', github_owner_id: '1881825' },
     { slug: 'ucalgary', name: 'University of Calgary', github_owner: '', github_owner_id: 'vault:ucalgary' }]);
   staging = new FakeStorage();
-  app = createApp({
-    db, staging, production: new FakeStorage(), verifier,
-    stagingPublicUrl: 'https://stg.test', prodPublicUrl: 'https://prod.test',
-    adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production',
-    previewRetentionDays: 90, taskInvokerEmail: 'x@y',
-    portal: { baseUrl: 'https://portal.test', sessionSecret: SECRET, vaultAdmins: ['boss'],
-      oauth: { authorizeUrl: () => 'https://github.test/', exchange: async (code) => ({ github_id: `id-${code}`, login: code, name: null, avatar_url: null }) } },
-  });
+  production = new FakeStorage();
+  app = createApp(deps());
   // aqualab v1.0 on staging, through the normal CI path.
   const start = await app.request('/v1/previews', { method: 'POST', headers: { Authorization: 'Bearer wake', 'Content-Type': 'application/json' }, body: JSON.stringify({ game: 'aqualab', files: [{ path: 'index.html', size: 5 }] }) });
   const j = (await start.json()) as { upload_id: string };
@@ -275,21 +279,63 @@ describe('import from the Hugo prototype', () => {
     assert.deepEqual(games.find((g) => g.slug === 'crowds').play.fit, [1920, 1024, 0, 0, 800, 600]);
     const again = (await (await boss.post('/portal/api/vault/listings/import', { pages: JSON.stringify(pages) })).json()) as any;
     assert.equal(again.skipped.length, 4);
-    for (const path of ['/vault/listings', '/vault/listings?show=offsite', '/vault/listings?show=ready', '/s/phoboslab', '/s/phoboslab/g/ztype', '/s/phoboslab/g/ztype?tab=cdn']) {
+    for (const path of ['/vault/listings', '/s/phoboslab', '/s/phoboslab/g/ztype', '/s/phoboslab/g/ztype?tab=cdn']) {
       assert.equal((await boss.get(path)).status, 200, path);
     }
   });
 });
 
-describe('featured games on the home page', () => {
+describe('Vault → Site games: one table with featured games and availability', () => {
   const F = '/portal/api/vault/featured';
-  const full = async () => (await (await app.request('/v1/catalog')).json()) as { featured: { slug: string; blurb: string; image: string }[] };
+  type Entry = { slug: string; blurb: string; image: string; sequence: number };
+  const full = async () => (await (await app.request('/v1/catalog')).json()) as { featured: Entry[] };
   async function onSite(boss: ReturnType<typeof as>, slug: string, title: string) {
     await boss.post(L, { slug, title });
     assert.equal((await boss.post(`${L}/${slug}`, { short_description: `${title}!`, play_url: `https://example.org/${slug}/`, 'grades:Grades 5-8': true, publish: true })).status, 200);
   }
+  const feature = (who: ReturnType<typeof as>, slug: string, featured = true) => who.post(F, { op: 'feature', slug, featured });
+  const upload = (login: string, role: 'none' | 'release_manager' | 'admin', slug: string, body: Uint8Array) => {
+    const u = db.upsertUser({ github_id: `id-${login}`, login, name: null, avatar_url: null });
+    db.setVaultRole(u.id, role);
+    return app.request(`${F}/${slug}/image`, { method: 'POST', body: body as Uint8Array<ArrayBuffer>, headers: { Cookie: `vault_session=${signSession(u.id, SECRET)}`, 'Content-Type': 'image/png', 'X-Requested-With': 'vault-portal' } });
+  };
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2, 3]);
+  const WEBP = new Uint8Array([...Buffer.from('RIFF'), 20, 0, 0, 0, ...Buffer.from('WEBPVP8 '), 1, 2, 3]);
 
-  test('release managers choose, order and describe them; the catalog publishes them in order', async () => {
+  test('one row per listing with the featured checkbox and availability columns; the old pages redirect here', async () => {
+    const boss = as('boss', 'admin');
+    await onSite(boss, 'wake', 'Wake');
+    await onSite(boss, 'bloom', 'Bloom');
+    await boss.post(L, { slug: 'draft-only', title: 'Draft only' });
+    assert.equal((await feature(boss, 'wake')).status, 200);
+    db.addGameCheck({ checked_at: '2026-09-29T11:00:00.000Z', site: 'https://vault.test', source: 'https://github.com/VaultLearningGames/vault-publisher/actions/runs/42', counts: { ok: 1, warn: 0, fail: 1 },
+      games: [{ slug: 'wake', level: 'ok', ms: 240, problems: [] }, { slug: 'bloom', level: 'fail', ms: null, problems: ['HTTP 404 Not Found'] }].map((g) => ({ title: '', studio: 'fieldday', url: '', source: 'url' as const, embed: true, status: 200, final_url: null, redirects: [], attempts: 1, error: null, framing: null, ...g, level: g.level as 'ok' | 'fail' })) }, 'test');
+    const page = await (await boss.get('/vault/listings')).text();
+    const row = (slug: string) => page.slice(page.indexOf(`id="game-${slug}"`), page.indexOf('</tr>', page.indexOf(`id="game-${slug}"`)));
+    for (const slug of ['wake', 'bloom', 'draft-only']) assert.ok(page.includes(`id="game-${slug}"`), slug);
+    assert.ok(page.indexOf('id="game-wake"') < page.indexOf('id="game-bloom"'), 'featured games come first');
+    assert.match(row('wake'), /name="featured" checked/);
+    assert.match(row('wake'), /#1/);
+    assert.doesNotMatch(row('bloom'), /name="featured" checked/);
+    assert.match(row('draft-only'), /name="featured"\s+disabled/, 'only games on the site can be featured');
+    assert.match(page, /name="sequence" value="1"/, 'a featured game has its editor');
+    assert.equal((page.match(/name="sequence"/g) ?? []).length, 1);
+    assert.match(row('wake'), /title="The play address loaded"[^]*Loads[^]*0\.2 s[^]*actions\/runs\/42/);
+    assert.match(row('bloom'), /title="HTTP 404 Not Found"[^]*Failing/);
+    assert.match(row('draft-only'), /<td class="muted">—<\/td>/, 'no result: dashes');
+    assert.match(page, /Waiting for Vault|No site changes are waiting/);
+    assert.match(page, /Import from the Hugo site prototype/);
+    for (const gone of ['On the CDN (', 'CDN release ready', 'Unpublished changes', 'Not on the site</a>', 'show=']) assert.ok(!page.includes(gone), gone);
+    assert.doesNotMatch(page, /href="\/vault\/(featured|availability)"/, 'no separate nav entries');
+
+    for (const old of ['/vault/featured', '/vault/availability', '/vault/availability?run=3']) {
+      const r = await boss.get(old);
+      assert.equal(r.status, 302, old);
+      assert.equal(r.headers.get('location'), '/vault/listings');
+    }
+  });
+
+  test('release managers feature games with a checkbox; the catalog lists them by sequence, then title', async () => {
     const boss = as('boss', 'release_manager');
     await onSite(boss, 'wake', 'Wake');
     await onSite(boss, 'jowilder', 'Jo Wilder');
@@ -297,39 +343,96 @@ describe('featured games on the home page', () => {
     await boss.post(L, { slug: 'draft-only', title: 'Draft only' });
     assert.deepEqual((await full()).featured, [], 'nothing is featured to begin with');
 
-    for (const slug of ['wake', 'jowilder', 'aqualab']) assert.equal((await boss.post(F, { op: 'add', slug })).status, 200);
-    assert.equal((await boss.post(F, { op: 'add', slug: 'wake' })).status, 400, 'no duplicates');
-    const off = await boss.post(F, { op: 'add', slug: 'draft-only' });
+    for (const slug of ['wake', 'jowilder', 'aqualab']) assert.equal((await feature(boss, slug)).status, 200);
+    assert.equal((await feature(boss, 'wake')).status, 200, 'ticking twice is harmless');
+    const off = await feature(boss, 'draft-only');
     assert.equal(off.status, 400);
     assert.match(((await off.json()) as { error: string }).error, /on the site/);
+    assert.deepEqual((await full()).featured.map((e) => [e.slug, e.sequence]), [['wake', 1], ['jowilder', 2], ['aqualab', 3]]);
 
-    assert.equal((await boss.post(F, { op: 'move', slug: 'aqualab', to: 0 })).status, 200);
-    assert.equal((await boss.post(F, { op: 'set', slug: 'jowilder', blurb: 'Solve *mysteries* in Wisconsin.', image: 'games/jowilder/img/banner.jpg' })).status, 200);
-    assert.equal((await boss.post(F, { op: 'set', slug: 'wake', blurb: '', image: 'javascript:alert(1)' })).status, 400, 'images are site paths or https');
+    assert.equal((await boss.post(F, { op: 'set', slug: 'aqualab', sequence: '1' })).status, 200);
+    assert.equal((await boss.post(F, { op: 'set', slug: 'jowilder', sequence: 5, blurb: 'Solve *mysteries* in Wisconsin.', image: 'images/featured/jowilder.webp' })).status, 200);
+    assert.equal((await boss.post(F, { op: 'set', slug: 'wake', sequence: 1.5 })).status, 400, 'whole numbers');
+    assert.equal((await boss.post(F, { op: 'set', slug: 'wake', image: 'javascript:alert(1)' })).status, 400, 'images are site paths or https');
     assert.deepEqual((await full()).featured, [
-      { slug: 'aqualab', blurb: '', image: '' },
-      { slug: 'wake', blurb: '', image: '' },
-      { slug: 'jowilder', blurb: 'Solve *mysteries* in Wisconsin.', image: 'games/jowilder/img/banner.jpg' },
+      { slug: 'aqualab', blurb: '', image: '', sequence: 1 },   // ties by title: Aqualab before Wake
+      { slug: 'wake', blurb: '', image: '', sequence: 1 },
+      { slug: 'jowilder', blurb: 'Solve *mysteries* in Wisconsin.', image: 'images/featured/jowilder.webp', sequence: 5 },
     ]);
 
-    // Taking a game off the site drops it from the home page, and it's gone from the list once removed.
+    // Unticking takes it off the home page; ticking it again brings back its blurb and image, last in sequence.
+    assert.equal((await feature(boss, 'jowilder', false)).status, 200);
+    assert.deepEqual((await full()).featured.map((e) => e.slug), ['aqualab', 'wake']);
+    await feature(boss, 'jowilder');
+    assert.deepEqual((await full()).featured.at(-1), { slug: 'jowilder', blurb: 'Solve *mysteries* in Wisconsin.', image: 'images/featured/jowilder.webp', sequence: 2 });
+
+    // A game taken off the site drops out of the catalog but stays ticked, with a note.
     await boss.post(`${L}/wake/unpublish`);
     assert.deepEqual((await full()).featured.map((e) => e.slug), ['aqualab', 'jowilder']);
-    assert.match(await (await boss.get('/vault/featured')).text(), /No longer on the site/);
-    assert.equal((await boss.post(F, { op: 'remove', slug: 'wake' })).status, 200);
-    const page = await (await boss.get('/vault/featured')).text();
-    assert.match(page, /1\. Aqualab/);
-    assert.match(page, /2\. Jo Wilder/);
-    assert.match(page, /Last changed .* by/);
+    assert.match(await (await boss.get('/vault/listings')).text(), /Off the site, so the home page skips it/);
   });
 
-  test('studio members can’t change them or see the page', async () => {
+  test('at most nine; stored lists from before sequence numbers keep their order', async () => {
+    const boss = as('boss', 'release_manager');
+    for (let i = 1; i <= 10; i++) await onSite(boss, `game-${i}`, `Game ${i}`);
+    for (let i = 1; i <= 9; i++) assert.equal((await feature(boss, `game-${i}`)).status, 200);
+    const tenth = await feature(boss, 'game-10');
+    assert.equal(tenth.status, 400);
+    assert.match(((await tenth.json()) as { error: string }).error, /at most 9/);
+
+    db.setSetting('site_featured', JSON.stringify({ games: [{ slug: 'game-3', blurb: 'Three', image: 'images/featured/3.webp' }, { slug: 'game-1', blurb: '', image: '' }, { slug: 'game-2', blurb: '', image: '' }], updated_by: 'user:boss', updated_at: '2026-09-01T00:00:00Z' }));
+    assert.deepEqual((await full()).featured, [
+      { slug: 'game-3', blurb: 'Three', image: 'images/featured/3.webp', sequence: 1 },
+      { slug: 'game-1', blurb: '', image: '', sequence: 2 },
+      { slug: 'game-2', blurb: '', image: '', sequence: 3 },
+    ]);
+  });
+
+  test('only release managers change them; studio members can’t see the page', async () => {
     const boss = as('boss', 'release_manager');
     await onSite(boss, 'wake', 'Wake');
-    await boss.post(F, { op: 'add', slug: 'wake' });
+    await feature(boss, 'wake');
     const mia = as('mia', 'none', 'maintainer');
-    assert.equal((await mia.post(F, { op: 'remove', slug: 'wake' })).status, 403);
-    assert.equal((await mia.get('/vault/featured')).status, 403);
+    assert.equal((await feature(mia, 'wake', false)).status, 403);
+    assert.equal((await mia.get('/vault/listings')).status, 403);
+    assert.equal((await mia.get('/vault/featured')).headers.get('location'), '/vault/listings');
     assert.deepEqual((await full()).featured.map((e) => e.slug), ['wake']);
+  });
+
+  test('featured images: uploaded to the CDN bucket by content hash, checked by content and size', async () => {
+    const boss = as('boss', 'release_manager');
+    await onSite(boss, 'wake', 'Wake');
+    await onSite(boss, 'bloom', 'Bloom');
+    await feature(boss, 'wake');
+    assert.equal((await upload('boss', 'release_manager', 'bloom', PNG)).status, 400, 'featured games only');
+    assert.equal((await upload('mia', 'none', 'wake', PNG)).status, 403);
+
+    const bad = await upload('boss', 'release_manager', 'wake', new TextEncoder().encode('<svg onload="alert(1)"></svg>'));
+    assert.equal(bad.status, 400, 'an image/png Content-Type doesn’t make it one');
+    assert.match(((await bad.json()) as { error: string }).error, /PNG, JPEG or WebP/);
+    const big = new Uint8Array(2 * 1024 * 1024 + 1); big.set(PNG);
+    assert.equal((await upload('boss', 'release_manager', 'wake', big)).status, 413);
+
+    const res = await upload('boss', 'release_manager', 'wake', WEBP);
+    assert.equal(res.status, 200);
+    const { image } = (await res.json()) as { image: string };
+    assert.match(image, /^https:\/\/prod\.test\/_site\/featured\/wake-[0-9a-f]{16}\.webp$/);
+    const key = image.slice('https://prod.test/'.length);
+    assert.deepEqual(production.headers.get(key), { contentType: 'image/webp', cacheControl: 'public, max-age=31536000, immutable' });
+    assert.equal((await full()).featured[0].image, image);
+    const page = await (await boss.get('/vault/listings')).text();
+    assert.match(page, new RegExp(`<img class="feat-thumb" src="${image}"`));
+
+    // A new image is a new object; the old one stays (a live site build may still use it).
+    await upload('boss', 'release_manager', 'wake', PNG);
+    assert.equal([...production.headers.keys()].filter((k) => k.startsWith('_site/featured/wake-')).length, 2);
+    assert.match((await full()).featured[0].image, /\.png$/);
+
+    // Without the CDN bucket (production storage not configured) the upload says so.
+    app = createApp({ ...deps(), production: null });
+    const none = await upload('boss', 'release_manager', 'wake', PNG);
+    assert.equal(none.status, 503);
+    assert.match(((await none.json()) as { error: string }).error, /isn’t configured/);
+    assert.match(await (await boss.get('/vault/listings')).text(), /Uploads need the Vault CDN storage/);
   });
 });

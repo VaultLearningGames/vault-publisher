@@ -244,7 +244,7 @@ details.data-table td, details.data-table th { padding: 5px 8px; }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field label, .field .lab { font-weight: 600; font-size: 12.5px; }
 .field .hint { font-size: 12px; color: var(--ink-3); }
-.field input[type=text], .field input[type=email], .field input[type=url], .field select, .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); width: 100%; }
+.field input[type=text], .field input[type=email], .field input[type=url], .field input[type=number], .field select, .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); width: 100%; }
 .field textarea { min-height: 76px; resize: vertical; }
 .field .ok { color: var(--ok); font-size: 12px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -388,8 +388,24 @@ button[aria-busy=true] { opacity: .6; cursor: progress; }
 
 .row-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 
-/* Vault → Game availability */
-table.avail td.r { white-space: nowrap; }
-table.avail details { margin-top: 4px; }
-table.avail details > div { margin-top: 3px; }
-table.avail details .mono { word-break: break-all; }
+/* Vault → Site games: featured games and availability columns */
+td.nowrap, .nowrap { white-space: nowrap; }
+table.site-games td.r { white-space: nowrap; }
+table.site-games .avail { cursor: help; }
+.feat-toggle { display: flex; flex-direction: column; gap: 3px; margin: 0; }
+.feat-toggle .err:empty { display: none; }
+table.site-games tr.is-feat > td { border-bottom: 0; }
+tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
+.feat { display: flex; flex-direction: column; gap: 10px; padding: 10px 0 2px; }
+.feat .lab { display: block; font-weight: 600; font-size: 12.5px; }
+.feat-form { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; margin: 0; }
+.feat-form > button { align-self: flex-end; }
+.feat-form .field { margin: 0; }
+.feat-form .seq input { width: 80px; }
+.feat-form .blurb { flex: 1 1 280px; }
+.feat-form textarea { width: 100%; min-height: 40px; }
+.feat-img { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.feat-img .lab { width: 100%; margin: 0; }
+.feat-img form { margin: 0; display: flex; gap: 6px; align-items: center; }
+.feat-img input[type=file] { font-size: 12px; max-width: 220px; }
+.feat-thumb { display: block; height: 44px; width: auto; max-width: 120px; border-radius: 6px; border: 1px solid var(--line); object-fit: cover; }

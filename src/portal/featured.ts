@@ -1,88 +1,77 @@
-// Vault → Featured games: which site games the home page's Featured Games section shows, in order, with optional
-// home-page blurbs and images. Vault release managers edit it; other Vault staff can look. The site gets the list
+// The featured games API behind Vault → Site games (listings.ts): the Featured checkbox, each featured game's
+// sequence number and home-page blurb, and its uploaded image. Vault release managers only. The site gets the list
 // from GET /v1/catalog ("featured") on its next build.
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
-import { applyFeaturedEdit, MAX_FEATURED, readFeatured, saveFeatured, type FeaturedEdit } from '../featured.ts';
-import { html } from './html.ts';
-import type { ListingHelpers, ListingRow } from './listings.ts';
-import { ago, head, who } from './routes.ts';
+import { applyFeaturedEdit, featuredImageKey, IMAGE_CACHE, MAX_IMAGE_BYTES, readFeatured, saveFeatured, sniffImage, type FeaturedEdit, type FeaturedLists } from '../featured.ts';
+import type { User } from '../db.ts';
+import type { ListingHelpers } from './listings.ts';
 
-const err = html`<span class="err" role="status" aria-live="polite"></span>`;
-
-export function registerFeaturedPages(app: Hono, h: ListingHelpers) {
+export function registerFeaturedApi(app: Hono, h: ListingHelpers) {
   const { db } = h;
-  const onSite = () => new Map(db.listings({ published: true }).map((l) => [l.slug, l as ListingRow]));
-
-  app.get('/vault/featured', (c) => {
-    const u = h.signedIn(c); if (u instanceof Response) return u;
-    if (!h.isStaff(u)) return h.denied(c, 'Only Vault staff can see this page.');
-    const edit = h.canRelease(u);
-    const f = readFeatured(db);
-    const site = onSite();
-    const api = '/portal/api/vault/featured';
-    const n = f.games.length;
-
-    const cards = f.games.map((e, i) => {
-      const l = site.get(e.slug);
-      const shown = l?.published;
-      const title = shown?.title || l?.draft.title || e.slug;
-      const move = (to: number, label: string, text: string) => html`<form data-api="${api}" data-then="reload"><input type="hidden" name="op" value="move"><input type="hidden" name="slug" value="${e.slug}"><input type="hidden" name="to" value="${to}"><button class="btn sm" aria-label="${label} ${title}">${text}</button></form>`;
-      return html`<div class="card">
-        <div class="card-h"><b>${i + 1}. ${title}</b> <small>${l ? html`${l.studio_name} · <a href="/s/${l.studio_slug}/g/${e.slug}">listing</a>` : html`<span class="err">No longer on the site, so the home page skips it.</span>`}</small></div>
-        ${edit ? html`
-          <form data-api="${api}" data-then="reload" class="fields">
-            <input type="hidden" name="op" value="set"><input type="hidden" name="slug" value="${e.slug}">
-            <label class="field full"><span class="lab">Home-page blurb (optional; *italics* work)</span>
-              <textarea name="blurb" rows="3" placeholder="${shown?.short_description ?? ''}">${e.blurb}</textarea></label>
-            <label class="field full"><span class="lab">Image (optional; the listing’s hero image otherwise)</span>
-              <input name="image" value="${e.image}" placeholder="${shown?.hero_image || 'games/…/img/hero.jpg'}"></label>
-            <div class="form-foot"><button class="btn pri">Save</button>${err}</div>
-          </form>
-          <div class="req-actions">
-            ${i > 0 ? move(i - 1, 'Move up', '↑ Move up') : ''}
-            ${i < n - 1 ? move(i + 1, 'Move down', '↓ Move down') : ''}
-            <form data-api="${api}" data-then="reload" data-confirm="Take ${title} off the home page?"><input type="hidden" name="op" value="remove"><input type="hidden" name="slug" value="${e.slug}"><button class="btn sm">Remove</button>${err}</form>
-          </div>`
-        : html`<p class="small">${e.blurb || shown?.short_description || ''}</p>`}
-      </div>`;
-    });
-
-    const choices = [...site.values()].filter((l) => !f.games.some((e) => e.slug === l.slug))
-      .sort((a, b) => (a.published!.title || a.slug).localeCompare(b.published!.title || b.slug));
-    const add = edit && n < MAX_FEATURED ? html`<div class="card" style="margin-top:22px"><h2>Feature another game</h2>
-      <form data-api="${api}" data-then="reload" class="fields">
-        <input type="hidden" name="op" value="add">
-        <label class="field full"><span class="lab">Game on the site</span>
-          <select name="slug" required><option value="">Choose a game…</option>${choices.map((l) => html`<option value="${l.slug}">${l.published!.title || l.slug} (${l.studio_name})</option>`)}</select></label>
-        <div class="form-foot"><button class="btn pri">Add to Featured Games</button>${err}</div>
-      </form></div>` : '';
-
-    const updated = f.updated_at ? ` Last changed ${ago(f.updated_at)} by ${who(f.updated_by ?? '')}.` : '';
-    const body = html`${head('Featured games', `The Featured Games section on the home page of vaultlearninggames.org shows these games, in this order (three to a row). Changes reach the site on its next build.${updated}`, html`<a class="btn" href="/v1/catalog" target="_blank">Catalog JSON ↗</a>`)}
-      ${!edit ? html`<div class="card"><p class="muted">Only Vault release managers can change the featured games.</p></div>` : ''}
-      ${n ? html`<div class="grid">${cards}</div>` : html`<div class="card"><p class="muted">No games are featured, so the home page leaves the section out.</p></div>`}
-      ${add}`;
-    return h.page(c, 'Featured games', body, { active: 'vault-featured' });
-  });
-
-  app.post('/portal/api/vault/featured', async (c) => {
+  const onSite = () => new Set(db.listings({ published: true }).map((l) => l.slug));
+  const editor = (c: Context): User => {
     const u = h.apiUser(c);
     if (!h.canRelease(u)) fail(403, 'Only Vault release managers can change the featured games.');
+    return u;
+  };
+  const save = (u: User, edit: FeaturedEdit): FeaturedLists => {
+    const site = onSite();
+    const next = applyFeaturedEdit(readFeatured(db), edit, (s) => site.has(s));
+    if (typeof next === 'string') fail(400, next);
+    saveFeatured(db, next, h.actor(u));
+    return next;
+  };
+
+  // Body: { op: "feature", slug, featured: true|false } (the checkbox), or
+  //       { op: "set", slug, sequence?, blurb?, image? } (image "" goes back to the listing's hero image).
+  app.post('/portal/api/vault/featured', async (c) => {
+    const u = editor(c);
     const b = await jsonBody(c);
     const op = String(b.op ?? '');
     const slug = String(b.slug ?? '').trim();
     if (!slug) fail(400, 'Choose a game.');
     let edit: FeaturedEdit;
-    if (op === 'add' || op === 'remove') edit = { op, slug };
-    else if (op === 'move') edit = { op, slug, to: Number(b.to) };
-    else if (op === 'set') edit = { op, slug, blurb: String(b.blurb ?? ''), image: String(b.image ?? '') };
+    if (op === 'feature') edit = { op, slug, on: b.featured === true || b.featured === 'on' };
+    else if (op === 'set') edit = { op, slug, sequence: b.sequence, blurb: typeof b.blurb === 'string' ? b.blurb : undefined, image: typeof b.image === 'string' ? b.image : undefined };
     else fail(400, 'unknown change');
-    const site = onSite();
-    const next = applyFeaturedEdit(readFeatured(db).games, edit, (s) => site.has(s));
-    if (typeof next === 'string') fail(400, next);
-    saveFeatured(db, next, h.actor(u));
-    db.audit(h.actor(u), `featured.${op}`, slug, op === 'move' ? { to: Number(b.to) } : undefined);
+    save(u, edit);
+    db.audit(h.actor(u), op === 'feature' ? `featured.${edit.op === 'feature' && edit.on ? 'add' : 'remove'}` : 'featured.set', slug,
+      op === 'set' ? { fields: ['sequence', 'blurb', 'image'].filter((k) => b[k] !== undefined), sequence: b.sequence } : undefined);
     return c.json({ ok: true });
   });
+
+  // A featured game's home-page image. The body is the file itself (png, jpeg or webp, up to MAX_IMAGE_BYTES, its type
+  // read from its content). It goes to the Vault CDN (the release bucket) and the entry keeps its public URL.
+  app.post('/portal/api/vault/featured/:slug/image', async (c) => {
+    const u = editor(c);
+    const slug = c.req.param('slug');
+    if (!readFeatured(db).games.some((e) => e.slug === slug)) fail(400, 'That game isn’t featured.');
+    if (!h.deps.production) fail(503, 'The Vault CDN storage isn’t configured here, so images can’t be uploaded.');
+    const body = await readCapped(c.req.raw, MAX_IMAGE_BYTES);
+    if (body === 'too big') fail(413, `The image is too big: at most ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`);
+    if (!body.length) fail(400, 'Choose an image to upload.');
+    const type = sniffImage(body);
+    if (!type) fail(400, 'That isn’t a PNG, JPEG or WebP image.');
+    const key = featuredImageKey(slug, body, type.ext);
+    await h.deps.production.put(key, body, body.length, { contentType: type.contentType, cacheControl: IMAGE_CACHE });
+    const url = `${h.deps.prodPublicUrl}/${key}`;
+    save(u, { op: 'set', slug, image: url });
+    db.audit(h.actor(u), 'featured.image', slug, { image: url, bytes: body.length });
+    return c.json({ ok: true, image: url });
+  });
+}
+
+// The request body, or 'too big' as soon as it passes max bytes (without reading the rest).
+async function readCapped(req: Request, max: number): Promise<Uint8Array | 'too big'> {
+  if (Number(req.headers.get('content-length') ?? 0) > max) return 'too big';
+  if (!req.body) return new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of req.body as unknown as AsyncIterable<Uint8Array>) {
+    total += chunk.byteLength;
+    if (total > max) return 'too big';
+    chunks.push(chunk);
+  }
+  return new Uint8Array(Buffer.concat(chunks));
 }

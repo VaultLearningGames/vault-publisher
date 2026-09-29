@@ -75,11 +75,20 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   The site ([vault-rebuild](https://github.com/fielddaylab/vault-rebuild)) is built from it. Each game's `studio`
   carries the studio's website as `url`, and `studios` lists every studio with a game on the site (`slug`, `name`,
   `url`) so the site can link maker names. Studio admins set the website on their **Members** page.
-* **Vault → Game availability** shows whether every site game still loads (checked daily by `check-games.yml`; see
-  [docs/setup.md](docs/setup.md#operating-notes)). Each game's page shows its latest result.
-* **Vault → Featured games** picks the games in the home page's Featured Games section, in order, with an optional
-  home-page blurb (short Markdown) and image for each. Release managers edit it; it's stored in `settings`
-  (`site_featured`) and published as `featured` in `/v1/catalog` (games that are off the site are left out).
+* **Vault → Site games** is one table of every site listing: its site status, where it plays from, whether it's
+  featured, and whether it still loads.
+  * **Availability** columns show the latest daily check by `check-games.yml` (see
+    [docs/setup.md](docs/setup.md#operating-notes)): result (hover for why), response time, and when (linking the
+    GitHub run). Each game's page shows its latest result too.
+  * **Featured** is a checkbox for the home page's Featured Games section (at most 9). Release managers tick it; a
+    featured game then gets a sequence number (the home page shows them in ascending sequence, ties by title), an
+    optional home-page description (short Markdown) and an optional image. Unticking keeps the description and image
+    for next time. It's stored in `settings` (`site_featured`) and published as `featured` in `/v1/catalog`:
+    `[{ slug, blurb, image, sequence }]` in display order, leaving out games that are off the site.
+  * **Featured images** are uploaded from the row (PNG, JPEG or WebP, up to 2 MB, type checked by content) to the
+    release bucket at `_site/featured/SLUG-HASH.EXT` (immutable, cached for a year; replaced images aren't deleted),
+    and `image` is then that absolute `cdn.vaultlearninggames.org` URL. Older entries keep a path on the site
+    (`images/featured/*.webp`, in the website repo), so the site must handle both.
 
 **Connecting games:**
 * A studio's first CI publish of a game connects its listing of the same name. Other names can be connected on the page.

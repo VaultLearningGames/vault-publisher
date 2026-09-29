@@ -1,7 +1,8 @@
 // Vault Studio Portal: progressive enhancement for forms, dialogs and the registration snippet.
 (function () {
   // Forms with data-api POST their fields as JSON to that URL. data-confirm asks first (in-page, no confirm()),
-  // data-then="reload" reloads on success, data-autosubmit submits when a select changes.
+  // data-then="reload" reloads on success, data-autosubmit submits when a select or checkbox changes (a checkbox flips
+  // back if that fails). Forms with data-upload POST their file input's file as the request body to that URL.
   function formJson(form) {
     const out = {};
     for (const el of form.elements) {
@@ -17,7 +18,7 @@
   // same card/dialog disabled, so a slow production copy can't be double-submitted or contradicted mid-way.
   let busy = 0;
   window.addEventListener('beforeunload', (e) => { if (busy) e.preventDefault(); });
-  async function submit(form) {
+  async function submit(form, changed) {
     const err = form.querySelector('.err');
     const btn = form.querySelector('button:not([type=button])');
     const scope = form.closest('.card, dialog') || form;
@@ -25,15 +26,18 @@
     if (err) { err.textContent = ''; err.classList.remove('status'); }
     if (btn) { btn.dataset.armed = ''; btn.dataset.label = btn.dataset.label || btn.textContent; }
     const fields = formJson(form);
+    const upload = form.dataset.upload;
+    const file = upload && form.querySelector('input[type=file]').files[0];
+    if (upload && file && file.size > 2 * 1024 * 1024) { if (err) err.textContent = 'The image is too big: at most 2 MB.'; return; }
     locked.forEach((el) => { el.disabled = true; });
     if (btn) { btn.setAttribute('aria-busy', 'true'); btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Working…'; }
     if (err && form.dataset.busy) { err.classList.add('status'); err.textContent = form.dataset.busy; }
     busy++;
     try {
-      const res = await fetch(form.dataset.api, {
+      const res = await fetch(upload || form.dataset.api, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
-        body: JSON.stringify(fields),
+        headers: { 'Content-Type': upload ? file.type || 'application/octet-stream' : 'application/json', 'X-Requested-With': 'vault-portal' },
+        body: upload ? file : JSON.stringify(fields),
         credentials: 'same-origin',
       });
       const body = await res.json().catch(() => ({}));
@@ -49,6 +53,7 @@
     } catch (e) {
       busy--;
       locked.forEach((el) => { el.disabled = false; });
+      if (changed && changed.type === 'checkbox') changed.checked = !changed.checked;
       if (err) { err.classList.remove('status'); err.textContent = e.message; } else alert(e.message);
       if (btn) { btn.removeAttribute('aria-busy'); btn.textContent = btn.dataset.label; }
     }
@@ -57,7 +62,7 @@
   // In-page confirmation: first click turns the button into "Click again to confirm".
   document.addEventListener('submit', (e) => {
     const form = e.target;
-    if (!form.dataset || !form.dataset.api) return;
+    if (!form.dataset || !(form.dataset.api || form.dataset.upload)) return;
     e.preventDefault();
     if (!form.reportValidity()) return;
     const btn = form.querySelector('button:not([type=button])');
@@ -76,7 +81,7 @@
   });
   document.addEventListener('change', (e) => {
     const form = e.target.form;
-    if (form && form.hasAttribute('data-autosubmit') && e.target.tagName === 'SELECT') submit(form);
+    if (form && form.hasAttribute('data-autosubmit') && (e.target.tagName === 'SELECT' || e.target.type === 'checkbox')) submit(form, e.target);
   });
 
   // Dialogs: buttons with data-open="id" fill the dialog's ref fields and open it.

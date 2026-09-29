@@ -1,7 +1,7 @@
 // Game availability checks: does every game on the Vault site still load? scripts/check-games.ts fetches each
 // catalog game's play URL (the network part); this module decides what the result means, so it can be tested
 // without a network. The daily check-games.yml workflow posts each run to POST /v1/admin/game-checks, and Vault
-// staff see it on Vault → Game availability.
+// staff see the latest run on Vault → Site games.
 //
 // ok: loads. warn: loads, but something is worth a look (slow, moved to another site, only on retry, bot
 // protection answered). fail: players can't get it (unreachable, an error status, or it refuses to be framed by

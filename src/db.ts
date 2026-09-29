@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { RefType } from './paths.ts';
 import type { ListingFields } from './listings.ts';
+import type { GameCheck, GameCheckRun } from './game-checks.ts';
 
 // Plain SQL with no SQLite-only features, so a later move to Postgres is a driver swap.
 // Each entry is applied once, in order; PRAGMA user_version tracks progress.
@@ -168,6 +169,21 @@ const MIGRATIONS = [
   ALTER TABLE listings ADD COLUMN game_id INTEGER REFERENCES games(id);
   CREATE INDEX listings_game ON listings (game_id);
   `,
+  // v8: game availability checks (check-games.yml posts one run a day): whether each site game still loads.
+  `
+  CREATE TABLE game_checks (
+    id           INTEGER PRIMARY KEY,
+    checked_at   TEXT NOT NULL,
+    source       TEXT,
+    site         TEXT NOT NULL,
+    ok_count     INTEGER NOT NULL,
+    warn_count   INTEGER NOT NULL,
+    fail_count   INTEGER NOT NULL,
+    results_json TEXT NOT NULL,
+    posted_by    TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+  );
+  `,
 ];
 
 export interface Listing {
@@ -288,6 +304,18 @@ export interface ReleaseRequest {
   decided_at: string | null;
 }
 
+export interface GameCheckRow {
+  id: number;
+  checked_at: string;
+  source: string | null;
+  site: string;
+  ok_count: number;
+  warn_count: number;
+  fail_count: number;
+  posted_by: string;
+  created_at: string;
+}
+
 export interface StaleBuild {
   build_id: number;
   studio_slug: string;
@@ -296,6 +324,7 @@ export interface StaleBuild {
 }
 
 const now = () => new Date().toISOString();
+const GAME_CHECKS_KEPT = 120;
 
 export class Db {
   readonly sqlite: DatabaseSync;
@@ -662,6 +691,33 @@ export class Db {
 
   unpublishListing(id: number) {
     this.sqlite.prepare(`UPDATE listings SET published_json = NULL, published_by = NULL, published_at = NULL WHERE id = ?`).run(id);
+  }
+
+  // ---------- game availability checks ----------
+  // Keeps the most recent GAME_CHECKS_KEPT runs (a daily run is ~50 KB).
+  addGameCheck(run: GameCheckRun, by: string): number {
+    const res = this.sqlite
+      .prepare(`INSERT INTO game_checks (checked_at, source, site, ok_count, warn_count, fail_count, results_json, posted_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(run.checked_at, run.source, run.site, run.counts.ok, run.counts.warn, run.counts.fail, JSON.stringify(run.games), by, now());
+    this.sqlite.prepare('DELETE FROM game_checks WHERE id NOT IN (SELECT id FROM game_checks ORDER BY id DESC LIMIT ?)').run(GAME_CHECKS_KEPT);
+    return Number(res.lastInsertRowid);
+  }
+
+  // Recent runs, newest first, without their per-game results.
+  gameChecks(limit = 30): GameCheckRow[] {
+    return this.sqlite.prepare(`SELECT id, checked_at, source, site, ok_count, warn_count, fail_count, posted_by, created_at
+      FROM game_checks ORDER BY id DESC LIMIT ?`).all(limit) as unknown as GameCheckRow[];
+  }
+
+  // One run with its results; the latest when id is omitted.
+  gameCheck(id?: number): (GameCheckRow & { games: GameCheck[] }) | undefined {
+    const row = (id === undefined
+      ? this.sqlite.prepare('SELECT * FROM game_checks ORDER BY id DESC LIMIT 1').get()
+      : this.sqlite.prepare('SELECT * FROM game_checks WHERE id = ?').get(id)) as (GameCheckRow & { results_json: string }) | undefined;
+    if (!row) return undefined;
+    const { results_json, ...rest } = row;
+    return { ...rest, games: JSON.parse(results_json) as GameCheck[] };
   }
 
   audit(actor: string, action: string, target: string, detail?: unknown) {

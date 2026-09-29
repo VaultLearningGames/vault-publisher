@@ -7,6 +7,7 @@ import type { Db, Game, ManifestFile, Studio } from './db.ts';
 import { copyRelease, makeLive, releasePrefix } from './releases.ts';
 import { catalogEntry } from './listings.ts';
 import { catalogFeatured, readFeatured } from './featured.ts';
+import { parseRun } from './game-checks.ts';
 import { registerPortal, type PortalConfig } from './portal/routes.ts';
 import {
   headersFor,
@@ -135,12 +136,13 @@ export function createApp(deps: AppDeps) {
     }
   }
 
-  // Release actions come only from the admin repository's Release workflow, running in the protected
-  // GitHub environment (which requires a Vault reviewer to approve each run).
+  // Admin actions (releases, Vault uploads, game availability runs) come only from the admin repository's workflows,
+  // running in this system's GitHub environment. (Required reviewers on that environment would also hold up the
+  // daily check-games run.)
   async function admin(c: Context): Promise<GitHubIdentity> {
     const id = await github(c);
     if (id.repository !== deps.adminRepository || id.environment !== deps.adminEnvironment) {
-      fail(403, `release actions must come from ${deps.adminRepository} in the "${deps.adminEnvironment}" environment`);
+      fail(403, `admin actions must come from ${deps.adminRepository} in the "${deps.adminEnvironment}" environment`);
     }
     return id;
   }
@@ -410,6 +412,17 @@ export function createApp(deps: AppDeps) {
   app.post('/v1/admin/previews/:uploadId/finalize', async (c) => {
     const id = await admin(c);
     return c.json(await finishUpload(c.req.param('uploadId'), () => true, `github:${id.actor}`, { repository: id.repository, vault_upload: true }));
+  });
+
+  // A game availability run from the check-games workflow (scripts/check-games.ts --out), shown on
+  // Vault → Game availability. Only this repository's workflow in this system's environment may post.
+  app.post('/v1/admin/game-checks', async (c) => {
+    const id = await admin(c);
+    const run = parseRun(await jsonBody(c));
+    if (typeof run === 'string') fail(400, run);
+    const runId = db.addGameCheck(run, `github:${id.actor}`);
+    db.audit(`github:${id.actor}`, 'game_checks.post', run.site, { run: runId, ...run.counts, source: run.source });
+    return c.json({ id: runId, counts: run.counts, url: `${deps.portal.baseUrl.replace(/\/+$/, '')}/vault/availability?run=${runId}` });
   });
 
   // Delete a preview, e.g. from a workflow triggered by branch deletion.

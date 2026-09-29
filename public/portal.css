@@ -387,3 +387,9 @@ button[aria-busy=true] { opacity: .6; cursor: progress; }
 }
 
 .row-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Vault → Game availability */
+table.avail td.r { white-space: nowrap; }
+table.avail details { margin-top: 4px; }
+table.avail details > div { margin-top: 3px; }
+table.avail details .mono { word-break: break-all; }

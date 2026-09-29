@@ -13,6 +13,7 @@ import { headersFor, isSafeFilePath, isVersionName, sanitizeRefName } from '../p
 import { escape, html, raw, type Html } from './html.ts';
 import { listingPieces, registerListingPages, type ListingRow } from './listings.ts';
 import { registerFeaturedPages } from './featured.ts';
+import { registerAvailabilityPages } from './availability.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -105,6 +106,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
           <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
           <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Site games</a>
           <a href="/vault/featured" class="${active === 'vault-featured' ? 'on' : ''}">Featured games</a>
+          <a href="/vault/availability" class="${active === 'vault-availability' ? 'on' : ''}">Game availability</a>
           <a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>
           <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>` : ''}
       </nav>
@@ -847,4 +849,5 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
 
   registerListingPages(app, listingHelpers);
   registerFeaturedPages(app, listingHelpers);
+  registerAvailabilityPages(app, listingHelpers);
 }

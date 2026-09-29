@@ -9,6 +9,7 @@ import { browseKeys, type Storage } from '../src/storage.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { importListings } from '../src/listings-import.ts';
 import { saveFeatured } from '../src/featured.ts';
+import { countLevels, parseRun, type GameCheck } from '../src/game-checks.ts';
 
 class MemoryStorage implements Storage {
   objects = new Map<string, Uint8Array>();
@@ -79,6 +80,29 @@ if (existsSync(`${rebuild}/migration/games-export.json`)) {
     { slug: 'walden-self-reliance', blurb: '', image: 'images/featured/walden-self-reliance.webp' },
     { slug: 'cozy-river-valley', blurb: '', image: 'images/featured/cozy-river-valley.webp' },
   ], 'user:boss');
+}
+
+// Game availability (Vault → Game availability): a run saved by `node scripts/check-games.ts --out FILE` when
+// $GAME_CHECKS points at one, otherwise a made-up run over the site listings.
+if (process.env.GAME_CHECKS) {
+  const run = parseRun(JSON.parse(readFileSync(process.env.GAME_CHECKS, 'utf8')));
+  if (typeof run === 'string') throw new Error(`GAME_CHECKS: ${run}`);
+  db.addGameCheck(run, 'github:dev');
+} else {
+  const onSite = db.listings({ published: true });
+  const games = onSite.map((l, i): GameCheck => {
+    const f = l.published!;
+    const level = i === 1 ? 'fail' : i === 4 ? 'warn' : 'ok';
+    return { slug: l.slug, title: f.title, studio: l.studio_slug, url: f.play_url, source: 'url', embed: f.embed, status: level === 'fail' ? 404 : 200,
+      final_url: f.play_url, redirects: [], ms: level === 'warn' ? 6400 : 180 + i * 7, attempts: 1, error: null,
+      framing: f.embed ? { allowed: true, reason: 'no framing restrictions' } : null, level,
+      problems: level === 'fail' ? ['HTTP 404 Not Found'] : level === 'warn' ? ['Slow: 6.4 s to respond'] : [] };
+  });
+  const day = (n: number) => new Date(Date.now() - n * 86400_000).toISOString();
+  for (const n of [2, 1, 0]) {
+    const run = { checked_at: day(n), site: 'https://vaultlearninggames.org', source: 'https://github.com/VaultLearningGames/vault-publisher/actions', games: n ? games.map((g) => ({ ...g, level: 'ok' as const, problems: [] })) : games };
+    db.addGameCheck({ ...run, counts: countLevels(run.games) }, 'github:dev');
+  }
 }
 
 const app = createApp({

@@ -1,0 +1,101 @@
+name: Check games
+
+# Checks that every game on a Vault site still loads (scripts/check-games.ts): each catalog game's play address
+# answers, and games shown in the site's player allow being framed by the site. Each run:
+#   - posts its results to that system's portal (Vault → Game availability),
+#   - writes a job summary,
+#   - keeps one open issue per environment ("Game availability (staging)", label game-availability) listing what
+#     fails, and closes it when everything passes.
+# Games being down doesn't fail the run (that's what the report and issue are for); only a check that can't run does.
+# Daily for both systems; run it by hand for one.
+on:
+  schedule:
+    - cron: '23 11 * * *'   # 11:23 UTC, early morning in the US
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which system to check
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(github.event_name == 'schedule' && '["staging","production"]' || format('["{0}"]', inputs.environment)) }}
+    # Runs in the system's environment: its variables, and an OIDC token that system's portal accepts.
+    environment: ${{ matrix.environment }}
+    concurrency: check-games-${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ENVIRONMENT: ${{ matrix.environment }}
+      PORTAL: ${{ vars.PORTAL_URL }}
+      SITE: ${{ vars.SITE_URL }}     # optional; defaults to the portal's address without "portal."
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+
+    - name: Check games
+      id: check
+      run: |
+        set -euo pipefail
+        node scripts/check-games.ts --portal "$PORTAL" ${SITE:+--site "$SITE"} --source "$RUN_URL" \
+          --out game-checks.json --summary summary.md --issue issue.md
+        cat summary.md >> "$GITHUB_STEP_SUMMARY"
+        skipped=$(jq -r '.skipped // empty' game-checks.json)
+        if [ -n "$skipped" ]; then echo "::notice title=Skipped $ENVIRONMENT::$skipped"; fi
+        echo "skipped=${skipped:+true}" >> "$GITHUB_OUTPUT"
+        jq -r '.games[] | select(.level == "fail") | "::warning title=\(.slug) fails::\(.problems | join("; "))"' game-checks.json
+
+    - name: Post results to the portal
+      if: steps.check.outputs.skipped != 'true'
+      run: |
+        set -euo pipefail
+        token=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=vault-publisher" | jq -r .value)
+        res=$(curl -sS -w '\n%{http_code}' -X POST "$PORTAL/v1/admin/game-checks" \
+          -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data-binary @game-checks.json)
+        code=$(echo "$res" | tail -1); json=$(echo "$res" | sed '$d')
+        if [ "$code" != 200 ]; then echo "::error::Posting to $PORTAL failed (HTTP $code): $(echo "$json" | jq -r .error 2>/dev/null || echo "$json")"; exit 1; fi
+        echo "Posted: $(echo "$json" | jq -r .url)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+    # Runs even if posting failed, so the issue stays current.
+    - name: Update the tracking issue
+      if: ${{ !cancelled() && steps.check.outcome == 'success' && steps.check.outputs.skipped != 'true' }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+        R: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        title="Game availability ($ENVIRONMENT)"
+        label=game-availability
+        gh label create "$label" -R "$R" --color d93f0b --description 'Games on the Vault site that fail the daily availability check' 2>/dev/null || true
+        num=$(gh issue list -R "$R" --label "$label" --state open --limit 50 --json number,title \
+          --jq "map(select(.title == \"$title\"))[0].number // empty")
+        fails=$(jq '.counts.fail' game-checks.json)
+        if [ "$fails" -gt 0 ]; then
+          if [ -z "$num" ]; then
+            gh issue create -R "$R" --title "$title" --label "$label" --body-file issue.md
+          else
+            # Comment when the set of failing games changes, so watchers hear about it; the body always updates.
+            before=$(gh issue view "$num" -R "$R" --json body --jq .body | grep -o 'failing: [^ ]*' || true)
+            after=$(grep -o 'failing: [^ ]*' issue.md || true)
+            gh issue edit "$num" -R "$R" --body-file issue.md
+            if [ "$before" != "$after" ]; then
+              gh issue comment "$num" -R "$R" --body "Failing games changed: now ${after#failing: } ($RUN_URL)."
+            fi
+          fi
+        elif [ -n "$num" ]; then
+          gh issue close "$num" -R "$R" --comment "Every game passes as of $RUN_URL."
+        fi

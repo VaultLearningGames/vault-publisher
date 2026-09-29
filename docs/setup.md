@@ -140,7 +140,7 @@ setenv production SERVICE=vault-publisher \
   PUBLISHER_SERVICE_ACCOUNT=vault-publisher@$PROJECT.iam.gserviceaccount.com \
   BUILDS_BUCKET=builds-vaultlearninggames BUILDS_PUBLIC_URL=https://builds.vaultlearninggames.org \
   CDN_BUCKET=cdn-vaultlearninggames CDN_PUBLIC_URL=https://cdn.vaultlearninggames.org \
-  PORTAL_URL=https://portal.vaultlearninggames.org ADMIN_ENVIRONMENT=production \
+  PORTAL_URL=https://portal.vaultlearninggames.org SITE_URL=https://vaultlearninggames.org ADMIN_ENVIRONMENT=production \
   LITESTREAM_BUCKET=$PROJECT-vault-publisher-db \
   TASK_INVOKER_EMAIL=vault-publisher-scheduler@$PROJECT.iam.gserviceaccount.com \
   PORTAL_GITHUB_CLIENT_ID=$(gh variable get PORTAL_GITHUB_CLIENT_ID -R $R) \
@@ -150,7 +150,7 @@ setenv staging SERVICE=vault-publisher-staging \
   PUBLISHER_SERVICE_ACCOUNT=vault-publisher-staging@$PROJECT.iam.gserviceaccount.com \
   BUILDS_BUCKET=builds-vaultlearninggames-staging BUILDS_PUBLIC_URL=https://builds.vaultlearninggames-staging.org \
   CDN_BUCKET=cdn-vaultlearninggames-staging CDN_PUBLIC_URL=https://cdn.vaultlearninggames-staging.org \
-  PORTAL_URL=https://portal.vaultlearninggames-staging.org ADMIN_ENVIRONMENT=staging \
+  PORTAL_URL=https://portal.vaultlearninggames-staging.org SITE_URL=https://vaultlearninggames-staging.org ADMIN_ENVIRONMENT=staging \
   LITESTREAM_BUCKET=$PROJECT-vault-publisher-staging-db LITESTREAM_SEED_BUCKET=$PROJECT-vault-publisher-db \
   TASK_INVOKER_EMAIL=vault-publisher-scheduler@$PROJECT.iam.gserviceaccount.com \
   PORTAL_GITHUB_CLIENT_ID=<staging OAuth app client ID> \
@@ -252,3 +252,13 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
 - **Deploys** briefly run the old and new instance together. Writes are rare (one per push), but avoid
   deploying while a large batch of game builds is publishing.
 - **Adding a studio:** add it to `studios.json` (the numeric org id is `gh api orgs/NAME --jq .id`) and deploy.
+- **Game availability:** `check-games.yml` runs daily at 11:23 UTC for both systems (or by hand for one, *Run
+  workflow* → environment). It fetches every game in the portal's `/v1/catalog`, checks that its play address loads
+  and, for games shown in the site's player, that it allows being framed by the site. It posts the run to that
+  system's portal (**Vault → Game availability**, via `POST /v1/admin/game-checks`, OIDC like releases), writes a job
+  summary, and keeps one open issue per system, *Game availability (staging)* / *(production)*, labelled
+  `game-availability`, closed when everything passes. Games being down doesn't fail the run; a portal without
+  `/v1/catalog` is skipped. It reads `PORTAL_URL` and the optional `SITE_URL` (the site origin framing is checked
+  against; default: `PORTAL_URL` without `portal.`) from the environment. Run it locally with
+  `node scripts/check-games.ts --portal https://portal.vaultlearninggames-staging.org` (add `--out run.json` for the
+  JSON, `--only slug,slug` for a few games); it only reads, and never posts.

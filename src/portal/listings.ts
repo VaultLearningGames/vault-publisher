@@ -10,6 +10,7 @@ import { importListings, type ExportedPage, type Override } from '../listings-im
 import { changedFields, FIELD_LABEL, GRADES, isListingSlug, normalize, problems, type ListingFields } from '../listings.ts';
 import { html, type Html } from './html.ts';
 import { ago, head, pill, who } from './routes.ts';
+import { availabilityLine } from './availability.ts';
 import type { PortalDeps } from './routes.ts';
 
 export interface ListingHelpers {
@@ -79,7 +80,8 @@ export function listingPieces(h: ListingHelpers) {
       else next = html`<p class="small muted">Not on the Vault CDN yet. It moves over when ${s.name}’s builds publish to Vault (<a href="/s/${s.slug}/register">set up</a>), or when Vault uploads its current version.</p>`;
     }
     const waiting = l && l.review === 'submitted' ? html`<p class="small">${pill('wait', 'Waiting for Vault')} ${changedFields(l.published, l.draft).map((k) => FIELD_LABEL[k]).join(', ')}</p>` : '';
-    return html`<div class="card"><h2>Where it plays</h2>${status}${waiting}${next}</div>`;
+    const checked = pub ? availabilityLine(db, l!.slug, h.isStaff(u)) : '';
+    return html`<div class="card"><h2>Where it plays</h2>${status}${checked}${waiting}${next}</div>`;
   }
 
   // The listing editor (draft) and its status card.

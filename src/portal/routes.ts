@@ -11,6 +11,8 @@ import { fail, jsonBody } from '../app.ts';
 import type { Build, Game, Membership, Release, StudioRole, Studio, User, VaultRole } from '../db.ts';
 import { headersFor, isSafeFilePath, isVersionName, sanitizeRefName } from '../paths.ts';
 import { escape, html, raw, type Html } from './html.ts';
+import { listingPieces, registerListingPages, type ListingRow } from './listings.ts';
+import { registerFeaturedPages } from './featured.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -62,7 +64,7 @@ function githubOAuth(clientId: string, clientSecret: string): OAuthClient {
 // ---------- formatting ----------
 const ROLE_LABEL: Record<StudioRole, string> = { viewer: 'Viewer', maintainer: 'Maintainer', admin: 'Studio admin' };
 const VAULT_LABEL: Record<VaultRole, string> = { none: '—', release_manager: 'Release manager', admin: 'Vault admin' };
-function ago(iso: string | null | undefined): string {
+export function ago(iso: string | null | undefined): string {
   if (!iso) return '—';
   const s = (Date.now() - Date.parse(iso)) / 1000;
   if (s < 90) return 'just now';
@@ -72,8 +74,8 @@ function ago(iso: string | null | undefined): string {
   return iso.slice(0, 10);
 }
 const mb = (bytes: number) => (bytes >= 1e6 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
-const who = (actor: string) => actor.replace(/^(github|user):/, '');
-const pill = (kind: 'ok' | 'run' | 'bad' | 'wait' | 'off' | 'brass', text: string) => html`<span class="pill p-${kind}">${text}</span>`;
+export const who = (actor: string) => actor.replace(/^(github|user):/, '');
+export const pill = (kind: 'ok' | 'run' | 'bad' | 'wait' | 'off' | 'brass', text: string) => html`<span class="pill p-${kind}">${text}</span>`;
 
 // ---------- page layout ----------
 // Content hashes of portal.css/js, so a deploy changes their URLs and browsers never use stale copies.
@@ -101,6 +103,8 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
         ${staff ? html`
           <div class="nav-sep">Vault</div>
           <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
+          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Site games</a>
+          <a href="/vault/featured" class="${active === 'vault-featured' ? 'on' : ''}">Featured games</a>
           <a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>
           <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>` : ''}
       </nav>
@@ -118,13 +122,13 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
 <script src="/assets/portal.js?v=${assetVersion}" defer></script></body></html>`;
 }
 
-const head = (title: string | Html, sub?: string | Html, actions?: Html | string, crumbs?: Html) => html`
+export const head = (title: string | Html, sub?: string | Html, actions?: Html | string, crumbs?: Html) => html`
   ${crumbs ? html`<div class="crumbs">${crumbs}</div>` : ''}
   <div class="page-head"><div><h1>${title}</h1>${sub ? html`<p>${sub}</p>` : ''}</div>${actions ? html`<div class="actions">${actions}</div>` : ''}</div>`;
 
 // ---------- registration snippets ----------
 const SNIPPETS = {
-  unity: (studio: string, game: string) => `# .github/workflows/vault.yml
+  unity: (builds: string, studio: string, game: string) => `# .github/workflows/vault.yml
 name: Vault
 on: { push: {}, delete: {}, workflow_dispatch: {} }
 permissions: { contents: read, id-token: write }
@@ -144,8 +148,8 @@ jobs:
     if: github.event_name == 'delete'
     uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
     with: { game: ${game} }
-# Publishes every branch and tag to https://cdn.vaultlearninggames-staging.org/${studio}/${game}/<branch>/`,
-  committed: (studio: string, game: string) => `# .github/workflows/vault.yml
+# Publishes every branch and tag to ${builds}/${studio}/${game}/<branch>/`,
+  committed: (builds: string, studio: string, game: string) => `# .github/workflows/vault.yml
 name: Vault
 on: { push: {}, delete: {}, workflow_dispatch: {} }
 permissions: { contents: read, id-token: write }
@@ -153,8 +157,8 @@ jobs:
   preview:
     uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
     with: { game: ${game}, path: WebGL }   # the folder that contains index.html
-# Publishes every branch and tag to https://cdn.vaultlearninggames-staging.org/${studio}/${game}/<branch>/`,
-  action: (studio: string, game: string) => `# In an existing workflow, after your own build step:
+# Publishes every branch and tag to ${builds}/${studio}/${game}/<branch>/`,
+  action: (builds: string, studio: string, game: string) => `# In an existing workflow, after your own build step:
     permissions: { contents: read, id-token: write }
     steps:
       # ... your build writes the web build to ./dist ...
@@ -163,7 +167,7 @@ jobs:
           game: ${game}
           path: dist
           publisher-url: \${{ vars.VAULT_PUBLISHER_URL }}
-# Publishes to https://cdn.vaultlearninggames-staging.org/${studio}/${game}/<branch>/`,
+# Publishes to ${builds}/${studio}/${game}/<branch>/`,
 };
 
 export function registerPortal(app: Hono, deps: PortalDeps) {
@@ -213,6 +217,11 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const canManageMembers = (u: User, s: Studio) => isVaultAdmin(u) || roleIn(u, s) === 'admin';
   const navFor = (u: User, studio?: Studio): Nav => ({ user: u, studio, memberships: db.membershipsForLogin(u.login), allStudios: db.studios() });
   const actor = (u: User) => `user:${u.login}`;
+  // Site listings (listings.ts): shown with each game, since a game is its listing and/or its CDN game.
+  const listingHelpers = { db, deps, page: (c: Context, t: string, b: Html, o?: { studio?: Studio; active?: string; status?: number }) => page(c, t, b, o),
+    denied: (c: Context, m: string, st?: number) => denied(c, m, st), signedIn: (c: Context) => signedIn(c), studioFor: (c: Context, u: User) => studioFor(c, u),
+    apiUser: (c: Context) => apiUser(c), actor, isStaff, canRelease, isVaultAdmin, roleIn };
+  const LP = listingPieces(listingHelpers);
 
   function page(c: Context, title: string, body: Html, opts: { studio?: Studio; active?: string; status?: number } = {}) {
     const u = currentUser(c)!;
@@ -323,31 +332,49 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   app.get('/s/:studio', (c) => {
     const u = signedIn(c); if (u instanceof Response) return u;
     const s = studioFor(c, u); if (s instanceof Response) return s;
-    const games = db.gamesForStudio(s.id);
-    let live = 0, released = 0;
+    // A game is its site listing and/or its CDN game: listings first (with their CDN game, if connected), then
+    // CDN games that aren't on the site yet.
+    const listings = db.listings({ studioId: s.id }) as ListingRow[];
+    const cdnGames = db.gamesForStudio(s.id);
+    const linked = new Set(listings.map((l) => l.game_id));
+    const entries: { l: ListingRow | null; g: Game | null }[] = [
+      ...listings.map((l) => ({ l, g: l.game_id ? cdnGames.find((g) => g.id === l.game_id) ?? null : null })),
+      ...cdnGames.filter((g) => !linked.has(g.id)).map((g) => ({ l: null, g })),
+    ];
+    let onCdn = 0, ready = 0;
+    const testVersions = cdnGames.reduce((n, g) => n + db.liveBuilds(g.id).length, 0);   // per CDN game (a collection counts once)
     const openRequests = db.releaseRequests({ status: 'requested' }).filter((r) => r.studio_slug === s.slug);
-    const rows = games.map((g) => {
-      const builds = db.liveBuilds(g.id);
-      live += builds.length;
-      const cur = db.currentRelease(g.id);
-      if (cur) released++;
-      const shown = builds.slice(0, 4);
+    const rows = entries.map(({ l, g }) => {
+      const builds = g ? db.liveBuilds(g.id) : [];
+      const cur = g ? db.currentRelease(g.id) : undefined;
+      const playsCdn = l?.published?.play_source === 'cdn' && !!cur;
+      if (playsCdn) onCdn++; else if (cur && l) ready++;
+      const shown = builds.slice(0, 3);
+      const slug = l?.slug ?? g!.slug;
       return html`<tr>
-        <td class="proj"><a href="/s/${s.slug}/g/${g.slug}"><b>${g.slug}</b></a><span><a class="muted" href="https://github.com/${g.repository}">${g.repository}</a></span></td>
-        <td>${builds.length ? html`<div class="refs">${shown.map((b) => html`<a class="ref-chip ${b.ref_type}" href="${deps.previewUrl(s, g, b.ref_name)}" title="${b.ref_type} · ${ago(b.updated_at)}">${b.ref_name}</a>`)}${builds.length > shown.length ? html`<span class="muted small">+${builds.length - shown.length}</span>` : ''}</div>` : html`<span class="muted small">No test versions</span>`}</td>
-        <td>${cur ? html`<span class="rel">${cur.version}</span> <span class="muted small">${ago(cur.approved_at)}</span>` : html`<span class="muted small">Not released</span>`}</td>
-        <td class="r small">${builds[0] ? ago(builds[0].updated_at) : '—'}</td></tr>`;
+        <td class="proj"><a href="/s/${s.slug}/g/${slug}"><b>${l?.draft.title || slug}</b></a><span>${l ? html`/games/${l.slug}/` : 'not on the site'}${g ? html` · CDN <span class="mono">${g.slug}</span>` : ''}</span></td>
+        <td>${LP.state(l)}</td>
+        <td>${LP.playsFrom(l, g)}${cur && !playsCdn && l ? html`<br><span class="small">${pill('ok', `CDN ${cur.version} ready`)}</span>` : ''}</td>
+        <td>${g ? (builds.length ? html`<div class="refs">${shown.map((bd) => html`<a class="ref-chip ${bd.ref_type}" href="${deps.previewUrl(s, g, bd.ref_name)}" title="${bd.ref_type} · ${ago(bd.updated_at)}">${bd.ref_name}</a>`)}${builds.length > shown.length ? html`<span class="muted small">+${builds.length - shown.length}</span>` : ''}</div>` : html`<span class="muted small">No test versions</span>`)
+          : html`<span class="muted small">Not on the CDN yet</span>`}</td>
+        <td>${cur ? html`<span class="rel">${cur.version}</span> <span class="muted small">${ago(cur.approved_at)}</span>` : html`<span class="muted small">—</span>`}</td></tr>`;
     });
-    const body = html`${head(s.name, html`Games on Vault. <b>Staging</b> is yours to test on; <b>production</b> is what classrooms play, released by Vault.`,
-      html`<a class="btn" href="/s/${s.slug}/register">Register a game</a>`)}
+    const body = html`${head(s.name, html`Every ${s.name} game on Vault. Games play from their <b>web address</b> until they move to the <b>Vault CDN</b>: staging is yours to test on, production is what classrooms play, released by Vault.`,
+      html`<a class="btn" href="/s/${s.slug}/register">Set up CDN builds</a>`)}
       <div class="kpis four">
-        <div class="kpi"><div class="v">${games.length}</div><div class="l">Games</div></div>
-        <div class="kpi"><div class="v">${live}</div><div class="l">Test versions on staging</div></div>
-        <div class="kpi"><div class="v">${released}</div><div class="l">Live for classrooms</div></div>
-        <div class="kpi"><div class="v">${openRequests.length}</div><div class="l">Release requests open</div></div>
+        <div class="kpi"><div class="v">${entries.length}</div><div class="l">Games</div></div>
+        <div class="kpi"><div class="v">${onCdn}</div><div class="l">Playing from the Vault CDN</div></div>
+        <div class="kpi"><div class="v">${ready}</div><div class="l">CDN release ready to switch</div></div>
+        <div class="kpi"><div class="v">${testVersions}</div><div class="l">Test versions on staging</div></div>
       </div>
-      ${games.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Staging (testing)</th><th>Production (classrooms)</th><th class="r">Last build</th></tr></thead><tbody>${rows}</tbody></table></div>`
-        : html`<div class="card"><p>No games yet. <a href="/s/${s.slug}/register">Register your first game</a>: it appears here after its first build.</p></div>`}`;
+      ${openRequests.length ? html`<p class="small">${pill('wait', `${openRequests.length} release request${openRequests.length > 1 ? 's' : ''} waiting for Vault`)}</p>` : ''}
+      ${entries.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Site</th><th>Plays from</th><th>Staging (testing)</th><th>Production</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : html`<div class="card"><p>No games yet. <a href="/s/${s.slug}/register">Set up CDN builds</a>, or ask Vault to add your games to the site.</p></div>`}
+      ${LP.canEdit(u, s) ? html`<div class="card" style="margin-top:18px"><h2>Add a game to the site</h2><form data-api="/portal/api/s/${s.slug}/listings" data-then="reload" class="inline-form">
+          <label class="field"><span class="lab">Title</span><input name="title" required autocomplete="off"></label>
+          <label class="field"><span class="lab">Page address</span><input name="slug" required pattern="[a-z0-9][a-z0-9-]*" autocomplete="off" placeholder="my-game"></label>
+          <button class="btn pri">Add</button><span class="err" role="status" aria-live="polite"></span></form>
+          <p class="small muted">It plays from a web address until it has a release on the Vault CDN.</p></div>` : ''}`;
     return page(c, s.name, body, { studio: s, active: 'studio' });
   });
 
@@ -397,11 +424,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   });
 
   // ---------- game page ----------
-  app.get('/s/:studio/g/:game', (c) => {
-    const u = signedIn(c); if (u instanceof Response) return u;
-    const s = studioFor(c, u); if (s instanceof Response) return s;
-    const g = db.game(s.id, c.req.param('game'));
-    if (!g) return denied(c, 'That game doesn’t exist.', 404);
+  // The Vault CDN side of a game: staging test versions, production releases, release requests, and their dialogs.
+  function cdnPanels(u: User, s: Studio, g: Game): { main: Html; side: Html; dialogs: Html } {
     const builds = db.liveBuilds(g.id);
     const releases = db.releases(g.id);
     const cur = db.currentRelease(g.id);
@@ -411,7 +435,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const api = `/portal/api/s/${s.slug}/g/${g.slug}`;
     const buildRows = builds.map((b: Build) => html`<tr>
       <td><span class="mono">${b.ref_name}</span> <span class="tag">${b.ref_type}</span></td>
-      <td class="small"><a class="mono" href="https://github.com/${g.repository}/commit/${b.commit_sha}">${b.commit_sha.slice(0, 7)}</a></td>
+      <td class="small">${g.repository ? html`<a class="mono" href="https://github.com/${g.repository}/commit/${b.commit_sha}">${b.commit_sha.slice(0, 7)}</a>` : html`<span class="muted">uploaded by Vault</span>`}</td>
       <td class="small num">${b.file_count} files · ${mb(b.total_bytes)}</td>
       <td class="small">${ago(b.updated_at)}<br><span class="muted">by ${b.actor}</span></td>
       <td class="small"><a href="${deps.previewUrl(s, g, b.ref_name)}" target="_blank" rel="noopener">Play ↗</a></td>
@@ -431,7 +455,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       return html`<tr>
         <td class="mono">${r.version}</td>
         <td>${status}${r.withdrawn_at && r.withdrawn_note ? html`<br><span class="small muted">“${r.withdrawn_note}”</span>` : ''}</td>
-        <td class="small">from <span class="mono">${r.source_ref}</span>${r.commit_sha ? html` · <a class="mono" href="https://github.com/${g.repository}/commit/${r.commit_sha}">${r.commit_sha.slice(0, 7)}</a>` : ''}</td>
+        <td class="small">from <span class="mono">${r.source_ref}</span>${r.commit_sha && g.repository ? html` · <a class="mono" href="https://github.com/${g.repository}/commit/${r.commit_sha}">${r.commit_sha.slice(0, 7)}</a>` : ''}</td>
         <td class="small">${r.approved_at.slice(0, 10)} · ${who(r.approved_by)}</td>
         <td class="small"><a href="${deps.prodPublicUrl}/${s.slug}/${g.slug}/_releases/${r.version}/" target="_blank" rel="noopener">Play ↗</a></td>
         <td class="r"><div class="row-actions">${actions}</div></td></tr>`;
@@ -442,9 +466,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       <td class="small">${who(r.requested_by)} · ${ago(r.created_at)}${r.notes ? html`<br><span class="muted">“${r.notes}”</span>` : ''}${r.decision_note ? html`<br><span class="muted">Vault: “${r.decision_note}”</span>` : ''}</td>
       <td class="r">${r.status === 'requested' && release ? html`<a class="btn sm" href="/vault#req-${r.id}">Review</a>` : ''}
         ${r.status === 'requested' && (r.requested_by === actor(u) || canManageMembers(u, s)) ? html`<form data-api="/portal/api/requests/${r.id}/withdraw" data-confirm="Withdraw this request?"><button class="btn sm">Withdraw</button><span class="err" role="status" aria-live="polite"></span></form>` : ''}</td></tr>`);
-    const body = html`${head(g.slug, html`<a href="https://github.com/${g.repository}">${g.repository}</a> · classrooms play <a href="${stable}" target="_blank" rel="noopener">${stable}</a>`, html`<a class="btn" href="/s/${s.slug}/files?path=${encodeURIComponent(g.slug + '/')}">Browse files</a>`, html`<a href="/s/${s.slug}">${s.name}</a> / ${g.slug}`)}
-      <div class="grid g-main">
-        <div class="grid">
+    const main = html`<div class="grid">
           <div class="card"><h2>Staging · test versions <small>every branch and tag your builds publish · kept 90 days after the last push</small></h2>
             ${builds.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Version</th><th>Commit</th><th>Size</th><th>Published</th><th>Preview</th><th></th></tr></thead><tbody>${buildRows}</tbody></table></div>`
               : html`<p class="muted">Nothing on staging yet. Push to a branch once the workflow is in place (<a href="/s/${s.slug}/register">instructions</a>).</p>`}</div>
@@ -452,8 +474,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
             ${releases.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Release</th><th>Status</th><th>Built from</th><th>Approved</th><th>Link</th><th></th></tr></thead><tbody>${relRows}</tbody></table></div>`
               : html`<p class="muted">Nothing released yet.${request ? ' Choose “Request release” on a test version above.' : ''}</p>`}</div>
           ${requests.length ? html`<div class="card"><h2>Release requests</h2><div class="tbl-wrap"><table><thead><tr><th>Version</th><th>Build</th><th>Status</th><th>Requested</th><th></th></tr></thead><tbody>${reqRows}</tbody></table></div></div>` : ''}
-        </div>
-        <div class="grid" style="align-content:start">
+        </div>`;
+    const side = html`<div class="grid" style="align-content:start">
           <div class="card"><h2>Live for classrooms</h2>${cur ? html`<div class="big-rel">${cur.version}</div><p class="small muted">approved ${cur.approved_at.slice(0, 10)} by ${who(cur.approved_by)}</p>` : html`<p class="muted">Nothing yet.</p>`}
             <p class="small">Stable link (always the current release):<br><a class="mono" href="${stable}" target="_blank" rel="noopener">${stable}</a></p>
             ${g.frozen_at ? html`<p class="small">${pill('wait', 'Frozen')} by ${who(g.frozen_by ?? '')} ${ago(g.frozen_at)}${g.frozen_note ? html`: “${g.frozen_note}”` : ''}. Only Vault can change the current release.</p>` : ''}
@@ -465,9 +487,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
             <li>Test it on staging, then ${release ? html`choose <b>Release…</b>` : request ? html`choose <b>Request release…</b>` : 'a maintainer requests a release'}.</li>
             <li>Vault copies that exact build to production and makes it current. Earlier releases stay available for rollback.</li>
             <li>Maintainers can switch between approved releases or roll back at any time, unless Vault has frozen the game or withdrawn a release.</li></ol></div>
-        </div>
-      </div>
-      ${release ? html`<dialog id="withdraw"><form data-api="${api}/withdraw" class="dlg" data-then="reload">
+        </div>`;
+    const dialogs = html`${release ? html`<dialog id="withdraw"><form data-api="${api}/withdraw" class="dlg" data-then="reload">
         <h2>Withdraw a release</h2>
         <p class="small"><b class="mono" data-fill="ref"></b> stays on production at its version link, but nobody can make it current again until Vault restores it.</p>
         <input type="hidden" name="ref"><label class="field"><span>Why</span><input name="note" required placeholder="e.g. logs student names; fixed in 0.1.2"></label>
@@ -489,14 +510,57 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
         <label class="field"><span class="lab">Notes for Vault</span><textarea name="notes" placeholder="What changed, what to check"></textarea></label>
         <div class="dlg-foot"><span class="err" role="status" aria-live="polite"></span><button type="button" class="btn" data-close>Cancel</button><button class="btn pri">Send request</button></div>
       </form></dialog>` : ''}`;
-    return page(c, g.slug, body, { studio: s, active: 'studio' });
+    return { main, side, dialogs };
+  }
+
+  // A game's page: its site listing and/or its CDN game. Games already on the site that only play from a web address
+  // have just a listing; once they're on the Vault CDN, the same page switches them over.
+  app.get('/s/:studio/g/:game', (c) => {
+    const u = signedIn(c); if (u instanceof Response) return u;
+    const s = studioFor(c, u); if (s instanceof Response) return s;
+    const slug = c.req.param('game');
+    let l = db.listing(slug) as ListingRow | undefined;
+    if (l && l.studio_id !== s.id) l = undefined;
+    let g: Game | null = l?.game_id ? db.gameById(l.game_id) ?? null : null;
+    if (!l) {
+      g = db.game(s.id, slug) ?? null;
+      if (!g) return denied(c, 'That game doesn’t exist.', 404);
+      const lgs = db.listingsForGame(g.id);
+      if (lgs.length === 1) return c.redirect(`/s/${s.slug}/g/${lgs[0].slug}${c.req.query('tab') ? `?tab=${c.req.query('tab')}` : ''}`);
+    }
+    const asked = c.req.query('tab');
+    const tab = asked === 'cdn' || asked === 'listing' ? asked : l || (g && db.listingsForGame(g.id).length) ? 'listing' : 'cdn';
+    const title = l?.draft.title || g!.slug;
+    const stable = g ? `${deps.prodPublicUrl}/${s.slug}/${g.slug}/` : null;
+    const sub = html`${l?.published ? html`<a href="https://vaultlearninggames.org/games/${l.slug}/" target="_blank" rel="noopener">vaultlearninggames.org/games/${l.slug}/</a>` : l ? html`<span class="muted">vaultlearninggames.org/games/${l.slug}/ (not published)</span>` : html`<span class="muted">not on the site</span>`}
+      ${g ? html` · CDN <a class="mono" href="${stable}" target="_blank" rel="noopener">${s.slug}/${g.slug}</a>` : ''}${g?.repository ? html` · <a href="https://github.com/${g.repository}">${g.repository}</a>` : g ? html` · <span class="muted">uploaded by Vault</span>` : ''}`;
+    const tabs = html`<div class="tabs"><a href="?tab=listing" class="${tab === 'listing' ? 'on' : ''}">Site listing</a><a href="?tab=cdn" class="${tab === 'cdn' ? 'on' : ''}">Vault CDN${g ? html` · ${db.currentRelease(g.id)?.version ?? 'no release'}` : ''}</a></div>`;
+    let content: Html | string;
+    let dialogs: Html | string = '';
+    if (tab === 'listing') {
+      if (l) { const ed = LP.editor(u, s, l, g); content = html`<div class="grid g-main">${ed.form}<div class="grid" style="align-content:start">${ed.side}</div></div>`; }
+      else {
+        const served = db.listingsForGame(g!.id) as ListingRow[];
+        content = served.length
+          ? html`<div class="card"><h2>Site games in this CDN game</h2><div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Folder</th><th>Site</th></tr></thead><tbody>${served.map((x) => html`<tr><td class="proj"><a href="/s/${s.slug}/g/${x.slug}"><b>${x.draft.title || x.slug}</b></a><span>/games/${x.slug}/</span></td><td class="mono small">${x.draft.cdn_path || '/'}</td><td>${LP.state(x)}</td></tr>`)}</tbody></table></div></div>`
+          : LP.createListingCard(u, s, g!);
+      }
+    } else if (g) {
+      const p = cdnPanels(u, s, g);
+      content = html`<div class="grid g-main">${p.main}${p.side}</div>`;
+      dialogs = p.dialogs;
+    } else content = LP.linkCard(u, s, l!);
+    const body = html`${head(title, sub, g ? html`<a class="btn" href="/s/${s.slug}/files?path=${encodeURIComponent(g.slug + '/')}">Browse files</a>` : '', html`<a href="/s/${s.slug}">${s.name}</a> / ${title}`)}
+      ${LP.playCard(u, s, l ?? null, g)}
+      ${tabs}${content}${dialogs}`;
+    return page(c, title, body, { studio: s, active: 'studio' });
   });
 
   // ---------- register instructions ----------
   app.get('/s/:studio/register', (c) => {
     const u = signedIn(c); if (u instanceof Response) return u;
     const s = studioFor(c, u); if (s instanceof Response) return s;
-    const snippets = JSON.stringify({ unity: SNIPPETS.unity(s.slug, 'GAME'), committed: SNIPPETS.committed(s.slug, 'GAME'), action: SNIPPETS.action(s.slug, 'GAME') });
+    const snippets = JSON.stringify({ unity: SNIPPETS.unity(deps.stagingPublicUrl, s.slug, 'GAME'), committed: SNIPPETS.committed(deps.stagingPublicUrl, s.slug, 'GAME'), action: SNIPPETS.action(deps.stagingPublicUrl, s.slug, 'GAME') });
     const body = html`${head('Register a game', html`A game registers itself the first time its repository publishes to Vault. Pick how it builds, name it, and add one workflow file.`, '', html`<a href="/s/${s.slug}">${s.name}</a> / Register`)}
       <div class="grid g-main"><div class="grid">
         <div class="card">
@@ -518,7 +582,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
             <li>Your GitHub organization must be registered with Vault. ${s.github_owner ? html`This studio publishes from <b>github.com/${s.github_owner}</b>.` : html`<b>This studio has no GitHub organization registered yet; ask Vault.</b>`}</li>
           </ul></div>
         <div class="card"><h2>3. Push</h2>
-          <p>Every push to a branch or tag builds and publishes a test version to <span class="mono">https://cdn.vaultlearninggames-staging.org/${s.slug}/GAME/BRANCH/</span>. The game then appears under <a href="/s/${s.slug}">Games</a>. Deleting a branch removes its test version.</p>
+          <p>Every push to a branch or tag builds and publishes a test version to <span class="mono">${deps.stagingPublicUrl}/${s.slug}/GAME/BRANCH/</span>. The game then appears under <a href="/s/${s.slug}">Games</a>. Deleting a branch removes its test version.</p>
           <p>When a version is ready for classrooms, push a version tag, test it on staging, and choose <b>Request release</b> on the game’s page.</p></div>
       </div>
       <div class="grid" style="align-content:start">
@@ -781,4 +845,6 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     return c.json({ ok: true });
   });
 
+  registerListingPages(app, listingHelpers);
+  registerFeaturedPages(app, listingHelpers);
 }

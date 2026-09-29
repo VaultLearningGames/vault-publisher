@@ -2,11 +2,14 @@
 
 Publishes web game builds to Vault Learning Games:
 
-- **Staging** (your studio controls it): every branch and tag →
-  `https://cdn.vaultlearninggames-staging.org/STUDIO/GAME/BRANCH/`
-- **Production** (Vault releases it): `https://cdn.vaultlearninggames.org/STUDIO/GAME/` → the current release
+- **Test builds** (your studio controls them): every branch and tag →
+  `https://builds.vaultlearninggames.org/STUDIO/GAME/BRANCH/`
+- **Releases** (Vault releases them): `https://cdn.vaultlearninggames.org/STUDIO/GAME/` → the current release
 
 Studios manage games, members and release requests at **https://portal.vaultlearninggames.org**.
+
+Vault also runs a separate staging copy of all of this (site, portal, test builds, releases) on
+`vaultlearninggames-staging.org` for trying new versions. Studios never need it. See [docs/setup.md](docs/setup.md).
 
 ## Set up a game
 
@@ -51,6 +54,39 @@ Push a version tag, test it on staging, then **Request release** in the portal. 
 production (kept at `STUDIO/GAME/_releases/VERSION/`) and makes it current: copied into `STUDIO/GAME/` itself, so
 bookmarks always get the current release. Studio maintainers can then switch between approved releases or roll back
 themselves, unless Vault has frozen the game (e.g. during a study) or withdrawn that release.
+
+## Games on the site and on the CDN
+
+Each studio's **Games** page in the portal lists every game it has on Vault. A game is its **site listing** (what
+vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, connected:
+
+* **Games already on the site play from their web address.** The page Vault's in-page player wraps, as the site does
+  for most games today.
+* **On the Vault CDN,** a game has test versions on staging and releases in production, as described above.
+* **Moving a game over is one step on its page:** once its CDN game has a current release, **Where it plays** offers
+  *Switch to the Vault CDN*, and *Switch back* returns it to its web address. Studio maintainers ask for it; Vault
+  publishes it.
+
+**Site listing edits** (title, descriptions, grades, subjects, topics, standards, images, play settings) are drafts:
+* Studio maintainers submit them for review.
+* Vault publishes them from **Vault → Site games**, sends them back with a note, or takes the game off the site.
+* The public **`GET /v1/catalog`** lists published games with their play URL resolved. That's either the web address or
+  `cdn.vaultlearninggames.org/STUDIO/GAME/` plus an optional folder, so one CDN game can hold a collection (The Yard).
+  The site ([vault-rebuild](https://github.com/fielddaylab/vault-rebuild)) is built from it.
+* **Vault → Featured games** picks the games in the home page's Featured Games section, in order, with an optional
+  home-page blurb (short Markdown) and image for each. Release managers edit it; it's stored in `settings`
+  (`site_featured`) and published as `featured` in `/v1/catalog` (games that are off the site are left out).
+
+**Connecting games:**
+* A studio's first CI publish of a game connects its listing of the same name. Other names can be connected on the page.
+* **Vault can upload a game for a studio** before the studio's CI does, e.g. the version that's live today. Use the
+  action's `mode: vault-upload` with `studio`, `game`, `ref` (default `v1.0`) and `listing`. It must run from this
+  repository's workflow in the `production` environment, like releases.
+* A game Vault uploaded is taken over by the studio's repository on its first CI publish, with its releases.
+
+Vault admins can import the Hugo prototype's game pages once, from that repo's `migration/` folder. The import creates
+missing studios as Vault-managed studios. `node scripts/dev-portal.ts` does it automatically when `vault-rebuild` is
+checked out next to this repo; sign in as `lee` to edit NMSU's games.
 
 ## Develop
 

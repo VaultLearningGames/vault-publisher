@@ -5,7 +5,7 @@ Inventory as of 2026-09-24, from `fielddaylab/fielddaysite` (`play/` pages and t
 (`https://fielddaylab.wisc.edu/play/NAME/...`).
 
 **Goal of this stage:** every Field Day Unity web game builds with the new pipeline and has its current release branch
-on the staging CDN (`https://cdn.vaultlearninggames-staging.org/fieldday/GAME/BRANCH/`); older JavaScript/HTML games
+on the staging CDN (`https://builds.vaultlearninggames.org/fieldday/GAME/BRANCH/`); older JavaScript/HTML games
 (and builds with no working pipeline) are copied from DoIT as-is.
 
 ## A. Unity WebGL games built in CI → move to the new pipeline
@@ -82,5 +82,5 @@ Done 2026-09-25: `journalism-unity` → `headlines`, `lost_emerald` → `emerald
 ## Decisions
 
 - **Studio slug is `fieldday`** (the GitHub org stays `fielddaylab`): `…/fieldday/GAME/BRANCH/`.
-- **The Yard has one production version, no version folders:** `…/fieldday/yardgames/wind/`, `…/magnetism/`, etc.
-  (a "replace in place" release allowed only for `yardgames`).
+- **The Yard is one game:** `…/fieldday/yardgames/wind/`, `…/magnetism/`, etc. (every game's production release is
+  now served in place at `…/STUDIO/GAME/`, so no special case is needed).

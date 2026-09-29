@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { bearerToken, type GitHubIdentity, type Verifier } from './auth.ts';
 import type { Db, Game, ManifestFile, Studio } from './db.ts';
 import { copyRelease, makeLive, releasePrefix } from './releases.ts';
+import { catalogEntry } from './listings.ts';
+import { catalogFeatured, readFeatured } from './featured.ts';
 import { registerPortal, type PortalConfig } from './portal/routes.ts';
 import {
   headersFor,
@@ -111,11 +113,26 @@ export function createApp(deps: AppDeps) {
       if (!opts.create) fail(404, `unknown game ${studio.slug}/${slug}`);
       game = db.createGame(studio.id, slug, id.repository, id.repositoryId);
       db.audit(`github:${id.actor}`, 'game.claim', `${studio.slug}/${slug}`, { repository: id.repository });
+      linkSameNamedListing(studio, game);
+    } else if (game.repository_id.startsWith('vault:')) {
+      // Vault uploaded this game for the studio (e.g. copied from its old host); the studio's own CI now takes it over.
+      db.claimGame(game.id, id.repository, id.repositoryId);
+      db.audit(`github:${id.actor}`, 'game.claim', `${studio.slug}/${slug}`, { repository: id.repository, from: game.repository_id });
+      game = db.gameById(game.id)!;
     }
     if (game.repository_id !== id.repositoryId) {
       fail(403, `${studio.slug}/${slug} is published from ${game.repository}, not ${id.repository}`);
     }
     return game;
+  }
+
+  // A new CDN game is linked to the studio's site listing of the same name, if that listing isn't linked yet.
+  function linkSameNamedListing(studio: Studio, game: Game) {
+    const l = db.listing(game.slug);
+    if (l && l.studio_id === studio.id && !l.game_id) {
+      db.linkListing(l.id, game.id);
+      db.audit('vault', 'listing.link', `${studio.slug}:${l.slug}`, { game: game.slug });
+    }
   }
 
   // Release actions come only from the admin repository's Release workflow, running in the protected
@@ -267,18 +284,33 @@ export function createApp(deps: AppDeps) {
     });
   });
 
+  // Public: every published site listing, which the Vault website is built from, and the home page's featured
+  // games. A listing that plays from the Vault CDN gets its game's current release URL here, so releasing or rolling
+  // back a game changes what the site plays on the next site build without anyone editing the listing.
+  app.get('/v1/catalog', (c) => {
+    const games = db.listings({ published: true }).map((l) => {
+      const f = l.published!;
+      let cdn: { url: string; release: string } | null = null;
+      if (f.play_source === 'cdn' && l.game_id) {
+        const game = db.gameById(l.game_id);
+        const current = game && db.currentRelease(game.id);
+        if (game && current) cdn = { url: `${deps.prodPublicUrl}/${l.studio_slug}/${game.slug}/`, release: current.version };
+      }
+      return catalogEntry(l, f, cdn);
+    });
+    // The home page's Featured Games, in order (only games that are on the site).
+    const onSite = new Set(games.map((g) => g.slug));
+    const featured = catalogFeatured(readFeatured(db), (slug) => onSite.has(slug));
+    c.header('Access-Control-Allow-Origin', '*');
+    c.header('Cache-Control', 'public, max-age=60');
+    return c.json({ version: 1, generated_at: new Date().toISOString(), featured, games });
+  });
+
   // Start a preview upload for the branch or tag in the caller's OIDC token.
   // Body: { game, files: [{ path, size }] }. Returns a presigned PUT URL and headers per file.
-  app.post('/v1/previews', async (c) => {
-    const id = await github(c);
-    const body = await jsonBody(c);
-    if (!PUBLISH_EVENTS.has(id.eventName)) fail(400, `previews publish on push, not ${id.eventName}`);
-    const ref = parseGitRef(id.ref);
-    if (!ref) fail(400, `cannot publish a preview for ref ${id.ref}`);
-    const studio = studioFor(id);
-    const game = gameFor(studio, id, body.game, { create: true });
-    const manifest = parseManifest(body.files);
-
+  // Presigned PUTs for a new build of `game` at `ref`; the caller uploads, then finalizes.
+  async function startUpload(studio: Studio, game: Game, ref: { type: 'branch' | 'tag'; name: string }, sha: string, actor: string, filesBody: unknown) {
+    const manifest = parseManifest(filesBody);
     const uploadId = randomUUID();
     const prefix = previewPrefix(studio, game, ref.name);
     const files = await Promise.all(
@@ -296,21 +328,20 @@ export function createApp(deps: AppDeps) {
       game_id: game.id,
       ref_name: ref.name,
       ref_type: ref.type,
-      commit_sha: id.sha,
-      actor: id.actor,
+      commit_sha: sha,
+      actor,
       manifest,
       expires_at: new Date(Date.now() + UPLOAD_TTL_MS).toISOString(),
     });
-    return c.json({ upload_id: uploadId, url: `${deps.stagingPublicUrl}/${prefix}`, files });
-  });
+    return { upload_id: uploadId, url: `${deps.stagingPublicUrl}/${prefix}`, files };
+  }
 
   // Check every file arrived, remove files left over from the previous build, record the preview.
-  app.post('/v1/previews/:uploadId/finalize', async (c) => {
-    const id = await github(c);
-    const upload = db.upload(c.req.param('uploadId'));
+  async function finishUpload(uploadId: string, allowed: (game: Game) => boolean, auditActor: string, auditDetail: Record<string, unknown>) {
+    const upload = db.upload(uploadId);
     if (!upload) fail(404, 'unknown upload');
     const game = db.gameById(upload.game_id)!;
-    if (game.repository_id !== id.repositoryId) fail(403, 'upload belongs to another repository');
+    if (!allowed(game)) fail(403, 'upload belongs to another repository');
     if (upload.finalized_at) fail(409, 'upload already finalized');
     if (upload.expires_at < new Date().toISOString()) fail(410, 'upload expired; publish again');
     if (db.hasNewerUpload(upload)) fail(409, 'a newer upload to this preview has started; this one is superseded');
@@ -327,14 +358,58 @@ export function createApp(deps: AppDeps) {
     const totalBytes = upload.manifest.reduce((sum, f) => sum + f.size, 0);
     db.upsertBuild(upload, upload.manifest.length, totalBytes);
     db.markUploadFinalized(upload.id);
-    db.audit(`github:${id.actor}`, 'preview.publish', prefix, {
-      repository: id.repository,
-      sha: upload.commit_sha,
-      files: upload.manifest.length,
-      bytes: totalBytes,
-      removed: stale.length,
-    });
-    return c.json({ url: `${deps.stagingPublicUrl}/${prefix}` });
+    db.audit(auditActor, 'preview.publish', prefix, { ...auditDetail, sha: upload.commit_sha, files: upload.manifest.length, bytes: totalBytes, removed: stale.length });
+    return { url: `${deps.stagingPublicUrl}/${prefix}` };
+  }
+
+  app.post('/v1/previews', async (c) => {
+    const id = await github(c);
+    const body = await jsonBody(c);
+    if (!PUBLISH_EVENTS.has(id.eventName)) fail(400, `previews publish on push, not ${id.eventName}`);
+    const ref = parseGitRef(id.ref);
+    if (!ref) fail(400, `cannot publish a preview for ref ${id.ref}`);
+    const studio = studioFor(id);
+    const game = gameFor(studio, id, body.game, { create: true });
+    return c.json(await startUpload(studio, game, ref, id.sha, id.actor, body.files));
+  });
+
+  app.post('/v1/previews/:uploadId/finalize', async (c) => {
+    const id = await github(c);
+    return c.json(await finishUpload(c.req.param('uploadId'), (g) => g.repository_id === id.repositoryId, `github:${id.actor}`, { repository: id.repository }));
+  });
+
+  // Vault uploads a build for any studio's game: games that aren't built by the studio's own CI yet (e.g. copied from
+  // DoIT, or the version that's live today), so they can be released to the CDN before the studio moves over.
+  // Only the admin repository's workflow in its protected environment may call this. A game Vault creates here is
+  // marked repository_id 'vault:STUDIO/GAME' and is taken over by the studio's repository on its first CI publish.
+  // Body: { studio, game, ref ("v1.0"), ref_type ("tag" | "branch"), files: [{ path, size }], listing? (slug to link) }.
+  app.post('/v1/admin/previews', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    if (!isSlug(body.studio)) fail(400, 'studio must be a studio slug');
+    if (!isSlug(body.game)) fail(400, 'game must be a lowercase slug like "aqualab"');
+    const studio = db.studioBySlug(body.studio);
+    if (!studio) fail(404, `unknown studio ${body.studio}`);
+    const name = typeof body.ref === 'string' ? sanitizeRefName(body.ref) : null;
+    if (!name) fail(400, 'ref must be a branch or tag name like "v1.0"');
+    let game = db.game(studio.id, body.game);
+    if (!game) {
+      game = db.createGame(studio.id, body.game, '', `vault:${studio.slug}/${body.game}`);
+      db.audit(`github:${id.actor}`, 'game.create', `${studio.slug}/${body.game}`, { by: 'vault upload' });
+      linkSameNamedListing(studio, game);
+    }
+    if (body.listing !== undefined) {
+      const l = db.listing(String(body.listing));
+      if (!l || l.studio_id !== studio.id) fail(404, `unknown listing ${studio.slug}:${body.listing}`);
+      if (l.game_id !== game.id) { db.linkListing(l.id, game.id); db.audit(`github:${id.actor}`, 'listing.link', `${studio.slug}:${l.slug}`, { game: game.slug }); }
+    }
+    const refType = body.ref_type === 'branch' ? 'branch' : 'tag';
+    return c.json(await startUpload(studio, game, { type: refType, name }, String(body.sha ?? 'vault-upload'), id.actor, body.files));
+  });
+
+  app.post('/v1/admin/previews/:uploadId/finalize', async (c) => {
+    const id = await admin(c);
+    return c.json(await finishUpload(c.req.param('uploadId'), () => true, `github:${id.actor}`, { repository: id.repository, vault_upload: true }));
   });
 
   // Delete a preview, e.g. from a workflow triggered by branch deletion.

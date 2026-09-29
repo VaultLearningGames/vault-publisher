@@ -87,14 +87,22 @@ if (mode === 'delete') {
     ['Branch/tag', `\`${env.INPUT_REF}\``],
     ['Files removed', String(deleted)],
   ]);
-} else if (mode === 'publish') {
+} else if (mode === 'publish' || mode === 'vault-upload') {
+  // publish: the studio's CI publishes the branch or tag in its OIDC token.
+  // vault-upload: Vault (this repository's workflow in its protected environment) uploads a build for any studio's
+  // game, e.g. a game's current version copied from its old host; the studio's CI takes the game over later.
+  const vault = mode === 'vault-upload';
+  if (vault && !env.INPUT_STUDIO) die('input "studio" is required for mode "vault-upload"');
   const root = env.INPUT_PATH || 'build/WebGL/WebGL';
   const files = await listFiles(root).catch((err) => die(`Cannot read build folder ${root}: ${err.message}`));
   if (!files.some((f) => f.path === 'index.html')) console.log(`::warning::No index.html at the top of ${root}`);
   const total = files.reduce((n, f) => n + f.size, 0);
   console.log(`Publishing ${files.length} files (${(total / 1e6).toFixed(1)} MB) from ${root}`);
 
-  const upload = await api(token, '/v1/previews', { game, files: files.map(({ path, size }) => ({ path, size })) });
+  const manifest = files.map(({ path, size }) => ({ path, size }));
+  const upload = vault
+    ? await api(token, '/v1/admin/previews', { studio: env.INPUT_STUDIO, game, ref: env.INPUT_REF || 'v1.0', ref_type: env.INPUT_REF_TYPE || 'tag', listing: env.INPUT_LISTING || undefined, sha: env.GITHUB_SHA, files: manifest })
+    : await api(token, '/v1/previews', { game, files: manifest });
   const targets = new Map(upload.files.map((t) => [t.path, t]));
   const queue = [...files];
   await Promise.all(
@@ -104,11 +112,11 @@ if (mode === 'delete') {
   );
 
   // The finalize call needs a fresh token only if the upload took longer than the token's lifetime (~5 min).
-  const { url } = await api(await oidcToken(), `/v1/previews/${upload.upload_id}/finalize`);
+  const { url } = await api(await oidcToken(), `${vault ? '/v1/admin/previews' : '/v1/previews'}/${upload.upload_id}/finalize`);
   output('url', url);
-  announce('🎮 Preview published', url, [
-    ['Game', `\`${game}\``],
-    ['Branch/tag', `\`${env.GITHUB_REF_NAME || '?'}\``],
+  announce(vault ? '🎮 Uploaded by Vault' : '🎮 Preview published', url, [
+    ['Game', `\`${vault ? env.INPUT_STUDIO + '/' : ''}${game}\``],
+    ['Branch/tag', `\`${vault ? env.INPUT_REF || 'v1.0' : env.GITHUB_REF_NAME || '?'}\``],
     ['Commit', repoLink && commit ? `[\`${commit}\`](${repoLink}/commit/${env.GITHUB_SHA})` : commit || '?'],
     ['Files', `${files.length} (${(total / 1e6).toFixed(1)} MB)`],
   ]);

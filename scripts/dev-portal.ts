@@ -6,6 +6,9 @@ import { createApp } from '../src/app.ts';
 import { Db } from '../src/db.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import { browseKeys, type Storage } from '../src/storage.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import { importListings } from '../src/listings-import.ts';
+import { saveFeatured } from '../src/featured.ts';
 
 class MemoryStorage implements Storage {
   objects = new Map<string, Uint8Array>();
@@ -59,10 +62,29 @@ db.setMembership(fd.id, 'mia', 'maintainer', 'user:boss');
 db.setMembership(fd.id, 'vera', 'viewer', 'user:boss');
 db.setMembership(fd.id, 'ada', 'admin', 'user:boss');
 
+// Site listings: import the Hugo prototype's games if github.com/fielddaylab/vault-rebuild is checked out next to
+// this repo (or at $VAULT_REBUILD), so /vault/listings and each studio's Site listings page have real content.
+const rebuild = process.env.VAULT_REBUILD ?? new URL('../../vault-rebuild/', import.meta.url).pathname;
+if (existsSync(`${rebuild}/migration/games-export.json`)) {
+  const pages = JSON.parse(readFileSync(`${rebuild}/migration/games-export.json`, 'utf8'));
+  const ov = existsSync(`${rebuild}/migration/import-overrides.json`) ? JSON.parse(readFileSync(`${rebuild}/migration/import-overrides.json`, 'utf8')) : {};
+  const r = importListings(db, pages, ov.overrides ?? {}, 'user:boss', ov.studios ?? {});
+  console.log(`site listings: imported ${r.created.length} published, ${r.drafts.length} drafts, ${r.studiosCreated.length} new studios from ${rebuild}`);
+  // A studio member for the listings walkthrough: lee maintains NMSU Learning Games Lab's listings.
+  const lgl = db.studios().find((s) => s.name === 'Learning Games Lab: NMSU');
+  if (lgl) db.setMembership(lgl.id, 'lee', 'maintainer', 'user:boss');
+  // The home page's Featured Games, as on vaultlearninggames.org today (the banners are in vault-rebuild/static/images/featured).
+  saveFeatured(db, [
+    { slug: 'project-hercules', blurb: 'In *Project Hercules*, you play Astrid, an astronomer in the distant future, working to identify objects in the night sky and uncover the mystery of an impending celestial event.', image: 'images/featured/project-hercules.webp' },
+    { slug: 'walden-self-reliance', blurb: '', image: 'images/featured/walden-self-reliance.webp' },
+    { slug: 'cozy-river-valley', blurb: '', image: 'images/featured/cozy-river-valley.webp' },
+  ], 'user:boss');
+}
+
 const app = createApp({
   db, staging, production,
   verifier: { async github() { throw new Error('no CI in dev'); }, async google() { throw new Error('no'); } },
-  stagingPublicUrl: 'https://cdn.vaultlearninggames-staging.org', prodPublicUrl: 'https://cdn.vaultlearninggames.org',
+  stagingPublicUrl: 'https://builds.vaultlearninggames.org', prodPublicUrl: 'https://cdn.vaultlearninggames.org',
   adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production',
   previewRetentionDays: 90, taskInvokerEmail: 'dev@example.org',
   portal: {
@@ -77,7 +99,7 @@ const app = createApp({
 app.get('/dev-login', (c) => c.html(`<form action="/auth/callback" style="font:16px system-ui;max-width:360px;margin:15vh auto;display:grid;gap:10px">
   <b>Dev sign-in</b><input type="hidden" name="state" value="${c.req.query('state')}">
   <input name="code" placeholder="GitHub username" autofocus required style="padding:8px">
-  <small>boss = Vault admin · ada = studio admin · mia = maintainer · vera = viewer · anyone else = no access</small>
+  <small>boss = Vault admin · ada = studio admin · mia = maintainer · vera = viewer · lee = NMSU maintainer · anyone else = no access</small>
   <button style="padding:8px">Sign in</button></form>`));
 
 serve({ fetch: app.fetch, port: PORT }, () => console.log(`portal preview on http://localhost:${PORT}`));

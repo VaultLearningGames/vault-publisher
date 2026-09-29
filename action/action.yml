@@ -11,10 +11,23 @@ inputs:
     description: Folder containing the build (the folder with index.html).
     default: build/WebGL/WebGL
   mode:
-    description: '"publish" (default) or "delete".'
+    description: >
+      "publish" (default), "delete", or "vault-upload" (Vault only: from this repository's workflow in its production
+      environment, upload a build for any studio's game, e.g. its current version copied from its old host).
     default: publish
   ref:
-    description: For mode "delete", the branch or tag to remove (e.g. github.event.ref from a delete event).
+    description: >
+      For mode "delete", the branch or tag to remove (e.g. github.event.ref from a delete event).
+      For mode "vault-upload", the version name to upload as (default "v1.0").
+    default: ''
+  ref-type:
+    description: For mode "vault-upload", "tag" (default) or "branch".
+    default: tag
+  studio:
+    description: For mode "vault-upload", the studio slug, e.g. "fieldday".
+    default: ''
+  listing:
+    description: For mode "vault-upload", the site listing to connect this CDN game to (its vaultlearninggames.org slug).
     default: ''
   publisher-url:
     description: Base URL of the vault-publisher service.
@@ -39,5 +52,8 @@ runs:
         INPUT_PATH: ${{ inputs.path }}
         INPUT_MODE: ${{ inputs.mode }}
         INPUT_REF: ${{ inputs.ref }}
+        INPUT_REF_TYPE: ${{ inputs.ref-type }}
+        INPUT_STUDIO: ${{ inputs.studio }}
+        INPUT_LISTING: ${{ inputs.listing }}
         INPUT_PUBLISHER_URL: ${{ inputs.publisher-url }}
         INPUT_AUDIENCE: ${{ inputs.audience }}

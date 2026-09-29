@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { RefType } from './paths.ts';
+import type { ListingFields } from './listings.ts';
 
 // Plain SQL with no SQLite-only features, so a later move to Postgres is a driver swap.
 // Each entry is applied once, in order; PRAGMA user_version tracks progress.
@@ -140,7 +141,51 @@ const MIGRATIONS = [
   `
   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `,
+  // v6: site listings. Studios edit draft_json; Vault publishes it to published_json, which the site is built from.
+  // review: 'editing' (the studio is working on it), 'submitted' (waiting for Vault) or 'returned' (sent back).
+  `
+  CREATE TABLE listings (
+    id              INTEGER PRIMARY KEY,
+    studio_id       INTEGER NOT NULL REFERENCES studios(id),
+    slug            TEXT NOT NULL UNIQUE,
+    draft_json      TEXT NOT NULL,
+    published_json  TEXT,
+    review          TEXT NOT NULL DEFAULT 'editing' CHECK (review IN ('editing', 'submitted', 'returned')),
+    review_note     TEXT,
+    submitted_by    TEXT,
+    submitted_at    TEXT,
+    published_by    TEXT,
+    published_at    TEXT,
+    updated_by      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+  );
+  `,
+  // v7: a site listing plays from its linked CDN game once it has a release (several listings can share one CDN game,
+  // each in its own folder, e.g. The Yard). Games Vault uploads for a studio (before the studio's own CI publishes)
+  // have repository '' and repository_id 'vault:STUDIO/GAME' until a repository claims them.
+  `
+  ALTER TABLE listings ADD COLUMN game_id INTEGER REFERENCES games(id);
+  CREATE INDEX listings_game ON listings (game_id);
+  `,
 ];
+
+export interface Listing {
+  id: number;
+  studio_id: number;
+  slug: string;
+  game_id: number | null;
+  draft: ListingFields;
+  published: ListingFields | null;
+  review: 'editing' | 'submitted' | 'returned';
+  review_note: string | null;
+  submitted_by: string | null;
+  submitted_at: string | null;
+  published_by: string | null;
+  published_at: string | null;
+  updated_by: string;
+  updated_at: string;
+}
 
 export interface Studio {
   id: number;
@@ -555,6 +600,68 @@ export class Db {
   auditFor(actions: string[], limit = 10): { at: string; actor: string; action: string; target: string; detail_json: string | null }[] {
     return this.sqlite.prepare(`SELECT at, actor, action, target, detail_json FROM audit_log WHERE action IN (${actions.map(() => '?').join(',')}) ORDER BY id DESC LIMIT ?`)
       .all(...actions, limit) as unknown as { at: string; actor: string; action: string; target: string; detail_json: string | null }[];
+  }
+
+  // ---------- site listings ----------
+  private listingRow(r: Record<string, unknown> | undefined): (Listing & { studio_slug: string; studio_name: string }) | undefined {
+    if (!r) return undefined;
+    const { draft_json, published_json, ...rest } = r as Record<string, unknown> & { draft_json: string; published_json: string | null };
+    return { ...(rest as unknown as Listing & { studio_slug: string; studio_name: string }), draft: JSON.parse(draft_json), published: published_json ? JSON.parse(published_json) : null };
+  }
+  private readonly LISTING_SELECT = `SELECT l.*, s.slug AS studio_slug, s.name AS studio_name FROM listings l JOIN studios s ON s.id = l.studio_id`;
+
+  createListing(studioId: number, slug: string, draft: ListingFields, by: string) {
+    const t = now();
+    this.sqlite.prepare(`INSERT INTO listings (studio_id, slug, draft_json, updated_by, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(studioId, slug, JSON.stringify(draft), by, t, t);
+    return this.listing(slug)!;
+  }
+
+  listing(slug: string) {
+    return this.listingRow(this.sqlite.prepare(`${this.LISTING_SELECT} WHERE l.slug = ?`).get(slug) as Record<string, unknown> | undefined);
+  }
+
+  listings(filter: { studioId?: number; review?: string; published?: boolean } = {}) {
+    const where: string[] = [], args: (string | number)[] = [];
+    if (filter.studioId !== undefined) { where.push('l.studio_id = ?'); args.push(filter.studioId); }
+    if (filter.review) { where.push('l.review = ?'); args.push(filter.review); }
+    if (filter.published) where.push('l.published_json IS NOT NULL');
+    const rows = this.sqlite.prepare(`${this.LISTING_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY l.slug`).all(...args);
+    return rows.map((r) => this.listingRow(r as Record<string, unknown>)!);
+  }
+
+  linkListing(id: number, gameId: number | null) {
+    this.sqlite.prepare('UPDATE listings SET game_id = ? WHERE id = ?').run(gameId, id);
+  }
+
+  listingsForGame(gameId: number) {
+    return this.sqlite.prepare(`${this.LISTING_SELECT} WHERE l.game_id = ? ORDER BY l.slug`).all(gameId).map((r) => this.listingRow(r as Record<string, unknown>)!);
+  }
+
+  // A studio's repository takes over a game Vault uploaded for it (repository_id 'vault:…').
+  claimGame(gameId: number, repository: string, repositoryId: string) {
+    this.sqlite.prepare('UPDATE games SET repository = ?, repository_id = ? WHERE id = ?').run(repository, repositoryId, gameId);
+  }
+
+  saveListingDraft(id: number, draft: ListingFields, by: string) {
+    this.sqlite.prepare(`UPDATE listings SET draft_json = ?, updated_by = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(draft), by, now(), id);
+  }
+
+  setListingReview(id: number, review: 'editing' | 'submitted' | 'returned', by: string, note: string | null) {
+    if (review === 'submitted') {
+      this.sqlite.prepare(`UPDATE listings SET review = 'submitted', review_note = ?, submitted_by = ?, submitted_at = ? WHERE id = ?`).run(note, by, now(), id);
+    } else {
+      this.sqlite.prepare(`UPDATE listings SET review = ?, review_note = ? WHERE id = ?`).run(review, note, id);
+    }
+  }
+
+  publishListing(id: number, by: string) {
+    this.sqlite.prepare(`UPDATE listings SET published_json = draft_json, published_by = ?, published_at = ?, review = 'editing', review_note = NULL WHERE id = ?`)
+      .run(by, now(), id);
+  }
+
+  unpublishListing(id: number) {
+    this.sqlite.prepare(`UPDATE listings SET published_json = NULL, published_by = NULL, published_at = NULL WHERE id = ?`).run(id);
   }
 
   audit(actor: string, action: string, target: string, detail?: unknown) {

@@ -13,6 +13,7 @@ import { ago, head, pill, who } from './routes.ts';
 import { availabilityCells, availabilityLine, AVAILABILITY_HEADS } from './availability.ts';
 import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '../featured.ts';
 import type { PortalDeps } from './routes.ts';
+import { imageField } from './listing-assets.ts';
 
 export interface ListingHelpers {
   db: Db;
@@ -110,9 +111,9 @@ export function listingPieces(h: ListingHelpers) {
         ${area('standards', 'Standards', 'Codes, one per line or comma-separated (Common Core, NGSS), e.g. 4.OA.A.2', 2)}
         ${txt('related_curriculum', 'Related curriculum', 'A link to teacher materials')}
         ${txt('gameplay_video', 'Gameplay video', 'A YouTube or other video link')}
-        ${txt('hero_image', 'Hero image', 'A path on the site (games/x/img/hero.png) or an https link')}
-        ${txt('thumb_image', 'Thumbnail')}
-        ${area('screenshots', 'Screenshots', 'One path or link per line', 3)}
+        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'hero_image', label: 'Hero image', value: f.hero_image, hint: 'A path on the site (games/x/img/hero.png) or an https link.' })}
+        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'thumb_image', label: 'Thumbnail', value: f.thumb_image, hint: 'A path on the site or an https link.' })}
+        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'screenshots', label: 'Screenshots', value: f.screenshots, hint: 'One path or link per line, in the order the site shows them; delete a line to remove it.' })}
       </div>
       <h2 style="margin-top:18px">Playing</h2>
       <div class="fields">

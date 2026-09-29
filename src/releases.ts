@@ -2,6 +2,8 @@
 //   STUDIO/GAME/                    a full copy of the current release: what players load and bookmark
 //   STUDIO/GAME/current.json        which release that is
 //   STUDIO/GAME/_releases/VERSION/  every approved release, never changed; the source for switching and rollback
+//   STUDIO/GAME/_vault-assets/      images uploaded in the portal for the game's site listing (assets.ts); never part
+//                                   of a release, so switching and rollback leave it alone
 import { headersFor, type ObjectHeaders } from './paths.ts';
 import type { Storage } from './storage.ts';
 
@@ -11,8 +13,14 @@ export const RELEASE_CACHE = 'public, max-age=31536000, immutable';
 // load (a cheap 304 when unchanged, so big .wasm/.data files aren't downloaded again).
 export const LIVE_CACHE = 'no-cache';
 export const RELEASES_DIR = '_releases/';
+export const ASSETS_DIR = '_vault-assets/';
+// Paths under STUDIO/GAME/ that belong to Vault, not to any release: a release can't contain them, and switching
+// releases never copies over or removes them.
+const isVaultPath = (rel: string) => rel.startsWith(RELEASES_DIR) || rel.startsWith(ASSETS_DIR) || rel === 'current.json';
 
 export const releasePrefix = (gamePrefix: string, version: string) => `${gamePrefix}${RELEASES_DIR}${version}/`;
+
+export class ReleaseLayoutError extends Error {}
 
 export interface CopyResult {
   files: number;
@@ -32,6 +40,8 @@ export async function copyRelease(opts: {
   const { staging, production, srcPrefix, dstPrefix } = opts;
   const objects = await staging.list(srcPrefix);
   if (objects.length === 0) throw new Error(`nothing in staging under ${srcPrefix}`);
+  const clash = objects.map((o) => o.key.slice(srcPrefix.length)).find(isVaultPath);
+  if (clash) throw new ReleaseLayoutError(`the build contains ${clash}, which would collide with the release layout (${RELEASES_DIR}, ${ASSETS_DIR} and current.json are Vault's)`);
   const written: string[] = [];
   const queue = [...objects];
   try {
@@ -65,11 +75,11 @@ export async function makeLive(production: Storage, gamePrefix: string, version:
   const objects = await production.list(src);
   if (objects.length === 0) throw new Error(`release ${version} has no files under ${src}`);
   const rels = objects.map((o) => ({ rel: o.key.slice(src.length), size: o.size }));
-  const clash = rels.find((r) => r.rel.startsWith(RELEASES_DIR) || r.rel === 'current.json');
+  const clash = rels.find((r) => isVaultPath(r.rel));
   if (clash) throw new Error(`release ${version} contains ${clash.rel}, which would collide with the release layout`);
   const liveBefore = (await production.list(gamePrefix))
     .map((o) => o.key)
-    .filter((k) => !k.startsWith(gamePrefix + RELEASES_DIR) && k !== `${gamePrefix}current.json`);
+    .filter((k) => !isVaultPath(k.slice(gamePrefix.length)));
 
   const isHtml = (rel: string) => /\.html?$/i.test(rel);
   const phases = [rels.filter((r) => !isHtml(r.rel)), rels.filter((r) => isHtml(r.rel) && r.rel !== 'index.html'), rels.filter((r) => r.rel === 'index.html')];
@@ -106,7 +116,8 @@ export async function relayoutReleases(production: Storage, releases: { gamePref
     await makeLive(production, r.gamePrefix, r.version);
     log(`relayout: ${r.gamePrefix} now serves ${r.version} in place`);
   }
-  // Remove the old copies listed above, except any path the live copy now uses (makeLive has usually
+  // Remove the old copies listed above (only ever keys under STUDIO/GAME/VERSION/, and version names can't start with
+  // "_", so never _releases/ or _vault-assets/), except any path the live copy now uses (makeLive has usually
   // removed them already as stale files).
   const live = new Set<string>();
   for (const r of releases.filter((x) => x.current)) {

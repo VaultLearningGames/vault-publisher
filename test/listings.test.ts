@@ -416,7 +416,7 @@ describe('Vault → Site games: one table with featured games and availability',
     const res = await upload('boss', 'release_manager', 'wake', WEBP);
     assert.equal(res.status, 200);
     const { image } = (await res.json()) as { image: string };
-    assert.match(image, /^https:\/\/prod\.test\/_site\/featured\/wake-[0-9a-f]{16}\.webp$/);
+    assert.match(image, /^https:\/\/prod\.test\/fieldday\/wake\/_vault-assets\/featured-[0-9a-f]{16}\.webp$/);
     const key = image.slice('https://prod.test/'.length);
     assert.deepEqual(production.headers.get(key), { contentType: 'image/webp', cacheControl: 'public, max-age=31536000, immutable' });
     assert.equal((await full()).featured[0].image, image);
@@ -425,8 +425,11 @@ describe('Vault → Site games: one table with featured games and availability',
 
     // A new image is a new object; the old one stays (a live site build may still use it).
     await upload('boss', 'release_manager', 'wake', PNG);
-    assert.equal([...production.headers.keys()].filter((k) => k.startsWith('_site/featured/wake-')).length, 2);
+    assert.equal([...production.headers.keys()].filter((k) => k.startsWith('fieldday/wake/_vault-assets/featured-')).length, 2);
     assert.match((await full()).featured[0].image, /\.png$/);
+    // Images uploaded before (under _site/featured/) keep working as stored URLs.
+    assert.equal((await as('boss', 'release_manager').post(F, { op: 'set', slug: 'wake', image: 'https://prod.test/_site/featured/wake-0123456789abcdef.webp' })).status, 200);
+    assert.equal((await full()).featured[0].image, 'https://prod.test/_site/featured/wake-0123456789abcdef.webp');
 
     // Without the CDN bucket (production storage not configured) the upload says so.
     app = createApp({ ...deps(), production: null });

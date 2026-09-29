@@ -409,3 +409,10 @@ tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
 .feat-img form { margin: 0; display: flex; gap: 6px; align-items: center; }
 .feat-img input[type=file] { font-size: 12px; max-width: 220px; }
 .feat-thumb { display: block; height: 44px; width: auto; max-width: 120px; border-radius: 6px; border: 1px solid var(--line); object-fit: cover; }
+
+/* Listing image fields: previews and the upload picker under the path/link. */
+.img-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.img-prev { display: flex; gap: 6px; flex-wrap: wrap; }
+.img-prev:empty { display: none; }
+.img-up { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.field .img-up input[type=file] { font-size: 12px; max-width: 240px; width: auto; border: 0; padding: 1px; background: none; }

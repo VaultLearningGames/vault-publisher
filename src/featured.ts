@@ -5,10 +5,10 @@
 // Each entry is a site listing (by its page slug), a sequence number (the home page shows them in ascending sequence,
 // ties by title) and optional home-page overrides: a blurb (short Markdown, so a title can be *italic*) and an image.
 // Without them the site uses the listing's short description and hero image. The image is a path on the site
-// (images/featured/x.webp, in the website repo) or an absolute https URL of one uploaded to the Vault CDN.
+// (images/featured/x.webp, in the website repo) or an absolute https URL of one uploaded to the Vault CDN
+// (STUDIO/GAME/_vault-assets/featured-HASH.EXT; see assets.ts. Older uploads are at _site/featured/ and still work).
 //
 // Unticking a game parks its entry in `unfeatured`, so ticking it again brings its blurb and image back.
-import { createHash } from 'node:crypto';
 import type { Db } from './db.ts';
 import { isListingSlug } from './listings.ts';
 
@@ -119,25 +119,4 @@ export function applyFeaturedEdit(f: FeaturedLists, edit: FeaturedEdit, isPublis
 export function catalogFeatured(f: Featured, titleOf: (slug: string) => string | undefined): FeaturedEntry[] {
   return sortFeatured(f.games.filter((e) => titleOf(e.slug) !== undefined), titleOf)
     .map((e) => ({ slug: e.slug, blurb: e.blurb, image: e.image, sequence: e.sequence }));
-}
-
-// ---------- uploaded images ----------
-// Uploaded featured images go to the release (CDN) bucket under a Vault-owned prefix (studio slugs can't start with
-// "_"), named by content hash so every upload is a new, immutable object. Replaced images aren't deleted: a site
-// build that's still live may point at them, as with releases.
-export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
-export const IMAGE_PREFIX = '_site/featured/';
-export const IMAGE_CACHE = 'public, max-age=31536000, immutable';
-
-// The image type from the file's first bytes (not its name or the Content-Type the browser sent).
-export function sniffImage(b: Uint8Array): { ext: 'png' | 'jpg' | 'webp'; contentType: string } | null {
-  const at = (i: number, bytes: number[]) => bytes.every((x, j) => b[i + j] === x);
-  if (at(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return { ext: 'png', contentType: 'image/png' };
-  if (at(0, [0xff, 0xd8, 0xff])) return { ext: 'jpg', contentType: 'image/jpeg' };
-  if (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])) return { ext: 'webp', contentType: 'image/webp' };
-  return null;
-}
-
-export function featuredImageKey(slug: string, b: Uint8Array, ext: string): string {
-  return `${IMAGE_PREFIX}${slug}-${createHash('sha256').update(b).digest('hex').slice(0, 16)}.${ext}`;
 }

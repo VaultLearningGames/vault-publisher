@@ -339,6 +339,45 @@ describe('production releases', () => {
     assert.equal(new TextDecoder().decode(prod.data.get('fielddaylab/aqualab/index.html')), 'old');
   });
 
+  test('make current and rollback leave STUDIO/GAME/_vault-assets/ (uploaded listing images) untouched', async () => {
+    await publishTag('m3.1');
+    await approve('m3.1');
+    await publishTag('m3.2');
+    await approve('m3.2');
+    const h = { contentType: 'image/png', cacheControl: 'public, max-age=31536000, immutable' };
+    const assets = ['fielddaylab/aqualab/_vault-assets/hero-0123456789abcdef.png', 'fielddaylab/aqualab/_vault-assets/screenshot-fedcba9876543210.webp'];
+    for (const k of assets) await prod.put(k, new TextEncoder().encode(k), k.length, h);
+    const assetState = () => assets.map((k) => [prod.objects.has(k), new TextDecoder().decode(prod.data.get(k)), prod.headers.get(k)?.cacheControl]);
+    const before = assetState();
+    assert.equal((await promote('m3.2')).status, 200);   // make current
+    assert.deepEqual(assetState(), before);
+    assert.equal((await promote('m3.1')).status, 200);   // rollback
+    assert.deepEqual(assetState(), before);
+    assert.equal((await promote('m3.2')).status, 200);
+    assert.deepEqual(assetState(), before);
+  });
+
+  test('a build with its own top-level _vault-assets/ folder can’t be released', async () => {
+    identities.tag = { ...wake, ref: 'refs/tags/m4' };
+    const { json } = await start('tag', { game: 'aqualab', files: [...files, { path: '_vault-assets/logo.png', size: 3 }] });
+    uploadAll(json, { 'index.html': 10, 'Build/game.wasm.br': 20, '_vault-assets/logo.png': 3 });
+    assert.equal((await post(`/v1/previews/${json.upload_id}/finalize`, 'tag')).status, 200);
+    const res = await approve('m4', 'releaser', { ref: 'm4' });
+    assert.equal(res.status, 400);
+    assert.match(((await res.json()) as any).error, /_vault-assets\/logo\.png/);
+    assert.equal([...prod.objects.keys()].length, 0, 'nothing was copied');
+    assert.equal(db.release(1, 'm4'), undefined);
+  });
+
+  test('makeLive also refuses a release that contains _vault-assets/', async () => {
+    const { makeLive } = await import('../src/releases.ts');
+    const h = { contentType: 'text/html', cacheControl: 'x' };
+    await prod.put('s/g/_releases/v1/index.html', new Uint8Array(1), 1, h);
+    await prod.put('s/g/_releases/v1/_vault-assets/x.png', new Uint8Array(1), 1, h);
+    await assert.rejects(makeLive(prod, 's/g/', 'v1'), /_vault-assets\/x\.png/);
+    assert.ok(!prod.objects.has('s/g/index.html'));
+  });
+
   test('promoting an unapproved version or a bad version name is refused', async () => {
     assert.equal((await promote('m9')).status, 404);
     assert.equal((await approve('../evil')).status, 400);

@@ -84,6 +84,56 @@
     if (form && form.hasAttribute('data-autosubmit') && (e.target.tagName === 'SELECT' || e.target.type === 'checkbox')) submit(form, e.target);
   });
 
+  // Listing image pickers (data-upload-image): upload the chosen file as soon as it's picked; the server saves its URL
+  // in the draft, and here it goes into the field (screenshots: a new last line) and its preview, keeping other edits.
+  document.addEventListener('change', async (e) => {
+    const input = e.target;
+    if (!input.dataset || !input.dataset.uploadImage) return;
+    const file = input.files[0];
+    const err = input.parentElement.querySelector('.err');
+    const say = (msg, status) => { if (err) { err.classList.toggle('status', !!status); err.textContent = msg; } };
+    if (!file) return;
+    const max = Number(input.dataset.max);
+    if (max && file.size > max) { say(`The image is too big: at most ${max / 1024 / 1024} MB.`); input.value = ''; return; }
+    input.disabled = true;
+    say('Uploading…', true);
+    busy++;
+    try {
+      const res = await fetch(input.dataset.uploadImage, {
+        method: 'POST',
+        headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-Requested-With': 'vault-portal' },
+        body: file,
+        credentials: 'same-origin',
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Something went wrong (HTTP ${res.status}).`);
+      const field = document.getElementById(`f-${input.dataset.field}`);
+      if (field) {
+        if (field.tagName === 'TEXTAREA') {
+          const lines = field.value.split('\n').map((l) => l.trim()).filter(Boolean);
+          if (!lines.includes(body.url)) lines.push(body.url);
+          field.value = lines.join('\n');
+        } else field.value = body.url;
+      }
+      const prev = document.querySelector(`[data-prev-for="${input.dataset.field}"]`);
+      if (prev) {
+        const a = document.createElement('a');
+        a.href = body.url; a.target = '_blank'; a.rel = 'noopener';
+        const img = document.createElement('img');
+        img.className = 'feat-thumb'; img.src = body.url; img.alt = '';
+        a.append(img);
+        if (field && field.tagName === 'TEXTAREA') prev.append(a); else prev.replaceChildren(a);
+      }
+      say('Uploaded and saved to the draft.', true);
+    } catch (ex) {
+      say(ex.message);
+    } finally {
+      busy--;
+      input.disabled = false;
+      input.value = '';
+    }
+  });
+
   // Dialogs: buttons with data-open="id" fill the dialog's ref fields and open it.
   document.addEventListener('click', (e) => {
     const open = e.target.closest('[data-open]');

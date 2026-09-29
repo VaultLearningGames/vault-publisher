@@ -3,7 +3,8 @@
 // from GET /v1/catalog ("featured") on its next build.
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
-import { applyFeaturedEdit, featuredImageKey, IMAGE_CACHE, MAX_IMAGE_BYTES, readFeatured, saveFeatured, sniffImage, type FeaturedEdit, type FeaturedLists } from '../featured.ts';
+import { applyFeaturedEdit, readFeatured, saveFeatured, type FeaturedEdit, type FeaturedLists } from '../featured.ts';
+import { storeImage } from '../assets.ts';
 import type { User } from '../db.ts';
 import type { ListingHelpers } from './listings.ts';
 
@@ -41,37 +42,18 @@ export function registerFeaturedApi(app: Hono, h: ListingHelpers) {
     return c.json({ ok: true });
   });
 
-  // A featured game's home-page image. The body is the file itself (png, jpeg or webp, up to MAX_IMAGE_BYTES, its type
-  // read from its content). It goes to the Vault CDN (the release bucket) and the entry keeps its public URL.
+  // A featured game's home-page image. The body is the file itself (png, jpeg or webp, up to 2 MB, its type read from
+  // its content). It goes to the Vault CDN (the release bucket) under the listing's STUDIO/GAME/_vault-assets/ and the
+  // entry keeps its public URL.
   app.post('/portal/api/vault/featured/:slug/image', async (c) => {
     const u = editor(c);
     const slug = c.req.param('slug');
     if (!readFeatured(db).games.some((e) => e.slug === slug)) fail(400, 'That game isn’t featured.');
-    if (!h.deps.production) fail(503, 'The Vault CDN storage isn’t configured here, so images can’t be uploaded.');
-    const body = await readCapped(c.req.raw, MAX_IMAGE_BYTES);
-    if (body === 'too big') fail(413, `The image is too big: at most ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`);
-    if (!body.length) fail(400, 'Choose an image to upload.');
-    const type = sniffImage(body);
-    if (!type) fail(400, 'That isn’t a PNG, JPEG or WebP image.');
-    const key = featuredImageKey(slug, body, type.ext);
-    await h.deps.production.put(key, body, body.length, { contentType: type.contentType, cacheControl: IMAGE_CACHE });
-    const url = `${h.deps.prodPublicUrl}/${key}`;
+    const l = db.listing(slug);
+    if (!l) fail(400, 'That game isn’t on the site.');
+    const { url, bytes } = await storeImage(c.req.raw, h.deps, l.studio_slug, l.slug, 'featured');
     save(u, { op: 'set', slug, image: url });
-    db.audit(h.actor(u), 'featured.image', slug, { image: url, bytes: body.length });
+    db.audit(h.actor(u), 'featured.image', slug, { image: url, bytes });
     return c.json({ ok: true, image: url });
   });
-}
-
-// The request body, or 'too big' as soon as it passes max bytes (without reading the rest).
-async function readCapped(req: Request, max: number): Promise<Uint8Array | 'too big'> {
-  if (Number(req.headers.get('content-length') ?? 0) > max) return 'too big';
-  if (!req.body) return new Uint8Array();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for await (const chunk of req.body as unknown as AsyncIterable<Uint8Array>) {
-    total += chunk.byteLength;
-    if (total > max) return 'too big';
-    chunks.push(chunk);
-  }
-  return new Uint8Array(Buffer.concat(chunks));
 }

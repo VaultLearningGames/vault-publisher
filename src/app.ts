@@ -4,7 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { randomUUID } from 'node:crypto';
 import { bearerToken, type GitHubIdentity, type Verifier } from './auth.ts';
 import type { Db, Game, ManifestFile, Studio } from './db.ts';
-import { copyRelease, makeLive, releasePrefix } from './releases.ts';
+import { copyRelease, makeLive, ReleaseLayoutError, releasePrefix } from './releases.ts';
 import { catalogEntry } from './listings.ts';
 import { catalogFeatured, readFeatured } from './featured.ts';
 import { parseRun } from './game-checks.ts';
@@ -180,7 +180,8 @@ export function createApp(deps: AppDeps) {
     if (db.release(game.id, version)) fail(409, `release ${version} already exists and can't be changed`);
     const dstPrefix = releasePrefix(`${studio.slug}/${game.slug}/`, version);
     if ((await production.list(dstPrefix)).length > 0) fail(409, `production already has files under ${dstPrefix}`);
-    const copied = await copyRelease({ staging, production, srcPrefix: previewPrefix(studio, game, ref), dstPrefix });
+    const copied = await copyRelease({ staging, production, srcPrefix: previewPrefix(studio, game, ref), dstPrefix })
+      .catch((err) => { if (err instanceof ReleaseLayoutError) fail(400, `Can’t release ${ref}: ${err.message}.`); throw err; });
     const release = db.createRelease({
       game_id: game.id, version, source_ref: ref, commit_sha: build.commit_sha,
       file_count: copied.files, total_bytes: copied.bytes, approved_by: actor,

@@ -69,6 +69,13 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
 
 **Site listing edits** (title, descriptions, grades, subjects, topics, standards, images, play settings) are drafts:
 * Studio maintainers submit them for review.
+* **Images** (hero image, thumbnail, screenshots) are a path on the site or an https link, or uploaded from the editor
+  (PNG, JPEG or WebP, type checked by content; 5 MB for the hero image, 2 MB for the others). An upload is stored at
+  once in the release bucket at `STUDIO/GAME/_vault-assets/KIND-HASH.EXT` (GAME is the listing's page slug; immutable,
+  cached for a year; replaced images are never deleted) and its absolute `cdn.vaultlearninggames.org` URL goes into the
+  draft, so it reaches the site through the same review. The site must handle both site paths and absolute https URLs
+  for `hero_image`, `thumb_image` and `screenshots`. `_vault-assets/` belongs to Vault: switching releases and rollback
+  leave it alone, and a build containing a top-level `_vault-assets/` folder can't be released.
 * Vault publishes them from **Vault → Site games**, sends them back with a note, or takes the game off the site.
 * The public **`GET /v1/catalog`** lists published games with their play URL resolved. That's either the web address or
   `cdn.vaultlearninggames.org/STUDIO/GAME/` plus an optional folder, so one CDN game can hold a collection (The Yard).
@@ -86,8 +93,9 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
     for next time. It's stored in `settings` (`site_featured`) and published as `featured` in `/v1/catalog`:
     `[{ slug, blurb, image, sequence }]` in display order, leaving out games that are off the site.
   * **Featured images** are uploaded from the row (PNG, JPEG or WebP, up to 2 MB, type checked by content) to the
-    release bucket at `_site/featured/SLUG-HASH.EXT` (immutable, cached for a year; replaced images aren't deleted),
-    and `image` is then that absolute `cdn.vaultlearninggames.org` URL. Older entries keep a path on the site
+    release bucket at `STUDIO/GAME/_vault-assets/featured-HASH.EXT` (immutable, cached for a year; replaced images
+    aren't deleted; images uploaded before this are at `_site/featured/` and keep working), and `image` is then that
+    absolute `cdn.vaultlearninggames.org` URL. Older entries keep a path on the site
     (`images/featured/*.webp`, in the website repo), so the site must handle both.
 
 **Connecting games:**

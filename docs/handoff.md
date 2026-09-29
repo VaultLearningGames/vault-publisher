@@ -16,7 +16,9 @@ system:
   `https://builds.vaultlearninggames.org/STUDIO/GAME/BRANCH/`
 - **Production CDN**, which Vault controls: `https://cdn.vaultlearninggames.org/STUDIO/GAME/` serves the current
   release in place (bookmarks always get the current version). Every approved release is kept, unchanged, at
-  `STUDIO/GAME/_releases/VERSION/`.
+  `STUDIO/GAME/_releases/VERSION/`. Images uploaded in the portal for a site listing (hero, thumbnail, screenshots,
+  featured image) live beside them at `STUDIO/GAME/_vault-assets/KIND-HASH.EXT`; release switching never touches that
+  folder, and a build containing its own `_vault-assets/` can't be released.
 - **Publisher API and studio portal**: one Cloud Run service, `vault-publisher`, at
   **https://portal.vaultlearninggames.org**. The old address `https://vault-publisher-3rlcoyes6a-uc.a.run.app` still
   answers the API, and its pages redirect to the portal.
@@ -42,8 +44,8 @@ portal "Make current" / rollback ──► publisher copies _releases/VERSION/ o
 | Studios | `studios.json` (slug ↔ GitHub org id); synced at startup |
 | Nightly cleanup | Cloud Scheduler → `POST /v1/tasks/cleanup` (removes staging previews idle 90 days) |
 
-Code map: `src/app.ts` (API, approve/promote), `src/releases.ts` (copying and production layout), `src/storage.ts`
-(R2), `src/db.ts` (schema + migrations, append only), `src/portal/routes.ts` (all portal pages and portal API),
+Code map: `src/app.ts` (API, approve/promote), `src/releases.ts` (copying and production layout), `src/assets.ts`
+(portal image uploads to `_vault-assets/`), `src/storage.ts` (R2), `src/db.ts` (schema + migrations, append only), `src/portal/routes.ts` (all portal pages and portal API),
 `public/portal.{css,js}`, `.github/workflows/*.yml` (deploy, tests, and the reusable workflows studios call),
 `action/` (the publish action).
 

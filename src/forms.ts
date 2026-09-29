@@ -125,14 +125,16 @@ export function registerForms(app: Hono, db: Db, cfg: FormsConfig | undefined) {
     return !accept.includes('text/html');
   }
 
-  function reply(c: Context, status: 200 | 400 | 403 | 413 | 429 | 502 | 503, error?: string): Response {
+  // returnTo: the page's own address from the form's hidden return_to field. Browsers send only the site's origin as
+  // the Referer to another site, so without it a no-JS visitor would land on the home page.
+  function reply(c: Context, status: 200 | 400 | 403 | 413 | 429 | 502 | 503, error?: string, returnTo?: string): Response {
     const origin = c.req.header('Origin') ?? null;
     const headers: Record<string, string> = { Vary: 'Origin', 'Cache-Control': 'no-store' };
     if (origin && isAllowed(origin)) headers['Access-Control-Allow-Origin'] = origin;
     if (wantsJson(c)) return Response.json(error ? { ok: false, error } : { ok: true }, { status, headers });
-    const referer = c.req.header('Referer');
-    if (referer && isAllowed(originOf(referer))) {
-      const back = new URL(referer);
+    const target = [returnTo, c.req.header('Referer')].find((u) => u && isAllowed(originOf(u)));
+    if (target) {
+      const back = new URL(target);
       back.hash = error ? 'form-error' : 'form-submitted';
       return new Response(null, { status: 303, headers: { ...headers, Location: back.href } });
     }
@@ -185,11 +187,12 @@ export function registerForms(app: Hono, db: Db, cfg: FormsConfig | undefined) {
 
       const fields = await readFields(c.req.raw);
       if (typeof fields === 'string') return reply(c, 400, fields);
-      if ((fields.get(HONEYPOT) ?? []).some((v) => v.trim() !== '')) return reply(c, 200); // a bot: pretend it worked
+      const returnTo = fields.get('return_to')?.[0];
+      if ((fields.get(HONEYPOT) ?? []).some((v) => v.trim() !== '')) return reply(c, 200, undefined, returnTo); // a bot: pretend it worked
 
       const ip = (c.req.header('X-Forwarded-For') ?? '').split(',')[0].trim() || 'unknown';
       const now = Date.now();
-      if (limited(`${form}:${ip}`, now)) return reply(c, 429, 'Too many submissions. Please try again later.');
+      if (limited(`${form}:${ip}`, now)) return reply(c, 429, 'Too many submissions. Please try again later.', returnTo);
 
       const get = (name: string) => {
         const alias = Object.entries(spec.aliases ?? {}).find(([, to]) => to === name)?.[0];
@@ -197,10 +200,10 @@ export function registerForms(app: Hono, db: Db, cfg: FormsConfig | undefined) {
         return values.join('; ');
       };
       const tooLong = [...fields.values()].flat().some((v) => v.length > MAX_FIELD_CHARS);
-      if (tooLong) return reply(c, 400, `Each answer can be at most ${MAX_FIELD_CHARS} characters.`);
+      if (tooLong) return reply(c, 400, `Each answer can be at most ${MAX_FIELD_CHARS} characters.`, returnTo);
       const missing = spec.required.filter((name) => !get(name));
-      if (missing.length > 0) return reply(c, 400, `Please fill in: ${missing.map((n) => spec.labels[n]).join(', ')}.`);
-      if (!EMAIL.test(get('email')) || get('email').length > 254) return reply(c, 400, 'Please enter a valid email address.');
+      if (missing.length > 0) return reply(c, 400, `Please fill in: ${missing.map((n) => spec.labels[n]).join(', ')}.`, returnTo);
+      if (!EMAIL.test(get('email')) || get('email').length > 254) return reply(c, 400, 'Please enter a valid email address.', returnTo);
 
       recent.set(`${form}:${ip}`, [...(recent.get(`${form}:${ip}`) ?? []), now]);
       const site = originOf(origin) ?? originOf(c.req.header('Referer')) ?? '';
@@ -210,10 +213,10 @@ export function registerForms(app: Hono, db: Db, cfg: FormsConfig | undefined) {
       } catch (err) {
         // The error only, never the submitted values: they're personal data.
         console.error(`forms: ${form} submission from ${site || 'unknown site'} was not saved: ${(err as Error).message}`);
-        return reply(c, 502, 'Your form could not be saved. Please try again later.');
+        return reply(c, 502, 'Your form could not be saved. Please try again later.', returnTo);
       }
       db.audit('public', 'form.submit', form, { site });
-      return reply(c, 200);
+      return reply(c, 200, undefined, returnTo);
     });
   }
 }

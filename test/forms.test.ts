@@ -232,6 +232,20 @@ describe('CORS and HTML forms', () => {
     const row = sheets.rows.get('news-sheet')!.at(-1)!;
     assert.equal(row[1], 'https://elsewhere.example');
   });
+
+  test('return_to beats the origin-only Referer, but only for an allowed site', async () => {
+    // Cross-site, browsers send just the origin as the Referer; the form's return_to names the actual page.
+    const html = { Accept: 'text/html', 'Sec-Fetch-Mode': 'navigate', Referer: `${SITE}/` };
+    let res = await submit('newsletter', new URLSearchParams({ email: 'a@b.co', return_to: `${SITE}/submit-a-game/` }), html);
+    assert.equal(res.headers.get('Location'), `${SITE}/submit-a-game/#form-submitted`);
+    res = await submit('newsletter', new URLSearchParams({ email: 'nope', return_to: `${SITE}/submit-a-game/` }), html);
+    assert.equal(res.headers.get('Location'), `${SITE}/submit-a-game/#form-error`);
+    // Not an open redirect: another site in return_to falls back to the Referer.
+    res = await submit('newsletter', new URLSearchParams({ email: 'a@b.co', return_to: 'https://evil.example/phish' }), html);
+    assert.equal(res.headers.get('Location'), `${SITE}/#form-submitted`);
+    res = await submit('newsletter', new URLSearchParams({ email: 'a@b.co', return_to: 'javascript:alert(1)' }), html);
+    assert.equal(res.headers.get('Location'), `${SITE}/#form-submitted`);
+  });
 });
 
 describe('googleSheets', () => {

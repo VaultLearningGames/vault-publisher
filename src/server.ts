@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createApp } from './app.ts';
 import { createVerifier } from './auth.ts';
 import { loadConfig } from './config.ts';
@@ -11,6 +11,12 @@ import { googleSheets } from './forms.ts';
 const config = loadConfig();
 const db = new Db(config.dbPath);
 db.syncStudios(JSON.parse(readFileSync(config.studiosFile, 'utf8')));
+// Websites for studios that have never had one; the portal is where they're changed after that.
+if (existsSync(config.studioWebsitesFile)) {
+  const seeded = db.seedStudioWebsites(JSON.parse(readFileSync(config.studioWebsitesFile, 'utf8')));
+  if (seeded.set.length) console.log(`studio websites: set ${seeded.set.join(', ')}`);
+  if (seeded.invalid.length) console.error(`studio websites: skipped invalid entries for ${seeded.invalid.join(', ')}`);
+}
 
 const production =
   config.prodAccessKeyId && config.prodSecretAccessKey

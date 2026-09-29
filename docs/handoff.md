@@ -70,7 +70,7 @@ Code map: `src/app.ts` (API, approve/promote), `src/releases.ts` (copying and pr
 - **Reusable workflow changes**: studios pin `@v1`, a moving tag. Only after a change is tested with
   `vault-publisher-test`, cut `v1.x.y` and move `v1` to it (`git tag -f v1 && git push -f origin v1`). Current: `v1.1.0`.
 - **Add a studio**: add it to `studios.json` (GitHub org id from `gh api orgs/NAME --jq .id`), deploy, and add members
-  in the portal.
+  in the portal. Its website goes in `studio-websites.json` (only fills in websites never set) or on its Members page.
 - **Add a game**: the studio adds one workflow file (see the README or the portal's "Register a game" page). Unity
   games pass `UNITY_EMAIL`, `UNITY_PASSWORD` and `UNITY_SERIAL` explicitly, because `secrets: inherit` doesn't cross
   organizations. The repo needs the `VAULT_PUBLISHER_URL` variable.

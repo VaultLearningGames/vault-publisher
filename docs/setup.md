@@ -278,6 +278,10 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
 - **Deploys** briefly run the old and new instance together. Writes are rare (one per push), but avoid
   deploying while a large batch of game builds is publishing.
 - **Adding a studio:** add it to `studios.json` (the numeric org id is `gh api orgs/NAME --jq .id`) and deploy.
+  Its website (linked from the site wherever the studio is named as a game's maker, via `/v1/catalog`) can go in
+  `studio-websites.json` (`{ "slug": "https://…" }`), applied at startup only to studios whose website has never been
+  set. After that the website is changed on the studio's **Members** page (studio admins and Vault admins), and portal
+  edits, including clearing it, always win over the file.
 - **Game availability:** `check-games.yml` runs daily at 11:23 UTC for both systems (or by hand for one, *Run
   workflow* → environment). It fetches every game in the portal's `/v1/catalog`, checks that its play address loads
   and, for games shown in the site's player, that it allows being framed by the site. It posts the run to that

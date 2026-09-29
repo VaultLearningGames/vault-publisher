@@ -120,7 +120,7 @@ export const FIELD_LABEL: Record<keyof ListingFields, string> = {
 // The public catalog entry for a published listing. `cdn` is the linked game's current production URL and release,
 // if it has one; the listing's cdn_path is added to the URL.
 export function catalogEntry(
-  l: { slug: string; studio_slug: string; studio_name: string; published_at: string | null; updated_at: string },
+  l: { slug: string; studio_slug: string; studio_name: string; studio_website?: string | null; published_at: string | null; updated_at: string },
   f: ListingFields,
   cdn: { url: string; release: string } | null,
 ) {
@@ -128,7 +128,7 @@ export function catalogEntry(
   return {
     slug: l.slug,
     title: f.title,
-    studio: { slug: l.studio_slug, name: l.studio_name },
+    studio: { slug: l.studio_slug, name: l.studio_name, url: l.studio_website || null },
     makers: f.makers.length ? f.makers : [l.studio_name],
     short_description: f.short_description,
     about: f.about,

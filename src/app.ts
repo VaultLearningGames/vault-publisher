@@ -292,8 +292,11 @@ export function createApp(deps: AppDeps) {
   // Public: every published site listing, which the Vault website is built from, and the home page's featured
   // games. A listing that plays from the Vault CDN gets its game's current release URL here, so releasing or rolling
   // back a game changes what the site plays on the next site build without anyone editing the listing.
+  // `studios` is every studio with a game on the site and its website, so the site can link any maker name that
+  // matches a studio (a game can list several makers).
   app.get('/v1/catalog', (c) => {
-    const games = db.listings({ published: true }).map((l) => {
+    const published = db.listings({ published: true });
+    const games = published.map((l) => {
       const f = l.published!;
       let cdn: { url: string; release: string } | null = null;
       if (f.play_source === 'cdn' && l.game_id) {
@@ -306,9 +309,11 @@ export function createApp(deps: AppDeps) {
     // The home page's Featured Games, in order (only games that are on the site).
     const onSite = new Set(games.map((g) => g.slug));
     const featured = catalogFeatured(readFeatured(db), (slug) => onSite.has(slug));
+    const studios = [...new Map(published.map((l) => [l.studio_slug, { slug: l.studio_slug, name: l.studio_name, url: l.studio_website || null }])).values()]
+      .sort((a, b) => a.name.localeCompare(b.name));
     c.header('Access-Control-Allow-Origin', '*');
     c.header('Cache-Control', 'public, max-age=60');
-    return c.json({ version: 1, generated_at: new Date().toISOString(), featured, games });
+    return c.json({ version: 1, generated_at: new Date().toISOString(), featured, studios, games });
   });
 
   // Start a preview upload for the branch or tag in the caller's OIDC token.

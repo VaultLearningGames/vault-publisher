@@ -107,7 +107,7 @@ describe('studios edit, Vault publishes', () => {
     assert.equal((await boss.post(`${L}/wake/publish`)).status, 200);
     const [g] = await catalog();
     assert.equal(g.slug, 'wake');
-    assert.deepEqual(g.studio, { slug: 'fieldday', name: 'Field Day Lab' });
+    assert.deepEqual(g.studio, { slug: 'fieldday', name: 'Field Day Lab', url: null });
     assert.deepEqual(g.makers, ['Field Day Lab']);
     assert.deepEqual(g.grades, ['Grades 5-8']);
     assert.deepEqual(g.play, { url: 'https://fielddaylab.wisc.edu/play/wake/', source: 'url', release: null, embed: true, fit: null });
@@ -181,6 +181,31 @@ describe('one list of games per studio', () => {
     const start = await app.request('/v1/previews', { method: 'POST', headers: { Authorization: 'Bearer bloom', 'Content-Type': 'application/json' }, body: JSON.stringify({ game: 'bloom', files: [{ path: 'index.html', size: 5 }] }) });
     assert.equal(start.status, 200);
     assert.equal(db.listing('bloom')!.game_id, db.game(db.studioBySlug('fieldday')!.id, 'bloom')!.id);
+  });
+});
+
+describe('studio websites in the catalog', () => {
+  test('each game’s studio has its url, and `studios` lists every studio with a game on the site', async () => {
+    db.syncStudios([{ slug: 'nogames', name: 'No Games Yet', github_owner: '', github_owner_id: 'vault:nogames' }]);
+    const boss = as('boss', 'admin');
+    await boss.post(L, { slug: 'wake', title: 'Wake' });
+    await boss.post(`${L}/wake`, { play_url: 'https://example.org/wake/', makers: 'Field Day Lab, Wilson Center', publish: true });
+    await boss.post('/portal/api/s/ucalgary/listings', { slug: 'quake', title: 'Quake' });
+    await boss.post('/portal/api/s/ucalgary/listings/quake', { play_url: 'https://example.org/quake/', publish: true });
+    assert.equal((await boss.post('/portal/api/s/fieldday/website', { website: 'https://fielddaylab.wisc.edu/' })).status, 200);
+    db.setStudioWebsite(db.studioBySlug('nogames')!.id, 'https://nogames.example/');
+    const full = (await (await app.request('/v1/catalog')).json()) as any;
+    assert.equal(full.version, 1);
+    assert.deepEqual(full.games.find((g: any) => g.slug === 'wake').studio, { slug: 'fieldday', name: 'Field Day Lab', url: 'https://fielddaylab.wisc.edu/' });
+    assert.deepEqual(full.games.find((g: any) => g.slug === 'wake').makers, ['Field Day Lab', 'Wilson Center']);
+    assert.equal(full.games.find((g: any) => g.slug === 'quake').studio.url, null);
+    assert.deepEqual(full.studios, [
+      { slug: 'fieldday', name: 'Field Day Lab', url: 'https://fielddaylab.wisc.edu/' },
+      { slug: 'ucalgary', name: 'University of Calgary', url: null },
+    ], 'studios without a game on the site are left out');
+    // Clearing it in the portal publishes null.
+    await boss.post('/portal/api/s/fieldday/website', { website: '' });
+    assert.equal(((await (await app.request('/v1/catalog')).json()) as any).studios[0].url, null);
   });
 });
 

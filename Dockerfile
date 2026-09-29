@@ -15,7 +15,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY src ./src
 COPY public ./public
-COPY studios.json litestream.yml docker-entrypoint.sh ./
+COPY studios.json studio-websites.json litestream.yml docker-entrypoint.sh ./
 
 EXPOSE 8080
 ENTRYPOINT ["./docker-entrypoint.sh"]

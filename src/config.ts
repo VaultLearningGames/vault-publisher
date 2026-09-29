@@ -2,6 +2,8 @@ export interface Config {
   port: number;
   dbPath: string;
   studiosFile: string;
+  // Studios' websites to fill in when a studio has none yet (see Db.seedStudioWebsites).
+  studioWebsitesFile: string;
   // Audience GitHub Actions must request for their OIDC token.
   oidcAudience: string;
   r2AccountId: string;
@@ -47,6 +49,7 @@ export function loadConfig(): Config {
     port: Number(process.env.PORT ?? 8080),
     dbPath: process.env.DB_PATH ?? 'data/publisher.db',
     studiosFile: process.env.STUDIOS_FILE ?? 'studios.json',
+    studioWebsitesFile: process.env.STUDIO_WEBSITES_FILE ?? 'studio-websites.json',
     oidcAudience: process.env.OIDC_AUDIENCE ?? 'vault-publisher',
     r2AccountId: required('R2_ACCOUNT_ID'),
     // No defaults for buckets or URLs: the production and staging systems run the same image, and a

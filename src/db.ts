@@ -184,6 +184,11 @@ const MIGRATIONS = [
     created_at   TEXT NOT NULL
   );
   `,
+  // v9: each studio's own website, published in /v1/catalog so the site can link a game's maker to it.
+  // NULL: never set (studio-websites.json may fill it in); '': cleared in the portal (the file leaves it alone).
+  `
+  ALTER TABLE studios ADD COLUMN website TEXT;
+  `,
 ];
 
 export interface Listing {
@@ -209,6 +214,22 @@ export interface Studio {
   name: string;
   github_owner: string;
   github_owner_id: string;
+  website?: string | null;
+}
+
+const MAX_WEBSITE = 300;
+// A studio website as typed in the portal or studio-websites.json: an absolute http(s) URL, trimmed. Empty means
+// "no website" (null). Throws with a message for the person typing it.
+export function studioWebsite(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : '';
+  if (!s) return null;
+  if (s.length > MAX_WEBSITE) throw new Error(`The website address is too long (at most ${MAX_WEBSITE} characters).`);
+  let url: URL | null = null;
+  try { url = new URL(s); } catch { /* not a URL */ }
+  if (!url || !/^https?:$/.test(url.protocol) || !url.hostname || /\s/.test(s) || url.username || url.password) {
+    throw new Error('The website must be a full address starting with https:// (or http://).');
+  }
+  return s;
 }
 
 export interface Game {
@@ -362,6 +383,26 @@ export class Db {
       ON CONFLICT (github_owner_id) DO UPDATE SET slug = excluded.slug, name = excluded.name,
         github_owner = excluded.github_owner`);
     for (const s of studios) upsert.run(s.slug, s.name, s.github_owner, s.github_owner_id, now());
+  }
+
+  // Set (or clear, with null) a studio's website from the portal. Cleared is stored as '' so studio-websites.json
+  // doesn't fill it in again.
+  setStudioWebsite(studioId: number, website: string | null) {
+    this.sqlite.prepare('UPDATE studios SET website = ? WHERE id = ?').run(website ?? '', studioId);
+  }
+
+  // studio-websites.json ({ "slug": "https://…" }): fills in websites for studios that exist and have never had one
+  // set, so edits in the portal always win. Returns the slugs it set and the entries it skipped as invalid.
+  seedStudioWebsites(websites: Record<string, unknown>): { set: string[]; invalid: string[] } {
+    const out = { set: [] as string[], invalid: [] as string[] };
+    const update = this.sqlite.prepare('UPDATE studios SET website = ? WHERE slug = ? AND website IS NULL');
+    for (const [slug, v] of Object.entries(websites)) {
+      let url: string | null;
+      try { url = studioWebsite(v); } catch { url = null; }
+      if (!url) { out.invalid.push(slug); continue; }
+      if (update.run(url, slug).changes) out.set.push(slug);
+    }
+    return out;
   }
 
   studioByOwnerId(ownerId: string): Studio | undefined {
@@ -632,12 +673,12 @@ export class Db {
   }
 
   // ---------- site listings ----------
-  private listingRow(r: Record<string, unknown> | undefined): (Listing & { studio_slug: string; studio_name: string }) | undefined {
+  private listingRow(r: Record<string, unknown> | undefined): (Listing & { studio_slug: string; studio_name: string; studio_website: string | null }) | undefined {
     if (!r) return undefined;
     const { draft_json, published_json, ...rest } = r as Record<string, unknown> & { draft_json: string; published_json: string | null };
-    return { ...(rest as unknown as Listing & { studio_slug: string; studio_name: string }), draft: JSON.parse(draft_json), published: published_json ? JSON.parse(published_json) : null };
+    return { ...(rest as unknown as Listing & { studio_slug: string; studio_name: string; studio_website: string | null }), draft: JSON.parse(draft_json), published: published_json ? JSON.parse(published_json) : null };
   }
-  private readonly LISTING_SELECT = `SELECT l.*, s.slug AS studio_slug, s.name AS studio_name FROM listings l JOIN studios s ON s.id = l.studio_id`;
+  private readonly LISTING_SELECT = `SELECT l.*, s.slug AS studio_slug, s.name AS studio_name, s.website AS studio_website FROM listings l JOIN studios s ON s.id = l.studio_id`;
 
   createListing(studioId: number, slug: string, draft: ListingFields, by: string) {
     const t = now();

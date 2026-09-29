@@ -72,7 +72,9 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
 * Vault publishes them from **Vault → Site games**, sends them back with a note, or takes the game off the site.
 * The public **`GET /v1/catalog`** lists published games with their play URL resolved. That's either the web address or
   `cdn.vaultlearninggames.org/STUDIO/GAME/` plus an optional folder, so one CDN game can hold a collection (The Yard).
-  The site ([vault-rebuild](https://github.com/fielddaylab/vault-rebuild)) is built from it.
+  The site ([vault-rebuild](https://github.com/fielddaylab/vault-rebuild)) is built from it. Each game's `studio`
+  carries the studio's website as `url`, and `studios` lists every studio with a game on the site (`slug`, `name`,
+  `url`) so the site can link maker names. Studio admins set the website on their **Members** page.
 * **Vault → Game availability** shows whether every site game still loads (checked daily by `check-games.yml`; see
   [docs/setup.md](docs/setup.md#operating-notes)). Each game's page shows its latest result.
 * **Vault → Featured games** picks the games in the home page's Featured Games section, in order, with an optional

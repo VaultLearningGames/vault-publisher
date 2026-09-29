@@ -31,6 +31,7 @@ db.syncStudios([
   { slug: 'fieldday', name: 'Field Day Lab', github_owner: 'fielddaylab', github_owner_id: '1881825' },
   { slug: 'ucalgary', name: 'University of Calgary', github_owner: '', github_owner_id: 'vault:ucalgary' },
 ]);
+db.seedStudioWebsites({ fieldday: 'https://fielddaylab.wisc.edu/' });
 const staging = new MemoryStorage(), production = new MemoryStorage();
 const fd = db.studioBySlug('fieldday')!;
 

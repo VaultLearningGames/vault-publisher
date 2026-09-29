@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Readable } from 'node:stream';
 import { createApp } from '../src/app.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
-import { Db } from '../src/db.ts';
+import { Db, studioWebsite } from '../src/db.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import { signSession } from '../src/portal/session.ts';
 import { browseKeys, type Storage } from '../src/storage.ts';
@@ -295,6 +295,69 @@ describe('user management', () => {
     const me = db.users().find((u) => u.login === 'boss')!;
     assert.equal((await boss.post(`/portal/api/vault/users/${me.id}/role`, { role: 'none' })).status, 400);
     assert.equal((await as('rita', 'release_manager').post(`/portal/api/vault/users/${me.id}/role`, { role: 'none' })).status, 403);
+  });
+});
+
+describe('studio website', () => {
+  const W = '/portal/api/s/fieldday/website';
+  const website = () => db.studioBySlug('fieldday')!.website;
+
+  test('only absolute http(s) addresses are accepted, trimmed; empty clears', () => {
+    assert.equal(studioWebsite('  https://fielddaylab.wisc.edu/  '), 'https://fielddaylab.wisc.edu/');
+    assert.equal(studioWebsite('http://example.org/studio?a=1'), 'http://example.org/studio?a=1');
+    assert.equal(studioWebsite(''), null);
+    assert.equal(studioWebsite('   '), null);
+    assert.equal(studioWebsite(undefined), null);
+    for (const bad of ['javascript:alert(1)', 'data:text/html,hi', 'ftp://example.org/', 'example.org', '/about', 'https://', 'https://exa mple.org/', 'https://user:pw@example.org/', `https://example.org/${'a'.repeat(300)}`]) {
+      assert.throws(() => studioWebsite(bad), bad);
+    }
+  });
+
+  test('a new database has no website until one is set', () => {
+    assert.equal(website(), null);
+    const cols = db.sqlite.prepare('PRAGMA table_info(studios)').all() as { name: string; notnull: number }[];
+    assert.equal(cols.find((c) => c.name === 'website')?.notnull, 0);
+  });
+
+  test('studio admins and Vault admins set it; maintainers, viewers and release managers can’t', async () => {
+    assert.equal((await as('mia', 'none', 'maintainer').post(W, { website: 'https://x.test/' })).status, 403);
+    assert.equal((await as('vera', 'none', 'viewer').post(W, { website: 'https://x.test/' })).status, 403);
+    assert.equal((await as('rm', 'release_manager').post(W, { website: 'https://x.test/' })).status, 403);
+    assert.equal((await as('sam').post(W, { website: 'https://x.test/' })).status, 403);
+    assert.equal(website(), null);
+    const ada = as('ada', 'none', 'admin');
+    assert.equal((await ada.post(W, { website: 'javascript:alert(1)' })).status, 400);
+    assert.equal((await ada.post(W, { website: ' https://fielddaylab.wisc.edu/ ' })).status, 200);
+    assert.equal(website(), 'https://fielddaylab.wisc.edu/');
+    assert.equal((await as('boss', 'admin').post(W, { website: 'https://fielddaylab.org/' })).status, 200);
+    assert.equal(website(), 'https://fielddaylab.org/');
+    const log = db.auditFor(['studio.website'], 5);
+    assert.equal(log.length, 2);
+    assert.deepEqual(JSON.parse(log[0].detail_json!), { from: 'https://fielddaylab.wisc.edu/', to: 'https://fielddaylab.org/' });
+    assert.equal((await ada.post(W, { website: '' })).status, 200);
+    assert.equal(website(), '', 'cleared');
+  });
+
+  test('the Members page shows it; only those who can change it get the form', async () => {
+    db.setStudioWebsite(db.studioBySlug('fieldday')!.id, 'https://fielddaylab.wisc.edu/');
+    const viewerPage = await (await as('vera', 'none', 'viewer').get('/s/fieldday/members')).text();
+    assert.match(viewerPage, /href="https:\/\/fielddaylab\.wisc\.edu\/"/);
+    assert.doesNotMatch(viewerPage, /data-api="\/portal\/api\/s\/fieldday\/website"/);
+    assert.match(await (await as('ada', 'none', 'admin').get('/s/fieldday/members')).text(), /data-api="\/portal\/api\/s\/fieldday\/website"/);
+    assert.match(await (await as('boss', 'admin').get('/s/fieldday/members')).text(), /data-api="\/portal\/api\/s\/fieldday\/website"/);
+  });
+
+  test('studio-websites.json fills in websites never set, and never overrides the portal', async () => {
+    const r = db.seedStudioWebsites({ fieldday: 'https://fielddaylab.wisc.edu/', ucalgary: 'javascript:x', nosuch: 'https://x.test/' });
+    assert.deepEqual(r, { set: ['fieldday'], invalid: ['ucalgary'] });
+    assert.equal(website(), 'https://fielddaylab.wisc.edu/');
+    await as('ada', 'none', 'admin').post(W, { website: 'https://portal-edit.test/' });
+    db.seedStudioWebsites({ fieldday: 'https://fielddaylab.wisc.edu/' });
+    assert.equal(website(), 'https://portal-edit.test/', 'a portal edit wins');
+    await as('ada', 'none', 'admin').post(W, { website: '' });
+    db.seedStudioWebsites({ fieldday: 'https://fielddaylab.wisc.edu/' });
+    assert.equal(website(), '', 'clearing it in the portal also wins');
+    assert.equal(db.studioBySlug('ucalgary')!.website, null);
   });
 });
 

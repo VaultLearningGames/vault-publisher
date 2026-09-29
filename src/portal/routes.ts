@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { AppDeps } from '../app.ts';
 import { fail, jsonBody } from '../app.ts';
-import type { Build, Game, Membership, Release, StudioRole, Studio, User, VaultRole } from '../db.ts';
+import { studioWebsite, type Build, type Game, type Membership, type Release, type StudioRole, type Studio, type User, type VaultRole } from '../db.ts';
 import { headersFor, isSafeFilePath, isVersionName, sanitizeRefName } from '../paths.ts';
 import { escape, html, raw, type Html } from './html.ts';
 import { listingPieces, registerListingPages, type ListingRow } from './listings.ts';
@@ -621,11 +621,19 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
           <button class="btn pri">Add</button><span class="err" role="status" aria-live="polite"></span></form>
           <p class="small muted">They can sign in right away; nothing is emailed.</p></div>` : ''}
       </div>
-      <div class="card small" style="align-self:start"><h2>Roles</h2><ul class="tight">
+      <div class="grid" style="align-content:start">
+        <div class="card small" id="studio"><h2>Studio</h2>
+          <table class="kv"><tbody><tr><th>Name</th><td>${s.name}</td></tr>
+            <tr><th>Website</th><td>${s.website ? html`<a href="${s.website}" target="_blank" rel="noopener">${s.website}</a>` : html`<span class="muted">none</span>`}</td></tr></tbody></table>
+          ${manage ? html`<form data-api="/portal/api/s/${s.slug}/website" data-then="reload" class="inline-form">
+            <label class="field"><span class="lab">Website</span><input name="website" type="url" maxlength="300" value="${s.website ?? ''}" placeholder="https://example.org" autocomplete="off"></label>
+            <button class="btn">Save</button><span class="err" role="status" aria-live="polite"></span></form>` : ''}
+          <p class="muted">vaultlearninggames.org links ${s.name} to it wherever it’s named as a game’s maker.</p></div>
+        <div class="card small"><h2>Roles</h2><ul class="tight">
         <li><b>Viewer</b>: sees the studio’s games, test versions and releases.</li>
         <li><b>Maintainer</b>: also requests releases.</li>
-        <li><b>Studio admin</b>: also manages members.</li>
-        <li><b>Vault staff</b> release, promote and roll back.</li></ul></div></div>`;
+        <li><b>Studio admin</b>: also manages members and the studio’s website.</li>
+        <li><b>Vault staff</b> release, promote and roll back.</li></ul></div></div></div>`;
     return page(c, 'Members', body, { studio: s, active: 'members' });
   });
 
@@ -832,6 +840,20 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     db.removeMembership(s.id, login);
     db.audit(actor(u), 'member.remove', `${s.slug}:${login}`);
     return c.json({ ok: true });
+  });
+
+  // A studio's website, which the catalog publishes. Body: { website } ('' clears it).
+  app.post('/portal/api/s/:studio/website', async (c) => {
+    const u = apiUser(c);
+    const s = db.studioBySlug(c.req.param('studio'));
+    if (!s || !canManageMembers(u, s)) fail(403, 'Only studio admins can change the studio’s website.');
+    let website: string | null;
+    try { website = studioWebsite((await jsonBody(c)).website); } catch (err) { fail(400, (err as Error).message); }
+    if ((s.website || null) !== website) {
+      db.setStudioWebsite(s.id, website);
+      db.audit(actor(u), 'studio.website', s.slug, { from: s.website || null, to: website });
+    }
+    return c.json({ ok: true, website });
   });
 
   app.post('/portal/api/vault/users/:id/role', async (c) => {

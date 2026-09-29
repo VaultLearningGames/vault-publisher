@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { bearerToken, type GitHubIdentity, type Verifier } from './auth.ts';
 import type { Db, Game, ManifestFile, Studio } from './db.ts';
 import { copyRelease, makeLive, ReleaseLayoutError, releasePrefix } from './releases.ts';
-import { catalogEntry } from './listings.ts';
+import { catalogGame, catalogStudios } from './catalog.ts';
+import type { PreviewSite } from './config.ts';
 import { catalogFeatured, readFeatured } from './featured.ts';
 import { parseRun } from './game-checks.ts';
 import { registerPortal, type PortalConfig } from './portal/routes.ts';
@@ -38,6 +39,12 @@ export interface AppDeps {
   taskInvokerEmail: string;
   // Public website forms; without it the form endpoints answer 503.
   forms?: FormsConfig;
+  // The public website, where site-path listing images are fetched from to copy them to the CDN.
+  siteUrl?: string;
+  // Sites that show unsaved listing previews at SITE/_preview/TOKEN/; none hides the editor's Preview buttons.
+  previewSites?: PreviewSite[];
+  // Injected in tests (image migration downloads).
+  fetch?: typeof fetch;
 }
 
 const PRESIGN_SECONDS = 15 * 60;
@@ -297,21 +304,11 @@ export function createApp(deps: AppDeps) {
   // matches a studio (a game can list several makers).
   app.get('/v1/catalog', (c) => {
     const published = db.listings({ published: true });
-    const games = published.map((l) => {
-      const f = l.published!;
-      let cdn: { url: string; release: string } | null = null;
-      if (f.play_source === 'cdn' && l.game_id) {
-        const game = db.gameById(l.game_id);
-        const current = game && db.currentRelease(game.id);
-        if (game && current) cdn = { url: `${deps.prodPublicUrl}/${l.studio_slug}/${game.slug}/`, release: current.version };
-      }
-      return catalogEntry(l, f, cdn);
-    });
+    const games = published.map((l) => catalogGame(db, deps.prodPublicUrl, l, l.published!));
     // The home page's Featured Games, in ascending sequence, ties by title (only games that are on the site).
     const titles = new Map(games.map((g) => [g.slug, g.title]));
     const featured = catalogFeatured(readFeatured(db), (slug) => titles.get(slug));
-    const studios = [...new Map(published.map((l) => [l.studio_slug, { slug: l.studio_slug, name: l.studio_name, url: l.studio_website || null }])).values()]
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const studios = catalogStudios(published);
     c.header('Access-Control-Allow-Origin', '*');
     c.header('Cache-Control', 'public, max-age=60');
     return c.json({ version: 1, generated_at: new Date().toISOString(), featured, studios, games });

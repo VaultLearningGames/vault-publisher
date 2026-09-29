@@ -81,7 +81,36 @@
   });
   document.addEventListener('change', (e) => {
     const form = e.target.form;
-    if (form && form.hasAttribute('data-autosubmit') && (e.target.tagName === 'SELECT' || e.target.type === 'checkbox')) submit(form, e.target);
+    if (!form || !form.hasAttribute('data-autosubmit') || (e.target.tagName !== 'SELECT' && e.target.type !== 'checkbox')) return;
+    // data-open-after="id": ticking the box opens that accordion section once the page reloads.
+    if (form.dataset.openAfter && e.target.type === 'checkbox') setOpen(form.dataset.openAfter, e.target.checked);
+    submit(form, e.target);
+  });
+
+  // Accordions: a button with aria-controls="id" and aria-expanded shows and hides that element. Open sections are
+  // remembered for this tab, so they stay open when a Save reloads the page.
+  const OPEN_KEY = 'vault-portal-open';
+  const openSet = () => { try { return new Set(JSON.parse(sessionStorage.getItem(OPEN_KEY) || '[]')); } catch (_) { return new Set(); } };
+  function setOpen(id, open) {
+    const s = openSet();
+    if (open) s.add(id); else s.delete(id);
+    try { sessionStorage.setItem(OPEN_KEY, JSON.stringify([...s])); } catch (_) { /* private mode: not remembered */ }
+  }
+  function show(btn, open) {
+    const panel = document.getElementById(btn.getAttribute('aria-controls'));
+    if (!panel) return;
+    panel.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+  }
+  const toggles = document.querySelectorAll('button.feat-open[aria-controls]');
+  const remembered = openSet();
+  toggles.forEach((btn) => show(btn, remembered.has(btn.getAttribute('aria-controls'))));
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button.feat-open[aria-controls]');
+    if (!btn) return;
+    const open = btn.getAttribute('aria-expanded') !== 'true';
+    show(btn, open);
+    setOpen(btn.getAttribute('aria-controls'), open);
   });
 
   // Listing image pickers (data-upload-image): upload the chosen file as soon as it's picked; the server saves its URL
@@ -131,6 +160,42 @@
       busy--;
       input.disabled = false;
       input.value = '';
+    }
+  });
+
+  // Listing preview buttons (data-preview): post the editor's current, unsaved fields and show the result on the
+  // site. The tab is opened during the click (so popup blockers allow it) and pointed at the preview once it exists.
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-preview]');
+    if (!btn) return;
+    const form = btn.form || btn.closest('form');
+    const err = btn.parentElement.querySelector(':scope > .err') || (form && form.querySelector('.form-foot .err'));
+    const say = (msg, status) => { if (err) { err.style.color = ''; err.classList.toggle('status', !!status); err.textContent = msg; } };
+    const tab = window.open('about:blank', '_blank');
+    if (tab) { try { tab.opener = null; tab.document.title = 'Preparing preview…'; tab.document.body.textContent = 'Preparing the preview…'; } catch (_) { /* cross-origin */ } }
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    say('Preparing the preview…', true);
+    try {
+      const res = await fetch(btn.dataset.preview, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
+        body: JSON.stringify(formJson(form)),
+        credentials: 'same-origin',
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Something went wrong (HTTP ${res.status}).`);
+      const url = body.urls[Number(btn.dataset.site) || 0].url;
+      if (tab && !tab.closed) { tab.location.href = url; say('Preview opened in a new tab (it lasts 30 minutes; nothing was saved).', true); }
+      else { say(''); if (err) { const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Open the preview'; err.classList.add('status'); err.append(a); } }
+    } catch (ex) {
+      if (tab && !tab.closed) tab.close();
+      say(ex.message);
+    } finally {
+      btn.disabled = false;
+      btn.removeAttribute('aria-busy');
+      btn.textContent = label;
     }
   });
 

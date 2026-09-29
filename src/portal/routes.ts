@@ -14,6 +14,8 @@ import { escape, html, raw, type Html } from './html.ts';
 import { listingPieces, registerListingPages, type ListingRow } from './listings.ts';
 import { registerFeaturedApi } from './featured.ts';
 import { registerListingAssetsApi } from './listing-assets.ts';
+import { registerListingPreview } from './listing-preview.ts';
+import { registerImageMigration } from './image-migration.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -870,4 +872,6 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   registerListingPages(app, listingHelpers);
   registerFeaturedApi(app, listingHelpers);
   registerListingAssetsApi(app, listingHelpers);
+  registerListingPreview(app, listingHelpers);
+  registerImageMigration(app, listingHelpers);
 }

@@ -90,6 +90,8 @@ jobs:
           FORMS_ALLOWED_ORIGINS=${{ vars.FORMS_ALLOWED_ORIGINS }}
           FORMS_NEWSLETTER_SHEET=${{ vars.FORMS_NEWSLETTER_SHEET }}
           FORMS_SUBMIT_GAME_SHEET=${{ vars.FORMS_SUBMIT_GAME_SHEET }}
+          SITE_URL=${{ vars.SITE_URL }}
+          PREVIEW_SITES=${{ vars.PREVIEW_SITES }}
         secrets: |-
           R2_BUILDS_ACCESS_KEY_ID=${{ vars.SERVICE }}-r2-builds-access-key-id:latest
           R2_BUILDS_SECRET_ACCESS_KEY=${{ vars.SERVICE }}-r2-builds-secret-access-key:latest

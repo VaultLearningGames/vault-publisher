@@ -14,6 +14,8 @@ import { availabilityCells, availabilityLine, AVAILABILITY_HEADS } from './avail
 import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '../featured.ts';
 import type { PortalDeps } from './routes.ts';
 import { imageField } from './listing-assets.ts';
+import { previewButtons, saveControls } from './listing-preview.ts';
+import { migrationCard } from './image-migration.ts';
 
 export interface ListingHelpers {
   db: Db;
@@ -127,10 +129,7 @@ export function listingPieces(h: ListingHelpers) {
           <option value="false" ${f.embed ? '' : 'selected'}>A new tab (the game’s page refuses to be framed)</option></select></label>
         ${vault ? txt('fit', 'Player fit (Vault)', 'For fixed-size games: page width, page height, x, y, width, height of the game on that page.') : ''}
       </div>
-      ${edit ? html`<div class="form-foot">
-        ${vault ? html`<label class="check"><input type="checkbox" name="publish"> Publish to the site when saved</label>`
-                : html`<label class="check"><input type="checkbox" name="submit" ${l.review === 'submitted' ? 'checked' : ''}> Submit for Vault review when saved</label>`}
-        <button class="btn pri">Save</button>${err}</div>` : ''}
+      ${edit ? html`<div class="form-foot">${saveControls(vault, l)}${previewButtons(api, h.deps.previewSites)}${err}</div>` : ''}
     </form>`;
     const side = html`<div class="card"><h2>Site listing</h2><p>${state(l)}</p>
         ${l.published ? html`<p class="small">On the site since ${l.published_at?.slice(0, 10)} (${who(l.published_by ?? '')}).</p>` : html`<p class="small muted">Not on the site yet.</p>`}
@@ -210,19 +209,21 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
       const why = e ? '' : off ? 'Only games on the site can be featured' : full ? `${MAX_FEATURED} games are featured already` : '';
       const box = html`<input type="checkbox" name="featured" ${e ? 'checked' : ''} ${!featuring || why ? 'disabled' : ''} aria-label="Feature ${title} on the home page" title="${why}">`;
       const note = e && off ? html`<span class="err small">Off the site, so the home page skips it</span>` : '';
+      // A featured game's editor row opens and closes like an accordion (portal.js); ticking the box opens it.
+      const open = e ? html`<button type="button" class="feat-open" aria-expanded="false" aria-controls="feat-edit-${l.slug}" aria-label="${featuring ? 'Edit' : 'Show'} ${title}’s featured settings">${featuring ? 'Edit' : 'Details'}<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : '';
       return featuring
-        ? html`<form data-api="${FA}" data-autosubmit data-then="reload" class="feat-toggle"><input type="hidden" name="op" value="feature"><input type="hidden" name="slug" value="${l.slug}">
-            <label class="check">${box}${e ? html` <span class="mono small">#${e.sequence}</span>` : ''}</label>${note}${err}</form>`
-        : html`<label class="check">${box}${e ? html` <span class="mono small">#${e.sequence}</span>` : ''}</label>${note}`;
+        ? html`<form data-api="${FA}" data-autosubmit data-then="reload" data-open-after="feat-edit-${l.slug}" class="feat-toggle"><input type="hidden" name="op" value="feature"><input type="hidden" name="slug" value="${l.slug}">
+            <span class="feat-line"><label class="check">${box}${e ? html` <span class="mono small">#${e.sequence}</span>` : ''}</label>${open}</span>${note}${err}</form>`
+        : html`<span class="feat-line"><label class="check">${box}${e ? html` <span class="mono small">#${e.sequence}</span>` : ''}</label>${open}</span>${note}`;
     };
     const imageOf = (e: FeaturedEntry) => (!e.image ? html`<span class="muted small">The listing’s hero image</span>`
       : /^https:\/\//.test(e.image) ? html`<a href="${e.image}" target="_blank" rel="noopener"><img class="feat-thumb" src="${e.image}" alt="Featured image"></a>`
       : html`<span class="mono small" title="A path on the site">${e.image}</span>`);
     const featRow = (l: ListingRow, e: FeaturedEntry) => {
       const shown = l.published ?? l.draft;
-      if (!featuring) return html`<tr class="feat-edit"><td colspan="${COLS}"><div class="feat"><span class="small">Sequence <b class="mono">${e.sequence}</b></span>
+      if (!featuring) return html`<tr class="feat-edit" id="feat-edit-${l.slug}" hidden><td colspan="${COLS}"><div class="feat"><span class="small">Sequence <b class="mono">${e.sequence}</b></span>
         <span class="small">${e.blurb || html`<span class="muted">${shown.short_description || 'The listing’s short description'}</span>`}</span>${imageOf(e)}</div></td></tr>`;
-      return html`<tr class="feat-edit"><td colspan="${COLS}"><div class="feat">
+      return html`<tr class="feat-edit" id="feat-edit-${l.slug}" hidden><td colspan="${COLS}"><div class="feat">
         <form data-api="${FA}" data-then="reload" class="feat-form"><input type="hidden" name="op" value="set"><input type="hidden" name="slug" value="${l.slug}">
           <label class="field seq"><span class="lab">Sequence</span><input type="number" name="sequence" value="${e.sequence}" min="0" max="9999" step="1" required></label>
           <label class="field blurb"><span class="lab">Home-page description (optional; *italics* work)</span><textarea name="blurb" rows="2" placeholder="${shown.short_description}">${e.blurb}</textarea></label>
@@ -259,7 +260,8 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
         <form data-api="/portal/api/vault/listings/import" data-then="reload" class="fields">
           <label class="field full"><span class="lab">games-export.json</span><textarea name="pages" rows="4" required></textarea></label>
           <label class="field full"><span class="lab">import-overrides.json (optional)</span><textarea name="overrides" rows="3"></textarea></label>
-          <div class="form-foot"><button class="btn pri">Import</button>${err}</div></form></div>` : ''}`;
+          <div class="form-foot"><button class="btn pri">Import</button>${err}</div></form></div>` : ''}
+      ${h.isVaultAdmin(u) ? migrationCard(h) : ''}`;
     return h.page(c, 'Site games', body, { active: 'vault-listings' });
   });
 

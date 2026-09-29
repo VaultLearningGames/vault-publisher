@@ -35,6 +35,29 @@ export interface Config {
   formsAllowedOrigins: string[];
   formsNewsletterSheet?: string;
   formsSubmitGameSheet?: string;
+  // The public website (https://vaultlearninggames.org): where listings' site-path images are fetched from when they
+  // are copied to the CDN (image-migration.ts).
+  siteUrl: string;
+  // Sites that can show an unsaved listing preview at SITE/_preview/TOKEN/ (listing-preview.ts). The first is the
+  // editor's main Preview button.
+  previewSites: PreviewSite[];
+}
+
+export interface PreviewSite {
+  label: string;
+  url: string;
+}
+
+// PREVIEW_SITES: space-separated label=url pairs, e.g. "Squarespace=https://a.example.org New=https://b.example.org"
+// (no commas: the deploy action splits env_vars values on commas). Malformed entries are skipped.
+export function parsePreviewSites(v: string | undefined): PreviewSite[] {
+  const out: PreviewSite[] = [];
+  for (const pair of (v ?? '').split(/\s+/).filter(Boolean)) {
+    const at = pair.indexOf('=');
+    const label = pair.slice(0, at).trim(), url = pair.slice(at + 1).trim().replace(/\/+$/, '');
+    if (at > 0 && /^https?:\/\/[^\s/]+/i.test(url)) out.push({ label, url });
+  }
+  return out;
 }
 
 function required(name: string): string {
@@ -76,5 +99,7 @@ export function loadConfig(): Config {
     formsAllowedOrigins: (process.env.FORMS_ALLOWED_ORIGINS ?? '').split(/[\s,]+/).filter(Boolean),
     formsNewsletterSheet: process.env.FORMS_NEWSLETTER_SHEET?.trim() || undefined,
     formsSubmitGameSheet: process.env.FORMS_SUBMIT_GAME_SHEET?.trim() || undefined,
+    siteUrl: (process.env.SITE_URL?.trim() || 'https://vaultlearninggames.org').replace(/\/+$/, ''),
+    previewSites: parsePreviewSites(process.env.PREVIEW_SITES),
   };
 }

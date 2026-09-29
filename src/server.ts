@@ -50,6 +50,8 @@ const app = createApp({
     vaultAdmins: config.vaultAdmins,
   },
   previewRetentionDays: config.previewRetentionDays,
+  siteUrl: config.siteUrl,
+  previewSites: config.previewSites,
   taskInvokerEmail: config.taskInvokerEmail,
   forms: {
     allowedOrigins: config.formsAllowedOrigins,

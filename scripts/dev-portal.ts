@@ -9,6 +9,7 @@ import { browseKeys, type Storage } from '../src/storage.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { importListings } from '../src/listings-import.ts';
 import { saveFeatured } from '../src/featured.ts';
+import { parsePreviewSites } from '../src/config.ts';
 import { countLevels, parseRun, type GameCheck } from '../src/game-checks.ts';
 
 class MemoryStorage implements Storage {
@@ -112,6 +113,8 @@ const app = createApp({
   stagingPublicUrl: 'https://builds.vaultlearninggames.org', prodPublicUrl: 'https://cdn.vaultlearninggames.org',
   adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production',
   previewRetentionDays: 90, taskInvokerEmail: 'dev@example.org',
+  siteUrl: process.env.SITE_URL ?? 'https://new-design.vaultlearninggames-staging.org',
+  previewSites: parsePreviewSites(process.env.PREVIEW_SITES ?? 'Squarespace=https://squarespace-design.vaultlearninggames-staging.org New=https://new-design.vaultlearninggames-staging.org'),
   portal: {
     baseUrl: `http://localhost:${PORT}`, sessionSecret: 'dev-only-secret', vaultAdmins: ['boss'],
     oauth: {

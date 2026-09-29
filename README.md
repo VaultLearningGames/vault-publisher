@@ -77,6 +77,18 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   for `hero_image`, `thumb_image` and `screenshots`. `_vault-assets/` belongs to Vault: switching releases and rollback
   leave it alone, and a build containing a top-level `_vault-assets/` folder can't be released.
 * Vault publishes them from **Vault → Site games**, sends them back with a note, or takes the game off the site.
+* Vault staff's editor has one **Save and Publish Changes** button (saves the draft and publishes it); studio members
+  save the draft and may tick *Submit for Vault review*.
+* **Preview** shows the editor's unsaved edits on the website: the form is cleaned up as a save would (nothing is
+  saved), turned into the game object `/v1/catalog` would publish and kept for 30 minutes (in memory) under a random
+  token. The site shows it at `SITE/_preview/TOKEN/`, reading public `GET /v1/listing-previews/TOKEN` →
+  `{ "version": 1, "game": <a catalog game>, "studios": <as in the catalog> }` (`Cache-Control: no-store`; 404 once
+  expired). Sites come from `PREVIEW_SITES`, space-separated `label=url` pairs; the first is the main Preview button,
+  the others "Preview (Label)". Empty hides the buttons.
+* **Copy site images to the Vault CDN** (Vault admins, on Site games) downloads every listing image and featured image
+  that is still a site path (published and draft) from the site (`SITE_URL` by default), stores it like an upload in
+  `STUDIO/GAME/_vault-assets/` and relinks it. Published listings change only those links, so nothing needs review
+  again; external links are left alone and listed; re-running changes nothing. The last run's summary is on the page.
 * The public **`GET /v1/catalog`** lists published games with their play URL resolved. That's either the web address or
   `cdn.vaultlearninggames.org/STUDIO/GAME/` plus an optional folder, so one CDN game can hold a collection (The Yard).
   The site ([vault-rebuild](https://github.com/fielddaylab/vault-rebuild)) is built from it. Each game's `studio`

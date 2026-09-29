@@ -1,1 +1,24 @@
-{}
+{
+  "blockly": "https://developers.google.com/blockly",
+  "cornell-lab": "https://www.birds.cornell.edu/",
+  "cu-boulder": "https://www.colorado.edu/",
+  "fieldday": "https://fielddaylab.wisc.edu/",
+  "filament": "https://www.filamentgames.com/",
+  "fluency-games": "https://fluency-games.com/",
+  "havana24": "https://www.havana24.net/",
+  "hutchins-center": "https://www.brookings.edu/centers/the-hutchins-center-on-fiscal-and-monetary-policy/",
+  "icivics": "https://www.icivics.org/",
+  "junior-achievement": "https://jausa.ja.org/",
+  "ngpf": "https://www.ngpf.org/",
+  "nicky-case": "https://ncase.me/",
+  "nmsu": "https://innovativemedia.nmsu.edu/",
+  "phet": "https://phet.colorado.edu/",
+  "phoboslab": "https://phoboslab.org/",
+  "ssec": "https://ssec.si.edu/",
+  "ssi": "https://www.spacescience.org/",
+  "studio-saffron": "https://studiosaffron.itch.io/",
+  "testtube": "https://testtubegames.com/",
+  "usc-gil": "https://www.gameinnovationlab.com/",
+  "vault": "https://vaultlearninggames.org/",
+  "wilson-center": "https://www.wilsoncenter.org/"
+}

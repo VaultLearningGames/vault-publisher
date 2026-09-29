@@ -232,7 +232,33 @@ gcloud scheduler jobs create http vault-publisher-cleanup --location=$REGION \
   --oidc-token-audience=vault-publisher-tasks
 ```
 
-## 8. Pilot
+## 8. Website forms (Google Sheets)
+
+The sites' newsletter and "submit your game" forms post to the portal (`POST /v1/forms/newsletter`,
+`POST /v1/forms/submit-game`, src/forms.ts), which appends each submission as a row to a Google Sheet. Staging and
+production write to the **same** two spreadsheets; the *Site* column (the posting page's origin) tells them apart.
+The header row is written when a sheet is empty; rows go to the spreadsheet's first sheet.
+
+1. Share each spreadsheet with both portals' service accounts as **Editor**:
+   `vault-publisher@$PROJECT.iam.gserviceaccount.com` and `vault-publisher-staging@$PROJECT.iam.gserviceaccount.com`.
+   (They call the Sheets API with their own Cloud Run identity; no key or extra IAM role is needed. The Sheets API must
+   be enabled in the project: `gcloud services enable sheets.googleapis.com`.)
+2. Set the variables in each GitHub environment. The spreadsheet ID is the part of its URL between `/d/` and `/edit`.
+   `FORMS_ALLOWED_ORIGINS` is **space-separated** (the deploy action splits values on commas), and lists the site
+   origins that may post; any other `Origin` gets 403.
+
+```bash
+setenv production FORMS_NEWSLETTER_SHEET=<id> FORMS_SUBMIT_GAME_SHEET=<id> \
+  "FORMS_ALLOWED_ORIGINS=https://vaultlearninggames.org https://www.vaultlearninggames.org"
+setenv staging FORMS_NEWSLETTER_SHEET=<id> FORMS_SUBMIT_GAME_SHEET=<id> \
+  "FORMS_ALLOWED_ORIGINS=https://vaultlearninggames-staging.org"
+```
+
+A form whose spreadsheet variable is unset answers 503. Submissions are limited to 10 per form per client IP per
+hour, and a filled `company_website` honeypot field is accepted but not written. Failures are logged without the
+submitted values; each saved submission adds a `form.submit` audit entry (form and site only).
+
+## 9. Pilot
 
 Add the caller workflow from the README to a branch of `fielddaylab/wake`, push, and open
 `https://builds.vaultlearninggames.org/fieldday/aqualab/<branch>/`. Check:

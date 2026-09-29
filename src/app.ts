@@ -9,6 +9,7 @@ import { catalogEntry } from './listings.ts';
 import { catalogFeatured, readFeatured } from './featured.ts';
 import { parseRun } from './game-checks.ts';
 import { registerPortal, type PortalConfig } from './portal/routes.ts';
+import { registerForms, type FormsConfig } from './forms.ts';
 import {
   headersFor,
   isSafeFilePath,
@@ -35,6 +36,8 @@ export interface AppDeps {
   portal: PortalConfig;
   previewRetentionDays: number;
   taskInvokerEmail: string;
+  // Public website forms; without it the form endpoints answer 503.
+  forms?: FormsConfig;
 }
 
 const PRESIGN_SECONDS = 15 * 60;
@@ -470,6 +473,7 @@ export function createApp(deps: AppDeps) {
     return c.json({ removed, expired_uploads: expiredUploads });
   });
 
+  registerForms(app, db, deps.forms);
   registerPortal(app, { ...deps, approveRelease, promoteRelease, previewUrl: (studio: Studio, game: Game, ref: string) => `${deps.stagingPublicUrl}/${previewPrefix(studio, game, ref)}` });
   return app;
 }

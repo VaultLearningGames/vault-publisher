@@ -29,6 +29,10 @@ export interface Config {
   // Cloud Scheduler calls /v1/tasks/cleanup with a Google-signed ID token for this service account.
   taskInvokerEmail: string;
   taskAudience: string;
+  // Public website forms (src/forms.ts): the site origins allowed to post, and each form's spreadsheet.
+  formsAllowedOrigins: string[];
+  formsNewsletterSheet?: string;
+  formsSubmitGameSheet?: string;
 }
 
 function required(name: string): string {
@@ -65,5 +69,9 @@ export function loadConfig(): Config {
     previewRetentionDays: Number(process.env.PREVIEW_RETENTION_DAYS ?? 90),
     taskInvokerEmail: required('TASK_INVOKER_EMAIL'),
     taskAudience: process.env.TASK_AUDIENCE ?? 'vault-publisher-tasks',
+    // Space-separated: the deploy action splits env_vars values on commas.
+    formsAllowedOrigins: (process.env.FORMS_ALLOWED_ORIGINS ?? '').split(/[\s,]+/).filter(Boolean),
+    formsNewsletterSheet: process.env.FORMS_NEWSLETTER_SHEET?.trim() || undefined,
+    formsSubmitGameSheet: process.env.FORMS_SUBMIT_GAME_SHEET?.trim() || undefined,
   };
 }

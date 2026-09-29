@@ -6,6 +6,7 @@ import { loadConfig } from './config.ts';
 import { Db } from './db.ts';
 import { relayoutReleases } from './releases.ts';
 import { createR2Storage } from './storage.ts';
+import { googleSheets } from './forms.ts';
 
 const config = loadConfig();
 const db = new Db(config.dbPath);
@@ -44,6 +45,11 @@ const app = createApp({
   },
   previewRetentionDays: config.previewRetentionDays,
   taskInvokerEmail: config.taskInvokerEmail,
+  forms: {
+    allowedOrigins: config.formsAllowedOrigins,
+    sheets: { newsletter: config.formsNewsletterSheet, 'submit-game': config.formsSubmitGameSheet },
+    client: googleSheets(),
+  },
 });
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {

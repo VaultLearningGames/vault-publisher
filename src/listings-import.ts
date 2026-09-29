@@ -51,7 +51,7 @@ export function importListings(db: Db, pages: ExportedPage[], overrides: Record<
     // A studio Vault manages until it joins with its own GitHub organization (like mit-education-arcade).
     let slug = (isSlug(studioSlugs[name]) ? studioSlugs[name] : slugify(name)) || 'studio';
     while (db.studioBySlug(slug)) slug += '-2';
-    db.syncStudios([{ slug, name, github_owner: '', github_owner_id: `vault:${slug}` }]);
+    db.syncStudios([{ slug, name, github_owner: '', github_owner_id: `vault:${slug}` }], 'import');
     const s = db.studioBySlug(slug)!;
     byName.set(name.toLowerCase(), s);
     result.studiosCreated.push(slug);

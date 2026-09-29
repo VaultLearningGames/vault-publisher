@@ -41,11 +41,11 @@ portal "Make current" / rollback ──► publisher copies _releases/VERSION/ o
 | Database | SQLite at `/data/publisher.db` in the container, replicated by Litestream to GCS `wcer-field-day-ogd-1798-vault-publisher-db` |
 | Buckets | Cloudflare R2 `builds-vaultlearninggames` (test builds) and `cdn-vaultlearninggames` (releases), in the Cloudflare account "Public Games Cooperative". Staging has its own pair; see `docs/setup.md` |
 | Secrets | GCP Secret Manager: `vault-publisher-r2-*` (staging), `vault-publisher-r2-prod-*`, `vault-portal-github-client-secret`, `vault-portal-session-secret` |
-| Studios | `studios.json` (slug ↔ GitHub org id); synced at startup |
+| Studios | Created in the portal (**Vault → Studios**), or in `studios.json` (slug ↔ GitHub org id; synced at startup, authoritative only for the studios it lists) |
 | Nightly cleanup | Cloud Scheduler → `POST /v1/tasks/cleanup` (removes staging previews idle 90 days) |
 
 Code map: `src/app.ts` (API, approve/promote), `src/releases.ts` (copying and production layout), `src/assets.ts`
-(portal image uploads to `_vault-assets/`), `src/storage.ts` (R2), `src/db.ts` (schema + migrations, append only), `src/portal/routes.ts` (all portal pages and portal API),
+(portal image uploads to `_vault-assets/`), `src/storage.ts` (R2), `src/db.ts` (schema + migrations, append only), `src/portal/routes.ts` (portal pages and portal API; members, people and studios are in `src/portal/people.ts`),
 `public/portal.{css,js}`, `.github/workflows/*.yml` (deploy, tests, and the reusable workflows studios call),
 `action/` (the publish action).
 
@@ -54,8 +54,10 @@ Code map: `src/app.ts` (API, approve/promote), `src/releases.ts` (copying and pr
 - **CI publishing**: a game repo's GitHub OIDC token. The first repository to publish a game name owns it, matched by
   numeric repo id, so renames are fine.
 - **Portal**: GitHub sign-in. Vault roles are `release_manager` and `admin` (set on `/vault/people`; bootstrap admins
-  come from the `VAULT_ADMINS` var). Studio roles are `viewer`, `maintainer` and `admin` (set on each studio's Members
-  page).
+  come from the `VAULT_ADMINS` var). Studio roles are `viewer`, `maintainer` and `admin`, set on each studio's Members
+  page by its studio admins (who can't remove or demote the studio's last signed-in admin) or by Vault admins, who
+  also manage every membership and invitation on `/vault/people` and create and edit studios on `/vault/studios`.
+  People can be added by GitHub username before they first sign in (shown as invited until they do).
 - **Releasing** a new version into production: Vault release managers only (portal, or the `release.yml` workflow in
   this repo's `production` environment).
 - **Make current / roll back** between approved releases: Vault release managers, plus studio maintainers and admins,
@@ -71,8 +73,8 @@ Code map: `src/app.ts` (API, approve/promote), `src/releases.ts` (copying and pr
 - **Logs**: `gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="vault-publisher"' --project wcer-field-day-ogd-1798 --freshness=1h`
 - **Reusable workflow changes**: studios pin `@v1`, a moving tag. Only after a change is tested with
   `vault-publisher-test`, cut `v1.x.y` and move `v1` to it (`git tag -f v1 && git push -f origin v1`). Current: `v1.1.0`.
-- **Add a studio**: add it to `studios.json` (GitHub org id from `gh api orgs/NAME --jq .id`), deploy, and add members
-  in the portal. Its website goes in `studio-websites.json` (only fills in websites never set) or on its Members page.
+- **Add a studio**: **Vault → Studios → New studio** in the portal (or `studios.json` + deploy for a studio that should
+  be set in code), then add its first studio admin on its Members page. Its website goes in `studio-websites.json` (only fills in websites never set) or on its Members page.
 - **Add a game**: the studio adds one workflow file (see the README or the portal's "Register a game" page). Unity
   games pass `UNITY_EMAIL`, `UNITY_PASSWORD` and `UNITY_SERIAL` explicitly, because `secrets: inherit` doesn't cross
   organizations. The repo needs the `VAULT_PUBLISHER_URL` variable.

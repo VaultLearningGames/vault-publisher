@@ -64,6 +64,7 @@ db.createReleaseRequest({ game_id: wake.id, ref: 'm3.2', version: 'm3.2', notes:
 db.setMembership(fd.id, 'mia', 'maintainer', 'user:boss');
 db.setMembership(fd.id, 'vera', 'viewer', 'user:boss');
 db.setMembership(fd.id, 'ada', 'admin', 'user:boss');
+db.setMembership(fd.id, 'newhire', 'viewer', 'user:ada'); // invited: hasn't signed in yet
 
 // Site listings: import the Hugo prototype's games if github.com/fielddaylab/vault-rebuild is checked out next to
 // this repo (or at $VAULT_REBUILD), so /vault/listings and each studio's Site listings page have real content.

@@ -281,7 +281,7 @@ describe('user management', () => {
     assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'newbie', role: 'maintainer' })).status, 200);
     assert.equal(db.roleIn(db.studioBySlug('fieldday')!.id, 'NEWBIE'), 'maintainer'); // case-insensitive
     assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'bad user!', role: 'viewer' })).status, 400);
-    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'ada', role: 'viewer' })).status, 400); // no self-demotion
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'ada', role: 'viewer' })).status, 409); // the only studio admin
     assert.equal((await as('mia', 'none', 'maintainer').post('/portal/api/s/fieldday/members', { login: 'x', role: 'admin' })).status, 403);
     assert.equal((await ada.post('/portal/api/s/fieldday/members/remove', { login: 'newbie' })).status, 200);
     assert.equal(db.roleIn(db.studioBySlug('fieldday')!.id, 'newbie'), undefined);

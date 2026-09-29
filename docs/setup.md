@@ -279,11 +279,21 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
   production previews and releases are records only; their files aren't in staging's buckets.
 - **Deploys** briefly run the old and new instance together. Writes are rare (one per push), but avoid
   deploying while a large batch of game builds is publishing.
-- **Adding a studio:** add it to `studios.json` (the numeric org id is `gh api orgs/NAME --jq .id`) and deploy.
-  Its website (linked from the site wherever the studio is named as a game's maker, via `/v1/catalog`) can go in
-  `studio-websites.json` (`{ "slug": "https://…" }`), applied at startup only to studios whose website has never been
-  set. After that the website is changed on the studio's **Members** page (studio admins and Vault admins), and portal
-  edits, including clearing it, always win over the file.
+- **Adding a studio:** a Vault admin creates it in the portal under **Vault → Studios** (name, short name, website
+  and, optionally, the GitHub organization whose repositories publish its test versions; the portal looks up the org's
+  numeric id on GitHub). Leave the organization empty for a studio whose games Vault uploads (it gets the placeholder
+  owner id `vault:SLUG`). Vault admins can change a portal studio's name, website and organization there later (the
+  short name is fixed: it's in the studio's CDN addresses). Then add its first studio admin on its **Members** page or
+  on **Vault → People**; studio admins add the rest of their people. People who haven't signed in yet show as
+  *invited* and get access the first time they sign in with that GitHub account. Every change is in **Activity**.
+  `studios.json` still works, for example for a studio whose GitHub org publishes builds and should be set in code
+  (the numeric org id is `gh api orgs/NAME --jq .id`): it's synced at every startup and is authoritative for the
+  studios it lists (their name and organization can't be edited in the portal), but it never changes or deletes
+  studios it doesn't list; an entry whose slug is already another studio's is skipped with an error in the log.
+  A studio's website can also come from `studio-websites.json` (`{ "slug": "https://…" }`, linked from the site
+  wherever the studio is named as a game's maker, via `/v1/catalog`), applied at startup only to studios whose website
+  has never been set. After that the website is changed in the portal (the studio's **Members** page, for studio
+  admins and Vault admins, or **Vault → Studios**), and portal edits, including clearing it, always win over the file.
 - **Game availability:** `check-games.yml` runs daily at 11:23 UTC for both systems (or by hand for one, *Run
   workflow* → environment). It fetches every game in the portal's `/v1/catalog`, checks that its play address loads
   and, for games shown in the site's player, that it allows being framed by the site. It posts the run to that

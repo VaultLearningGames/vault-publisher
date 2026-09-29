@@ -189,6 +189,12 @@ const MIGRATIONS = [
   `
   ALTER TABLE studios ADD COLUMN website TEXT;
   `,
+  // v10: how each studio was created: 'file' (studios.json, which stays authoritative for the studios it lists),
+  // 'import' (the site listing import) or 'portal' (a Vault admin). NULL: from before v10 and not in studios.json.
+  `
+  ALTER TABLE studios ADD COLUMN source TEXT;
+  UPDATE studios SET source = 'import' WHERE slug IN (SELECT target FROM audit_log WHERE action = 'studio.create');
+  `,
 ];
 
 export interface Listing {
@@ -215,6 +221,16 @@ export interface Studio {
   github_owner: string;
   github_owner_id: string;
   website?: string | null;
+  source?: StudioSource | null;
+}
+
+export type StudioSource = 'file' | 'import' | 'portal';
+
+export interface StudioSummary extends Studio {
+  cdn_games: number;
+  listings: number;
+  members: number;
+  invited: number;
 }
 
 const MAX_WEBSITE = 300;
@@ -373,16 +389,45 @@ export class Db {
     }
   }
 
-  // studios.json is the source of truth for which GitHub orgs may publish, until there's an admin UI.
-  // A studio is identified by its GitHub owner id, so changing its slug in studios.json renames it in place
-  // (its games stay attached). Studios that only get content through Vault have no GitHub org; they use a
-  // placeholder id like "vault:ucalgary" that can never match a real (numeric) GitHub id.
-  syncStudios(studios: Omit<Studio, 'id'>[]) {
+  // studios.json is the source of truth for the studios it lists (which GitHub orgs may publish). A studio is identified
+  // by its GitHub owner id, so changing its slug in studios.json renames it in place (its games stay attached). Studios
+  // that only get content through Vault have no GitHub org; they use a placeholder id like "vault:ucalgary" that can
+  // never match a real (numeric) GitHub id. Studios the file doesn't list (created in the portal or by the listing
+  // import) are never changed or deleted; an entry whose slug is already another studio's is skipped and returned.
+  syncStudios(studios: Omit<Studio, 'id'>[], source: StudioSource = 'file'): { skipped: string[] } {
     const upsert = this.sqlite.prepare(`
-      INSERT INTO studios (slug, name, github_owner, github_owner_id, created_at) VALUES (?, ?, ?, ?, ?)
+      INSERT INTO studios (slug, name, github_owner, github_owner_id, created_at, source) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT (github_owner_id) DO UPDATE SET slug = excluded.slug, name = excluded.name,
-        github_owner = excluded.github_owner`);
-    for (const s of studios) upsert.run(s.slug, s.name, s.github_owner, s.github_owner_id, now());
+        github_owner = excluded.github_owner, source = excluded.source`);
+    const bySlug = this.sqlite.prepare('SELECT github_owner_id FROM studios WHERE slug = ?');
+    const skipped: string[] = [];
+    for (const s of studios) {
+      const taken = bySlug.get(s.slug) as { github_owner_id: string } | undefined;
+      if (taken && taken.github_owner_id !== s.github_owner_id) { skipped.push(s.slug); continue; }
+      upsert.run(s.slug, s.name, s.github_owner, s.github_owner_id, now(), source);
+    }
+    return { skipped };
+  }
+
+  // A studio a Vault admin creates in the portal. The caller checks that the slug and owner id are free.
+  createStudio(s: Omit<Studio, 'id' | 'source'>): Studio {
+    this.sqlite.prepare(`INSERT INTO studios (slug, name, github_owner, github_owner_id, website, created_at, source) VALUES (?, ?, ?, ?, ?, ?, 'portal')`)
+      .run(s.slug, s.name, s.github_owner, s.github_owner_id, s.website ?? null, now());
+    return this.studioBySlug(s.slug)!;
+  }
+
+  updateStudio(id: number, s: Pick<Studio, 'name' | 'github_owner' | 'github_owner_id'>) {
+    this.sqlite.prepare('UPDATE studios SET name = ?, github_owner = ?, github_owner_id = ? WHERE id = ?').run(s.name, s.github_owner, s.github_owner_id, id);
+  }
+
+  // Every studio with its counts, for Vault's Studios page. Members have signed in; invited people haven't yet.
+  studioSummaries(): StudioSummary[] {
+    return this.sqlite.prepare(`SELECT s.*,
+        (SELECT COUNT(*) FROM games g WHERE g.studio_id = s.id) AS cdn_games,
+        (SELECT COUNT(*) FROM listings l WHERE l.studio_id = s.id) AS listings,
+        (SELECT COUNT(*) FROM memberships m WHERE m.studio_id = s.id AND EXISTS (SELECT 1 FROM users u WHERE u.login = m.github_login COLLATE NOCASE)) AS members,
+        (SELECT COUNT(*) FROM memberships m WHERE m.studio_id = s.id AND NOT EXISTS (SELECT 1 FROM users u WHERE u.login = m.github_login COLLATE NOCASE)) AS invited
+      FROM studios s ORDER BY s.name COLLATE NOCASE`).all() as unknown as StudioSummary[];
   }
 
   // Set (or clear, with null) a studio's website from the portal. Cleared is stored as '' so studio-websites.json
@@ -617,6 +662,25 @@ export class Db {
       .prepare(`INSERT INTO memberships (studio_id, github_login, role, added_by, created_at) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (studio_id, github_login) DO UPDATE SET role = excluded.role`)
       .run(studioId, login, role, addedBy, now());
+  }
+
+  // Every membership with its studio, for Vault's People page.
+  allMemberships(): (Membership & { studio_slug: string; studio_name: string })[] {
+    return this.sqlite
+      .prepare(`SELECT m.*, s.slug AS studio_slug, s.name AS studio_name FROM memberships m JOIN studios s ON s.id = m.studio_id
+                ORDER BY m.github_login COLLATE NOCASE, s.name`)
+      .all() as unknown as (Membership & { studio_slug: string; studio_name: string })[];
+  }
+
+  // A studio's admins who have signed in at least once (invited admins don't count: they may never arrive).
+  signedInAdmins(studioId: number): string[] {
+    return (this.sqlite.prepare(`SELECT m.github_login FROM memberships m WHERE m.studio_id = ? AND m.role = 'admin'
+        AND EXISTS (SELECT 1 FROM users u WHERE u.login = m.github_login COLLATE NOCASE)`).all(studioId) as { github_login: string }[])
+      .map((r) => r.github_login);
+  }
+
+  userByLogin(login: string): User | undefined {
+    return this.sqlite.prepare('SELECT * FROM users WHERE login = ? COLLATE NOCASE').get(login) as User | undefined;
   }
 
   removeMembership(studioId: number, login: string) {

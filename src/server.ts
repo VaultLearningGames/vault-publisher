@@ -10,7 +10,9 @@ import { googleSheets } from './forms.ts';
 
 const config = loadConfig();
 const db = new Db(config.dbPath);
-db.syncStudios(JSON.parse(readFileSync(config.studiosFile, 'utf8')));
+// studios.json is authoritative for the studios it lists; studios created in the portal are left alone.
+const synced = db.syncStudios(JSON.parse(readFileSync(config.studiosFile, 'utf8')));
+if (synced.skipped.length) console.error(`studios.json: skipped ${synced.skipped.join(', ')}: the slug belongs to another studio (different GitHub owner id)`);
 // Websites for studios that have never had one; the portal is where they're changed after that.
 if (existsSync(config.studioWebsitesFile)) {
   const seeded = db.seedStudioWebsites(JSON.parse(readFileSync(config.studioWebsitesFile, 'utf8')));

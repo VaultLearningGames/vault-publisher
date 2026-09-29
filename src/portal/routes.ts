@@ -16,6 +16,7 @@ import { registerFeaturedApi } from './featured.ts';
 import { registerListingAssetsApi } from './listing-assets.ts';
 import { registerListingPreview } from './listing-preview.ts';
 import { registerImageMigration } from './image-migration.ts';
+import { githubAccount, registerPeople, type GitHubAccountLookup } from './people.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -34,6 +35,7 @@ export interface PortalConfig {
   // GitHub logins that become Vault admins when they sign in (bootstrap).
   vaultAdmins: string[];
   oauth?: OAuthClient; // injected in tests
+  githubAccount?: GitHubAccountLookup; // injected in tests
 }
 
 type ReleaseResult = { release: Release; url: string };
@@ -65,8 +67,8 @@ function githubOAuth(clientId: string, clientSecret: string): OAuthClient {
 }
 
 // ---------- formatting ----------
-const ROLE_LABEL: Record<StudioRole, string> = { viewer: 'Viewer', maintainer: 'Maintainer', admin: 'Studio admin' };
-const VAULT_LABEL: Record<VaultRole, string> = { none: '—', release_manager: 'Release manager', admin: 'Vault admin' };
+export const ROLE_LABEL: Record<StudioRole, string> = { viewer: 'Viewer', maintainer: 'Maintainer', admin: 'Studio admin' };
+export const VAULT_LABEL: Record<VaultRole, string> = { none: '—', release_manager: 'Release manager', admin: 'Vault admin' };
 export function ago(iso: string | null | undefined): string {
   if (!iso) return '—';
   const s = (Date.now() - Date.parse(iso)) / 1000;
@@ -107,6 +109,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
           <div class="nav-sep">Vault</div>
           <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
           <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Site games</a>
+          <a href="/vault/studios" class="${active === 'vault-studios' ? 'on' : ''}">Studios</a>
           <a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>
           <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>` : ''}
       </nav>
@@ -597,46 +600,6 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     return page(c, 'Register a game', body, { studio: s, active: 'register' });
   });
 
-  // ---------- members ----------
-  app.get('/s/:studio/members', (c) => {
-    const u = signedIn(c); if (u instanceof Response) return u;
-    const s = studioFor(c, u); if (s instanceof Response) return s;
-    const manage = canManageMembers(u, s);
-    const api = `/portal/api/s/${s.slug}/members`;
-    const users = new Map(db.users().map((x) => [x.login.toLowerCase(), x]));
-    const rows = db.memberships(s.id).map((m) => {
-      const known = users.get(m.github_login.toLowerCase());
-      return html`<tr>
-        <td class="proj"><b>${m.github_login}</b><span>${known ? (known.name || 'signed in ' + ago(known.last_login_at)) : 'hasn’t signed in yet'}</span></td>
-        <td>${manage ? html`<form data-api="${api}" data-autosubmit><input type="hidden" name="login" value="${m.github_login}"><select name="role" aria-label="Role for ${m.github_login}">${(['viewer', 'maintainer', 'admin'] as StudioRole[]).map((r) => html`<option value="${r}" ${r === m.role ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`)}</select><span class="err" role="status" aria-live="polite"></span></form>` : ROLE_LABEL[m.role]}</td>
-        <td class="small">${who(m.added_by)} · ${m.created_at.slice(0, 10)}</td>
-        <td class="r">${manage ? html`<form data-api="${api}/remove" data-confirm="Remove ${m.github_login} from ${s.name}?"><input type="hidden" name="login" value="${m.github_login}"><button class="btn sm">Remove</button><span class="err" role="status" aria-live="polite"></span></form>` : ''}</td></tr>`;
-    });
-    const body = html`${head('Members', `People who can see ${s.name}’s games. They sign in with GitHub.`, '', html`<a href="/s/${s.slug}">${s.name}</a> / Members`)}
-      <div class="grid g-main"><div class="grid">
-        <div class="tbl-wrap"><table><thead><tr><th>GitHub user</th><th>Role</th><th>Added</th><th></th></tr></thead><tbody>${rows.length ? rows : html`<tr><td colspan="4" class="muted">No members yet.</td></tr>`}</tbody></table></div>
-        ${manage ? html`<div class="card"><h2>Add someone</h2><form data-api="${api}" data-then="reload" class="inline-form">
-          <label class="field"><span class="lab">GitHub username</span><input name="login" required autocomplete="off" placeholder="octocat"></label>
-          <label class="field"><span class="lab">Role</span><select name="role"><option value="viewer">Viewer</option><option value="maintainer" selected>Maintainer</option><option value="admin">Studio admin</option></select></label>
-          <button class="btn pri">Add</button><span class="err" role="status" aria-live="polite"></span></form>
-          <p class="small muted">They can sign in right away; nothing is emailed.</p></div>` : ''}
-      </div>
-      <div class="grid" style="align-content:start">
-        <div class="card small" id="studio"><h2>Studio</h2>
-          <table class="kv"><tbody><tr><th>Name</th><td>${s.name}</td></tr>
-            <tr><th>Website</th><td>${s.website ? html`<a href="${s.website}" target="_blank" rel="noopener">${s.website}</a>` : html`<span class="muted">none</span>`}</td></tr></tbody></table>
-          ${manage ? html`<form data-api="/portal/api/s/${s.slug}/website" data-then="reload" class="inline-form">
-            <label class="field"><span class="lab">Website</span><input name="website" type="url" maxlength="300" value="${s.website ?? ''}" placeholder="https://example.org" autocomplete="off"></label>
-            <button class="btn">Save</button><span class="err" role="status" aria-live="polite"></span></form>` : ''}
-          <p class="muted">vaultlearninggames.org links ${s.name} to it wherever it’s named as a game’s maker.</p></div>
-        <div class="card small"><h2>Roles</h2><ul class="tight">
-        <li><b>Viewer</b>: sees the studio’s games, test versions and releases.</li>
-        <li><b>Maintainer</b>: also requests releases.</li>
-        <li><b>Studio admin</b>: also manages members and the studio’s website.</li>
-        <li><b>Vault staff</b> release, promote and roll back.</li></ul></div></div></div>`;
-    return page(c, 'Members', body, { studio: s, active: 'members' });
-  });
-
   // ---------- Vault staff ----------
   app.get('/vault', (c) => {
     const u = signedIn(c); if (u instanceof Response) return u;
@@ -669,22 +632,6 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       ${switches.length ? html`<h3 class="sec">Recent version switches</h3><div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Change</th><th>By</th></tr></thead><tbody>${switches}</tbody></table></div>` : ''}
       ${hist.length ? html`<h3 class="sec">Recently decided</h3><div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Version</th><th>Decision</th><th>By</th></tr></thead><tbody>${hist}</tbody></table></div>` : ''}`;
     return page(c, 'Release requests', body, { active: 'vault' });
-  });
-
-  app.get('/vault/people', (c) => {
-    const u = signedIn(c); if (u instanceof Response) return u;
-    if (!isStaff(u)) return denied(c, 'Only Vault staff can see this page.');
-    const admin = isVaultAdmin(u);
-    const rows = db.users().map((x) => {
-      const studios = db.membershipsForLogin(x.login).map((m) => `${m.studio_slug} (${ROLE_LABEL[m.role]})`).join(', ');
-      return html`<tr><td class="proj"><b>${x.login}</b><span>${x.name ?? ''}</span></td><td class="small">${studios || '—'}</td>
-        <td>${admin && x.id !== u.id ? html`<form data-api="/portal/api/vault/users/${x.id}/role" data-autosubmit><select name="role" aria-label="Vault role for ${x.login}">${(['none', 'release_manager', 'admin'] as VaultRole[]).map((r) => html`<option value="${r}" ${r === x.vault_role ? 'selected' : ''}>${r === 'none' ? 'No Vault role' : VAULT_LABEL[r]}</option>`)}</select><span class="err" role="status" aria-live="polite"></span></form>` : VAULT_LABEL[x.vault_role]}</td>
-        <td class="small">${ago(x.last_login_at)}</td></tr>`;
-    });
-    const body = html`${head('People', 'Everyone who has signed in. Vault roles are for Vault staff; studio roles are managed on each studio’s Members page.')}
-      <div class="tbl-wrap"><table><thead><tr><th>GitHub user</th><th>Studios</th><th>Vault role</th><th>Last sign-in</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <p class="small muted">Release managers release, promote and roll back. Vault admins also manage people and every studio’s members. ${cfg.vaultAdmins.length ? `Always admins: ${cfg.vaultAdmins.join(', ')}.` : ''}</p>`;
-    return page(c, 'People', body, { active: 'people' });
   });
 
   app.get('/vault/activity', (c) => {
@@ -817,31 +764,6 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     return c.json({ ok: true });
   });
 
-  app.post('/portal/api/s/:studio/members', async (c) => {
-    const u = apiUser(c);
-    const s = db.studioBySlug(c.req.param('studio'));
-    if (!s || !canManageMembers(u, s)) fail(403, 'Only studio admins can manage members.');
-    const b = await jsonBody(c);
-    const login = typeof b.login === 'string' ? b.login.trim().replace(/^@/, '') : '';
-    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(login)) fail(400, 'That isn’t a valid GitHub username.');
-    if (!['viewer', 'maintainer', 'admin'].includes(b.role as string)) fail(400, 'Choose a role.');
-    if (login.toLowerCase() === u.login.toLowerCase() && b.role !== 'admin' && !isVaultAdmin(u)) fail(400, 'You can’t lower your own role; ask another admin.');
-    db.setMembership(s.id, login, b.role as StudioRole, actor(u));
-    db.audit(actor(u), 'member.set', `${s.slug}:${login}`, { role: b.role });
-    return c.json({ ok: true });
-  });
-
-  app.post('/portal/api/s/:studio/members/remove', async (c) => {
-    const u = apiUser(c);
-    const s = db.studioBySlug(c.req.param('studio'));
-    if (!s || !canManageMembers(u, s)) fail(403, 'Only studio admins can manage members.');
-    const login = String((await jsonBody(c)).login ?? '');
-    if (login.toLowerCase() === u.login.toLowerCase() && !isVaultAdmin(u)) fail(400, 'You can’t remove yourself; ask another admin.');
-    db.removeMembership(s.id, login);
-    db.audit(actor(u), 'member.remove', `${s.slug}:${login}`);
-    return c.json({ ok: true });
-  });
-
   // A studio's website, which the catalog publishes. Body: { website } ('' clears it).
   app.post('/portal/api/s/:studio/website', async (c) => {
     const u = apiUser(c);
@@ -856,22 +778,10 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     return c.json({ ok: true, website });
   });
 
-  app.post('/portal/api/vault/users/:id/role', async (c) => {
-    const u = apiUser(c);
-    if (!isVaultAdmin(u)) fail(403, 'Only Vault admins can change Vault roles.');
-    const target = db.userById(Number(c.req.param('id')));
-    if (!target) fail(404, 'unknown user');
-    if (target.id === u.id) fail(400, 'You can’t change your own Vault role.');
-    const role = (await jsonBody(c)).role;
-    if (!['none', 'release_manager', 'admin'].includes(role as string)) fail(400, 'Choose a role.');
-    db.setVaultRole(target.id, role as VaultRole);
-    db.audit(actor(u), 'vault.role', target.login, { role });
-    return c.json({ ok: true });
-  });
-
   registerListingPages(app, listingHelpers);
   registerFeaturedApi(app, listingHelpers);
   registerListingAssetsApi(app, listingHelpers);
   registerListingPreview(app, listingHelpers);
   registerImageMigration(app, listingHelpers);
+  registerPeople(app, { ...listingHelpers, canManageMembers, vaultAdmins: cfg.vaultAdmins, githubAccount: cfg.githubAccount ?? githubAccount });
 }

@@ -429,3 +429,10 @@ tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
 .mig-result { margin-top: 14px; border-top: 1px solid var(--line-2); padding-top: 12px; }
 .mig-result details { margin-top: 6px; }
 .mig-list { margin: 6px 0 0; padding-left: 18px; max-height: 320px; overflow: auto; overflow-wrap: anywhere; }
+
+/* Vault → People: each person's studio memberships, one row each */
+.mem-list { display: flex; flex-direction: column; gap: 6px; }
+.mem { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mem a { min-width: 0; }
+.mem form { margin: 0; display: inline-flex; gap: 6px; align-items: center; }
+.mem .err:empty { display: none; }

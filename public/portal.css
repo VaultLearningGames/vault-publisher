@@ -60,9 +60,8 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100%; }
 .shell.solo { grid-template-columns: 1fr; }
 .side { background: var(--sunk); border-right: 1px solid var(--line); padding: 18px 14px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
-.brand { font: 700 17px/1 var(--display); display: flex; align-items: center; gap: 9px; padding: 2px 8px 16px; }
-.brand .mark { width: 22px; height: 22px; border-radius: 6px; background: var(--brass); position: relative; }
-.brand .mark::after { content: ""; position: absolute; inset: 6px; border: 2px solid var(--paper); border-radius: 50%; }
+.brand { display: flex; align-items: center; align-self: flex-start; margin: 2px 4px 16px; padding: 8px 10px; border-radius: 8px; background: #0B0F13; }
+.brand .logo { display: block; height: 24px; width: auto; }
 .studio-sw { margin: 0 2px 14px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); display: flex; flex-direction: column; }
 .studio-sw b { font-weight: 600; }
 .studio-sw span { font-size: 12px; color: var(--ink-3); }
@@ -347,8 +346,9 @@ td select { border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px;
 .login { max-width: 420px; margin: 12vh auto 0; text-align: center; display: flex; flex-direction: column; gap: 12px; align-items: center; }
 .login h1 { font: 700 30px/1.1 var(--display); margin: 0; }
 .login p { color: var(--ink-2); margin: 0; }
-.brand.big { font-size: 22px; padding: 0; }
-.brand.big .mark { width: 30px; height: 30px; }
+.brand.big { align-self: center; margin: 0; padding: 12px 16px; }
+.brand.big .logo { height: 40px; }
+.wrap { overflow-wrap: anywhere; }
 dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; background: var(--surface); color: var(--ink); width: min(460px, calc(100vw - 32px)); }
 dialog::backdrop { background: rgba(10, 16, 22, .45); }
 .dlg { padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
@@ -373,7 +373,8 @@ button[aria-busy=true] { opacity: .6; cursor: progress; }
 .field .check + .check { margin-top: 6px; }
 @media (max-width: 860px) {
   .shell .side { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 14px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .shell .side .brand { padding: 0; }
+  .shell .side .brand { margin: 0; padding: 6px 8px; }
+  .shell .side .brand .logo { height: 18px; }
   .shell .side .studio-sw { margin: 0; padding: 4px 8px; flex-direction: row; gap: 6px; align-items: center; }
   .shell .side .studio-sw span { display: none; }
   .shell .side .nav { display: flex; flex-wrap: wrap; gap: 2px; width: 100%; }

@@ -85,6 +85,8 @@ export const pill = (kind: 'ok' | 'run' | 'bad' | 'wait' | 'off' | 'brass', text
 // ---------- page layout ----------
 // Content hashes of portal.css/js, so a deploy changes their URLs and browsers never use stale copies.
 let assetVersion = 'dev';
+// The Vault Game Library wordmark (white and teal), shown on a dark badge so it reads in both themes.
+const logo = () => html`<img class="logo" src="/assets/vault-logo.png?v=${assetVersion}" alt="Vault Game Library" width="454" height="75">`;
 interface Nav { user: User; studio?: Studio; memberships: (Membership & { studio_slug: string; studio_name: string })[]; allStudios: Studio[] }
 function layout(title: string, nav: Nav | null, body: Html | string, active = ''): string {
   const u = nav?.user;
@@ -93,7 +95,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
   const cur = nav?.studio;
   const side = nav ? html`
     <aside class="side" aria-label="Portal navigation">
-      <a class="brand" href="/"><span class="mark" aria-hidden="true"></span>Vault</a>
+      <a class="brand" href="/">${logo()}</a>
       ${studios.length ? html`<label class="studio-sw"><span>Studio</span>
         <select onchange="location.href='/s/'+this.value" aria-label="Studio">
           ${cur ? '' : html`<option value="">Choose…</option>`}
@@ -198,11 +200,12 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
 
   // Static assets, read once at startup.
   const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
-  const css = asset('portal.css'), js = asset('portal.js');
-  assetVersion = createHash('sha256').update(css).update(js).digest('hex').slice(0, 10);
+  const css = asset('portal.css'), js = asset('portal.js'), logoPng = asset('vault-logo.png');
+  assetVersion = createHash('sha256').update(css).update(js).update(logoPng).digest('hex').slice(0, 10);
   const immutable = 'public, max-age=31536000, immutable';
   app.get('/assets/portal.css', (c) => c.body(css, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
   app.get('/assets/portal.js', (c) => c.body(js, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': immutable }));
+  app.get('/assets/vault-logo.png', (c) => c.body(logoPng, 200, { 'Content-Type': 'image/png', 'Cache-Control': immutable }));
 
   // ---------- identity & permissions ----------
   function currentUser(c: Context): User | null {
@@ -268,7 +271,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     if (currentUser(c)) return c.redirect('/');
     const next = c.req.query('next') ?? '/';
     const body = html`<div class="login">
-      <div class="brand big"><span class="mark" aria-hidden="true"></span>Vault</div>
+      <div class="brand big">${logo()}</div>
       <h1>Studio Portal</h1>
       <p>Publish your games to classrooms. Your studio controls testing on staging; Vault reviews every release.</p>
       ${configured
@@ -481,8 +484,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
           ${requests.length ? html`<div class="card"><h2>Release requests</h2><div class="tbl-wrap"><table><thead><tr><th>Version</th><th>Build</th><th>Status</th><th>Requested</th><th></th></tr></thead><tbody>${reqRows}</tbody></table></div></div>` : ''}
         </div>`;
     const side = html`<div class="grid" style="align-content:start">
-          <div class="card"><h2>Live for classrooms</h2>${cur ? html`<div class="big-rel">${cur.version}</div><p class="small muted">approved ${cur.approved_at.slice(0, 10)} by ${who(cur.approved_by)}</p>` : html`<p class="muted">Nothing yet.</p>`}
-            <p class="small">Stable link (always the current release):<br><a class="mono" href="${stable}" target="_blank" rel="noopener">${stable}</a></p>
+          <div class="card"><h2>Live for classrooms</h2>${cur ? html`<div class="big-rel">${cur.version}</div><p class="small muted">approved ${cur.approved_at.slice(0, 10)} by ${who(cur.approved_by)}</p>` : html`<p class="muted">No Public Releases</p>`}
+            ${cur ? html`<p class="small">Stable link (always the current release):<br><a class="mono wrap" href="${stable}" target="_blank" rel="noopener">${stable}</a></p>` : ''}
             ${g.frozen_at ? html`<p class="small">${pill('wait', 'Frozen')} by ${who(g.frozen_by ?? '')} ${ago(g.frozen_at)}${g.frozen_note ? html`: “${g.frozen_note}”` : ''}. Only Vault can change the current release.</p>` : ''}
             ${release ? (g.frozen_at
               ? html`<form data-api="${api}/freeze" data-then="reload" data-confirm="Let ${s.name} switch versions again?"><input type="hidden" name="frozen" value=""><button class="btn sm">Unfreeze</button><span class="err" role="status" aria-live="polite"></span></form>`
@@ -536,9 +539,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const asked = c.req.query('tab');
     const tab = asked === 'cdn' || asked === 'listing' ? asked : l || (g && db.listingsForGame(g.id).length) ? 'listing' : 'cdn';
     const title = l?.draft.title || g!.slug;
-    const stable = g ? `${deps.prodPublicUrl}/${s.slug}/${g.slug}/` : null;
     const sub = html`${l?.published ? html`<a href="https://vaultlearninggames.org/games/${l.slug}/" target="_blank" rel="noopener">vaultlearninggames.org/games/${l.slug}/</a>` : l ? html`<span class="muted">vaultlearninggames.org/games/${l.slug}/ (not published)</span>` : html`<span class="muted">not on the site</span>`}
-      ${g ? html` · CDN <a class="mono" href="${stable}" target="_blank" rel="noopener">${s.slug}/${g.slug}</a>` : ''}${g?.repository ? html` · <a href="https://github.com/${g.repository}">${g.repository}</a>` : g ? html` · <span class="muted">uploaded by Vault</span>` : ''}`;
+      ${g?.repository ? html` · <a href="https://github.com/${g.repository}" title="${g.repository}">GitHub Repo</a>` : ''}`;
     const tabs = html`<div class="tabs"><a href="?tab=listing" class="${tab === 'listing' ? 'on' : ''}">Site listing</a><a href="?tab=cdn" class="${tab === 'cdn' ? 'on' : ''}">Vault CDN${g ? html` · ${db.currentRelease(g.id)?.version ?? 'no release'}` : ''}</a></div>`;
     let content: Html | string;
     let dialogs: Html | string = '';

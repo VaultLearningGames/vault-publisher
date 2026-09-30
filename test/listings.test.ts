@@ -245,14 +245,21 @@ describe('Vault uploads a game’s current version for a studio', () => {
     const g = db.game(fd.id, 'emerald')!;
     assert.equal(g.repository_id, 'vault:fieldday/emerald');
     assert.equal(db.listing('legend-of-the-lost-emerald')!.game_id, g.id);
+    const before = await (await boss.get('/s/fieldday/g/legend-of-the-lost-emerald?tab=cdn')).text();
+    assert.match(before, /No Public Releases/);
+    assert.doesNotMatch(before, /Stable link/);
     assert.equal((await boss.post('/portal/api/s/fieldday/g/emerald/release', { version: 'v1.0', ref: 'v1.0', makeCurrent: true })).status, 200);
-    assert.match(await (await boss.get('/s/fieldday/g/legend-of-the-lost-emerald?tab=cdn')).text(), /uploaded by Vault/);
+    const released = await (await boss.get('/s/fieldday/g/legend-of-the-lost-emerald?tab=cdn')).text();
+    assert.match(released, /uploaded by Vault/);
+    assert.match(released, /Stable link/);
+    assert.doesNotMatch(released, /GitHub Repo/, 'no repo link for a game Vault uploaded');
     // Later the studio's own CI publishes emerald: it takes the game over, releases and all.
     ids.emerald = { ...wake, repository: 'fielddaylab/emerald', repositoryId: '102', ref: 'refs/heads/develop' };
     const ci = await app.request('/v1/previews', { method: 'POST', headers: { Authorization: 'Bearer emerald', 'Content-Type': 'application/json' }, body: JSON.stringify({ game: 'emerald', files: [{ path: 'index.html', size: 5 }] }) });
     assert.equal(ci.status, 200);
     assert.equal(db.game(fd.id, 'emerald')!.repository, 'fielddaylab/emerald');
     assert.equal(db.currentRelease(g.id)!.version, 'v1.0');
+    assert.match(await (await boss.get('/s/fieldday/g/legend-of-the-lost-emerald?tab=cdn')).text(), /<a href="https:\/\/github\.com\/fielddaylab\/emerald"[^>]*>GitHub Repo<\/a>/);
   });
 });
 

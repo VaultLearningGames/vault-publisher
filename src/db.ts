@@ -195,6 +195,15 @@ const MIGRATIONS = [
   ALTER TABLE studios ADD COLUMN source TEXT;
   UPDATE studios SET source = 'import' WHERE slug IN (SELECT target FROM audit_log WHERE action = 'studio.create');
   `,
+  // v11: a Vault role given to someone before they first sign in; applied (and removed) at their first sign-in.
+  `
+  CREATE TABLE vault_invites (
+    github_login TEXT PRIMARY KEY COLLATE NOCASE,
+    vault_role   TEXT NOT NULL CHECK (vault_role IN ('release_manager', 'admin')),
+    added_by     TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+  );
+  `,
 ];
 
 export interface Listing {
@@ -594,6 +603,22 @@ export class Db {
       .run(by ? now() : null, by, by ? note : null, releaseId);
   }
 
+  // Removes a CDN game and everything recorded about it (test versions, releases, requests, uploads). Site listings
+  // that played from it stay, unlinked. The caller deletes its files from the buckets first.
+  deleteGame(gameId: number) {
+    this.sqlite.exec('BEGIN');
+    try {
+      this.sqlite.prepare('UPDATE listings SET game_id = NULL WHERE game_id = ?').run(gameId);
+      this.sqlite.prepare('UPDATE games SET current_release_id = NULL WHERE id = ?').run(gameId);
+      for (const table of ['release_requests', 'uploads', 'builds', 'releases']) this.sqlite.prepare(`DELETE FROM ${table} WHERE game_id = ?`).run(gameId);
+      this.sqlite.prepare('DELETE FROM games WHERE id = ?').run(gameId);
+      this.sqlite.exec('COMMIT');
+    } catch (err) {
+      this.sqlite.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
   // Freeze (by + note) or unfreeze (null) a game's current release.
   setFrozen(gameId: number, by: string | null, note: string | null) {
     this.sqlite.prepare('UPDATE games SET frozen_at = ?, frozen_by = ?, frozen_note = ? WHERE id = ?')
@@ -635,6 +660,24 @@ export class Db {
 
   setVaultRole(userId: number, role: VaultRole) {
     this.sqlite.prepare('UPDATE users SET vault_role = ? WHERE id = ?').run(role, userId);
+  }
+
+  // Vault roles waiting for someone's first sign-in.
+  vaultInvites(): { github_login: string; vault_role: VaultRole; added_by: string; created_at: string }[] {
+    return this.sqlite.prepare('SELECT * FROM vault_invites ORDER BY github_login COLLATE NOCASE').all() as unknown as
+      { github_login: string; vault_role: VaultRole; added_by: string; created_at: string }[];
+  }
+  setVaultInvite(login: string, role: VaultRole, by: string) {
+    if (role === 'none') this.sqlite.prepare('DELETE FROM vault_invites WHERE github_login = ?').run(login);
+    else this.sqlite.prepare(`INSERT INTO vault_invites (github_login, vault_role, added_by, created_at) VALUES (?, ?, ?, ?)
+                              ON CONFLICT (github_login) DO UPDATE SET vault_role = excluded.vault_role, added_by = excluded.added_by`)
+      .run(login, role, by, now());
+  }
+  // Removes and returns the Vault role waiting for this login, if any.
+  takeVaultInvite(login: string): VaultRole | undefined {
+    const row = this.sqlite.prepare('SELECT vault_role FROM vault_invites WHERE github_login = ?').get(login) as { vault_role: VaultRole } | undefined;
+    if (row) this.sqlite.prepare('DELETE FROM vault_invites WHERE github_login = ?').run(login);
+    return row?.vault_role;
   }
 
   memberships(studioId: number): Membership[] {

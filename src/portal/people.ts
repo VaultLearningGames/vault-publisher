@@ -183,7 +183,9 @@ export function registerPeople(app: Hono, h: Helpers) {
       const k = m.github_login.toLowerCase();
       byLogin.set(k, [...(byLogin.get(k) ?? []), m]);
     }
-    const invitedLogins = [...new Set([...byLogin.keys()].filter((k) => !known.has(k)))].map((k) => byLogin.get(k)![0].github_login);
+    const vaultInvites = new Map(db.vaultInvites().map((v) => [v.github_login.toLowerCase(), v]));
+    const invitedLogins = [...new Set([...byLogin.keys(), ...vaultInvites.keys()].filter((k) => !known.has(k)))]
+      .map((k) => byLogin.get(k)?.[0].github_login ?? vaultInvites.get(k)!.github_login);
     const studiosCell = (login: string) => {
       const ms = byLogin.get(login.toLowerCase()) ?? [];
       if (!ms.length) return html`<span class="muted">—</span>`;
@@ -198,28 +200,47 @@ export function registerPeople(app: Hono, h: Helpers) {
         <td>${admin && x.id !== u.id ? html`<form data-api="/portal/api/vault/users/${x.id}/role" data-autosubmit><select name="role" aria-label="Vault role for ${x.login}">${(['none', 'release_manager', 'admin'] as VaultRole[]).map((r) => html`<option value="${r}" ${r === x.vault_role ? 'selected' : ''}>${r === 'none' ? 'No Vault role' : VAULT_LABEL[r]}</option>`)}</select>${errSlot}</form>` : VAULT_LABEL[x.vault_role]}</td>
         <td class="small">${ago(x.last_login_at)}</td></tr>`),
       ...invitedLogins.map((login) => html`<tr><td class="proj"><b>${login}</b><span>${pill('wait', 'Invited')}</span></td><td>${studiosCell(login)}</td>
-        <td class="small muted">After they sign in</td><td class="small muted">Never</td></tr>`),
+        <td class="small">${vaultInvites.get(login.toLowerCase()) ? html`${VAULT_LABEL[vaultInvites.get(login.toLowerCase())!.vault_role]} <span class="muted">(at first sign-in)</span>` : html`<span class="muted">—</span>`}</td><td class="small muted">Never</td></tr>`),
     ];
     const studios = db.studios();
     const body = html`${head('People', 'Everyone who has signed in, and everyone invited to a studio who hasn’t yet. Vault roles are for Vault staff; studio roles can also be managed by each studio’s admins on its Members page.')}
-      ${admin ? html`<div class="card" style="margin-bottom:16px"><h2>Add someone to a studio</h2><form data-api="/portal/api/vault/members" data-then="reload" class="inline-form">
+      ${admin ? html`<div class="card" style="margin-bottom:16px"><h2>Add someone</h2><form data-api="/portal/api/vault/members" data-then="reload" class="inline-form">
           <label class="field"><span class="lab">GitHub username</span><input name="login" required autocomplete="off" placeholder="octocat"></label>
-          <label class="field"><span class="lab">Studio</span><select name="studio" required><option value="">Choose…</option>${studios.map((s) => html`<option value="${s.slug}">${s.name}</option>`)}</select></label>
-          <label class="field"><span class="lab">Role</span>${roleSelect('role', 'maintainer', 'Role')}</label>
+          <label class="field"><span class="lab">Studio</span><select name="studio"><option value="">No studio</option>${studios.map((s) => html`<option value="${s.slug}">${s.name}</option>`)}</select></label>
+          <label class="field"><span class="lab">Studio role</span>${roleSelect('role', 'maintainer', 'Studio role')}</label>
+          <label class="field"><span class="lab">Vault role</span><select name="vaultRole" aria-label="Vault role">${(['none', 'release_manager', 'admin'] as VaultRole[]).map((r) => html`<option value="${r}">${r === 'none' ? 'No Vault role' : VAULT_LABEL[r]}</option>`)}</select></label>
           <button class="btn pri">Add</button>${errSlot}</form>
-          <p class="small muted">People who haven’t signed in yet show as invited until they sign in with that GitHub account. Nothing is emailed.</p></div>` : ''}
+          <p class="small muted">Give them a studio, a Vault role, or both. People who haven’t signed in yet show as invited, and get their Vault role when they first sign in with that GitHub account. Nothing is emailed.</p></div>` : ''}
       <div class="tbl-wrap"><table><thead><tr><th>GitHub user</th><th>Studios</th><th>Vault role</th><th>Last sign-in</th></tr></thead><tbody>${rows}</tbody></table></div>
       <p class="small muted">Release managers release, promote and roll back. Vault admins also manage people, studios and every studio’s members. ${h.vaultAdmins.length ? `Always admins: ${h.vaultAdmins.join(', ')}.` : ''}</p>`;
     return h.page(c, 'People', body, { active: 'people' });
   });
 
-  // Vault admins: add anyone to any studio from the People page. Body: { studio, login, role }
+  // Vault admins: add anyone from the People page, to a studio (with a studio role) and/or with a Vault role.
+  // Body: { login, studio?, role?, vaultRole? }. Someone who hasn't signed in gets the Vault role at first sign-in.
   app.post('/portal/api/vault/members', async (c) => {
     const u = h.apiUser(c);
     if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can do this here; studio admins use their studio’s Members page.');
     const b = await jsonBody(c);
-    const s = studioOf(b.studio, u);
-    setMember(u, s, loginOf(b.login), roleOf(b.role));
+    const login = loginOf(b.login);
+    const vaultRole = (b.vaultRole ?? 'none') as VaultRole;
+    if (!['none', 'release_manager', 'admin'].includes(vaultRole)) fail(400, 'Choose a Vault role.');
+    const s = b.studio ? studioOf(b.studio, u) : null;
+    if (!s && vaultRole === 'none') fail(400, 'Choose a studio, a Vault role, or both.');
+    if (vaultRole !== 'none') {
+      const target = db.userByLogin(login);
+      if (target?.id === u.id) fail(400, 'You can’t change your own Vault role.');
+      if (target) {
+        if (target.vault_role !== vaultRole) {
+          db.setVaultRole(target.id, vaultRole);
+          db.audit(h.actor(u), 'vault.role', target.login, { role: vaultRole, from: target.vault_role });
+        }
+      } else {
+        db.setVaultInvite(login, vaultRole, h.actor(u));
+        db.audit(h.actor(u), 'vault.invite', login, { role: vaultRole });
+      }
+    }
+    if (s) setMember(u, s, login, roleOf(b.role));
     return c.json({ ok: true });
   });
 

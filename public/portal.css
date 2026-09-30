@@ -437,3 +437,9 @@ tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
 .mem a { min-width: 0; }
 .mem form { margin: 0; display: inline-flex; gap: 6px; align-items: center; }
 .mem .err:empty { display: none; }
+
+/* Danger zone: deleting a game */
+.card.danger { border-color: var(--bad); }
+.card.danger h2 { color: var(--bad); }
+.btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn.danger:hover { filter: brightness(1.08); }

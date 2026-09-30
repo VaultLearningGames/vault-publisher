@@ -118,7 +118,7 @@ describe('studios edit, Vault publishes', () => {
     // Later edits don't reach the site until they're published.
     await mia.post(`${L}/wake`, { short_description: 'Changed' });
     assert.equal((await catalog())[0].short_description, 'Kelp!');
-    assert.match(await (await mia.get('/s/fieldday')).text(), /Unpublished changes/);
+    assert.match(await (await mia.get('/s/fieldday')).text(), /<th>Status<\/th>[\s\S]*Published/);
     assert.equal((await mia.get('/s/fieldday/listings/wake')).headers.get('location'), '/s/fieldday/g/wake', 'old listing pages redirect');
   });
 

@@ -175,14 +175,35 @@ describe('Vault People page', () => {
     const p = everyone();
     db.setMembership(fd().id, 'invitee', 'maintainer', 'user:ada');
     const adminPage = await (await p.vaultAdmin.get('/vault/people')).text();
-    assert.match(adminPage, /Add someone to a studio/);
+    assert.match(adminPage, /<h2>Add someone<\/h2>/);
+    assert.match(adminPage, /name="vaultRole"/);
     assert.match(adminPage, /invitee<\/b><span><span class="pill p-wait">Invited/);
     assert.match(adminPage, /otto<\/b>[\s\S]*Other Studio/);
     const rm = await (await p.releaseManager.get('/vault/people')).text();
     assert.match(rm, /invitee/);
-    assert.doesNotMatch(rm, /Add someone to a studio|data-api/);
+    assert.doesNotMatch(rm, /<h2>Add someone<\/h2>|data-api/);
     for (const who of [p.studioAdmin, p.maintainer, p.viewer]) assert.equal((await who.get('/vault/people')).status, 403);
     assert.equal((await p.signedOut.get('/vault/people')).status, 302);
+  });
+
+  test('adding someone with a Vault role: now if they have signed in, at first sign-in otherwise', async () => {
+    const p = everyone();
+    const add = (body: unknown) => p.vaultAdmin.post('/portal/api/vault/members', body);
+    assert.equal((await add({ login: 'nobody' })).status, 400, 'needs a studio or a Vault role');
+    assert.equal((await add({ login: 'vera', vaultRole: 'king' })).status, 400);
+    // Signed in already: the role applies now; a studio and role can come along.
+    assert.equal((await add({ login: 'vera', vaultRole: 'release_manager', studio: 'other', role: 'maintainer' })).status, 200);
+    assert.equal(db.userByLogin('vera')!.vault_role, 'release_manager');
+    assert.equal(db.roleIn(db.studioBySlug('other')!.id, 'vera'), 'maintainer');
+    assert.equal((await add({ login: 'boss', vaultRole: 'none', studio: 'other', role: 'viewer' })).status, 200, 'own studio role is fine');
+    assert.equal((await add({ login: 'boss', vaultRole: 'release_manager' })).status, 400, 'not your own Vault role');
+    // Not signed in yet: a Vault-only invitation shows on People and applies at first sign-in.
+    assert.equal((await add({ login: 'Newbie', vaultRole: 'admin' })).status, 200);
+    assert.match(await (await p.vaultAdmin.get('/vault/people')).text(), /Newbie<\/b><span><span class="pill p-wait">Invited[\s\S]*Vault admin <span class="muted">\(at first sign-in\)/);
+    assert.equal((await signInWithGitHub('newbie')).status, 302);
+    assert.equal(db.userByLogin('newbie')!.vault_role, 'admin');
+    assert.equal(db.vaultInvites().length, 0);
+    assert.equal((await p.releaseManager.post('/portal/api/vault/members', { login: 'x', vaultRole: 'admin' })).status, 403);
   });
 
   test('Vault admins add anyone to any studio there, and change or remove any membership', async () => {

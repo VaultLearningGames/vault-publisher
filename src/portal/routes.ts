@@ -223,6 +223,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   // maintainers and admins unless Vault has frozen the game.
   const canSwitch = (u: User, s: Studio, g: Game) => canRelease(u) || (!g.frozen_at && ['maintainer', 'admin'].includes(roleIn(u, s) ?? ''));
   const canManageMembers = (u: User, s: Studio) => isVaultAdmin(u) || roleIn(u, s) === 'admin';
+  // Deleting a game from Vault: its studio's admins and Vault staff.
+  const canDeleteGame = (u: User, s: Studio) => isStaff(u) || roleIn(u, s) === 'admin';
   const navFor = (u: User, studio?: Studio): Nav => ({ user: u, studio, memberships: db.membershipsForLogin(u.login), allStudios: db.studios() });
   const actor = (u: User) => `user:${u.login}`;
   // Site listings (listings.ts): shown with each game, since a game is its listing and/or its CDN game.
@@ -304,6 +306,11 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     }
     const user = db.upsertUser(profile);
     if (admins.has(user.login.toLowerCase()) && user.vault_role !== 'admin') db.setVaultRole(user.id, 'admin');
+    const invited = db.takeVaultInvite(user.login);
+    if (invited && user.vault_role === 'none') {
+      db.setVaultRole(user.id, invited);
+      db.audit(actor(user), 'vault.role', user.login, { role: invited, from: 'none', invited: true });
+    }
     db.audit(actor(user), 'portal.sign_in', user.login);
     setCookie(c, SESSION_COOKIE, signSession(user.id, cfg.sessionSecret!), { httpOnly: true, secure, sameSite: 'Lax', path: '/', maxAge: SESSION_DAYS * 86400 });
     return c.redirect(next);
@@ -361,7 +368,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       const slug = l?.slug ?? g!.slug;
       return html`<tr>
         <td class="proj"><a href="/s/${s.slug}/g/${slug}"><b>${l?.draft.title || slug}</b></a><span>${l ? html`/games/${l.slug}/` : 'not on the site'}${g ? html` · CDN <span class="mono">${g.slug}</span>` : ''}</span></td>
-        <td>${LP.state(l)}</td>
+        <td>${l?.published ? pill('ok', 'Published') : pill('off', 'Testing Only')}</td>
         <td>${LP.playsFrom(l, g)}${cur && !playsCdn && l ? html`<br><span class="small">${pill('ok', `CDN ${cur.version} ready`)}</span>` : ''}</td>
         <td>${g ? (builds.length ? html`<div class="refs">${shown.map((bd) => html`<a class="ref-chip ${bd.ref_type}" href="${deps.previewUrl(s, g, bd.ref_name)}" title="${bd.ref_type} · ${ago(bd.updated_at)}">${bd.ref_name}</a>`)}${builds.length > shown.length ? html`<span class="muted small">+${builds.length - shown.length}</span>` : ''}</div>` : html`<span class="muted small">No test versions</span>`)
           : html`<span class="muted small">Not on the CDN yet</span>`}</td>
@@ -376,7 +383,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
         <div class="kpi"><div class="v">${testVersions}</div><div class="l">Test versions on staging</div></div>
       </div>
       ${openRequests.length ? html`<p class="small">${pill('wait', `${openRequests.length} release request${openRequests.length > 1 ? 's' : ''} waiting for Vault`)}</p>` : ''}
-      ${entries.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Site</th><th>Plays from</th><th>Staging (testing)</th><th>Production</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      ${entries.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Status</th><th>Plays from</th><th>Staging (testing)</th><th>Production</th></tr></thead><tbody>${rows}</tbody></table></div>`
         : html`<div class="card"><p>No games yet. <a href="/s/${s.slug}/register">Set up CDN builds</a>, or ask Vault to add your games to the site.</p></div>`}
       ${LP.canEdit(u, s) ? html`<div class="card" style="margin-top:18px"><h2>Add a game to the site</h2><form data-api="/portal/api/s/${s.slug}/listings" data-then="reload" class="inline-form">
           <label class="field"><span class="lab">Title</span><input name="title" required autocomplete="off"></label>
@@ -490,6 +497,12 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
             ${release ? (g.frozen_at
               ? html`<form data-api="${api}/freeze" data-then="reload" data-confirm="Let ${s.name} switch versions again?"><input type="hidden" name="frozen" value=""><button class="btn sm">Unfreeze</button><span class="err" role="status" aria-live="polite"></span></form>`
               : html`<form data-api="${api}/freeze" data-then="reload" class="inline-form"><input type="hidden" name="frozen" value="1"><input name="note" required placeholder="Why (e.g. study until Dec 15)" aria-label="Reason for freezing"><button class="btn sm">Freeze</button><span class="err" role="status" aria-live="polite"></span></form>`) : ''}</div>
+          ${canDeleteGame(u, s) ? html`<div class="card danger"><h2>Danger zone</h2>
+            <p class="small">Delete <b class="mono">${g.slug}</b> from Vault: every test version on staging${releases.length ? html`, <b>all ${releases.length} production release${releases.length > 1 ? 's' : ''}</b> (classrooms lose the game)` : ''} and its history here.${db.listingsForGame(g.id).length ? ' Its site listing stays, but no longer plays from the CDN.' : ''} This can’t be undone.</p>
+            <p class="small muted">If the repository’s workflow still publishes, its next push adds the game back. Remove the workflow first.</p>
+            <form data-api="${api}/delete" data-then="/s/${s.slug}" data-busy="Deleting ${g.slug}’s files. This can take a minute; keep this page open.">
+              <label class="field"><span class="lab">Type <b class="mono">${g.slug}</b> to confirm</span><input name="confirm" required autocomplete="off" spellcheck="false" aria-label="Type ${g.slug} to confirm"></label>
+              <button class="btn danger">Delete game</button><span class="err" role="status" aria-live="polite"></span></form></div>` : ''}
           <div class="card small"><h2>How releasing works</h2><ol class="tight">
             <li>Push a version tag (e.g. <code>v1.2</code>); it appears above as a test version.</li>
             <li>Test it on staging, then ${release ? html`choose <b>Release…</b>` : request ? html`choose <b>Request release…</b>` : 'a maintainer requests a release'}.</li>
@@ -687,6 +700,25 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       db.setWithdrawn(r.id, actor(u), note);
       db.audit(actor(u), 'release.withdraw', target, { note });
     }
+    return c.json({ ok: true });
+  });
+
+  // Studio admins and Vault staff: delete a game from Vault (its staging and production files, then its records).
+  // Body: { confirm } must be the game's slug.
+  app.post('/portal/api/s/:studio/g/:game/delete', async (c) => {
+    const u = apiUser(c);
+    const { studio, game } = apiStudioGame(c, u);
+    if (!canDeleteGame(u, studio)) fail(403, 'Only studio admins and Vault staff can delete games.');
+    const b = await jsonBody(c);
+    if (typeof b.confirm !== 'string' || b.confirm.trim() !== game.slug) fail(400, `Type ${game.slug} to confirm.`);
+    const prefix = `${studio.slug}/${game.slug}/`;
+    const staged = (await deps.staging.list(prefix)).map((o) => o.key);
+    if (staged.length) await deps.staging.deleteKeys(staged);
+    const released = deps.production ? (await deps.production.list(prefix)).map((o) => o.key) : [];
+    if (released.length) await deps.production!.deleteKeys(released);
+    const releases = db.releases(game.id).length;
+    db.deleteGame(game.id);
+    db.audit(actor(u), 'game.delete', prefix, { repository: game.repository, releases, stagingFiles: staged.length, productionFiles: released.length });
     return c.json({ ok: true });
   });
 

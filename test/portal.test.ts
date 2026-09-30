@@ -275,6 +275,32 @@ describe('studios switching approved releases', () => {
   });
 });
 
+describe('deleting a game', () => {
+  test('studio admins and Vault staff delete it after typing its name; files and records go, listings stay', async () => {
+    const boss = as('boss', 'admin');
+    await boss.post(`${G}/release`, { ref: 'v1.0', version: 'v1.0', makeCurrent: true });
+    prod.objects.set('fieldday/aqualab-two/index.html', 1);   // a neighbour whose name starts the same survives
+    const page = await (await as('ada', 'none', 'admin').get('/s/fieldday/g/aqualab?tab=cdn')).text();
+    assert.match(page, /Danger zone[\s\S]*Type <b class="mono">aqualab<\/b> to confirm/);
+    assert.doesNotMatch(await (await as('mia', 'none', 'maintainer').get('/s/fieldday/g/aqualab?tab=cdn')).text(), /Danger zone/);
+    for (const who of [as('mia', 'none', 'maintainer'), as('vera', 'none', 'viewer')]) assert.equal((await who.post(`${G}/delete`, { confirm: 'aqualab' })).status, 403);
+    const ada = as('ada', 'none', 'admin');
+    assert.equal((await ada.post(`${G}/delete`, { confirm: 'aqua' })).status, 400, 'must type the name');
+    assert.ok(db.game(db.studioBySlug('fieldday')!.id, 'aqualab'));
+    assert.equal((await ada.post(`${G}/delete`, { confirm: 'aqualab' })).status, 200);
+    assert.equal(db.game(db.studioBySlug('fieldday')!.id, 'aqualab'), undefined);
+    assert.equal([...staging.objects.keys()].filter((k) => k.startsWith('fieldday/aqualab/')).length, 0);
+    assert.deepEqual([...prod.objects.keys()], ['fieldday/aqualab-two/index.html']);
+    assert.equal((await ada.get('/s/fieldday/g/aqualab')).status, 404);
+    assert.ok(db.recentAudit(5).some((a) => a.action === 'game.delete' && a.target === 'fieldday/aqualab/'));
+  });
+
+  test('Vault release managers can delete too', async () => {
+    assert.equal((await as('rita', 'release_manager').post(`${G}/delete`, { confirm: 'aqualab' })).status, 200);
+    assert.equal(db.game(db.studioBySlug('fieldday')!.id, 'aqualab'), undefined);
+  });
+});
+
 describe('user management', () => {
   test('studio admins manage members; others can’t', async () => {
     const ada = as('ada', 'none', 'admin');

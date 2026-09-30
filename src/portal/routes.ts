@@ -545,7 +545,13 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     let g: Game | null = l?.game_id ? db.gameById(l.game_id) ?? null : null;
     if (!l) {
       g = db.game(s.id, slug) ?? null;
-      if (!g) return denied(c, 'That game doesn’t exist.', 404);
+      if (!g) {
+        // A listing that moved to another studio: follow it there, if they can see that studio.
+        const moved = db.listing(slug) as ListingRow | undefined;
+        const home = moved && db.studioById(moved.studio_id);
+        if (home && canView(u, home)) return c.redirect(`/s/${home.slug}/g/${slug}`);
+        return denied(c, 'That game doesn’t exist.', 404);
+      }
       const lgs = db.listingsForGame(g.id);
       if (lgs.length === 1) return c.redirect(`/s/${s.slug}/g/${lgs[0].slug}${c.req.query('tab') ? `?tab=${c.req.query('tab')}` : ''}`);
     }

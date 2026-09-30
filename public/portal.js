@@ -1,8 +1,9 @@
 // Vault Studio Portal: progressive enhancement for forms, dialogs and the registration snippet.
 (function () {
   // Forms with data-api POST their fields as JSON to that URL. data-confirm asks first (in-page, no confirm()),
-  // data-then="reload" reloads on success (data-then="/path" goes there), data-autosubmit submits when a select or checkbox changes (a checkbox flips
-  // back if that fails). Forms with data-upload POST their file input's file as the request body to that URL.
+  // data-then="reload" reloads on success (data-then="/path" goes there; data-then="go" opens the url the API returns),
+  // data-autosubmit submits when a select or checkbox changes (a checkbox flips back if that fails). Forms with
+  // data-upload POST their file input's file as the request body to that URL.
   function formJson(form) {
     const out = {};
     for (const el of form.elements) {
@@ -43,7 +44,10 @@
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `Something went wrong (HTTP ${res.status}).`);
       busy--;
-      if ((form.dataset.then || '').startsWith('/')) {
+      if (form.dataset.then === 'go' && body.url) {
+        if (btn) btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Done, opening…';
+        location.href = body.url;
+      } else if ((form.dataset.then || '').startsWith('/')) {
         if (btn) btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Done…';
         location.href = form.dataset.then;
       } else if (form.dataset.then === 'reload' || !form.hasAttribute('data-autosubmit')) {

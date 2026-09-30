@@ -89,6 +89,17 @@ export function listingPieces(h: ListingHelpers) {
   }
 
   // The listing editor (draft) and its status card.
+  // Vault admins: which studio a game belongs to (whose members edit it, and the studio shown on the site).
+  function studioCard(s: Studio, l: ListingRow): Html {
+    const others = db.studios().filter((x) => x.id !== s.id).sort((a, b) => a.name.localeCompare(b.name));
+    const cdn = l.game_id ? db.gameById(l.game_id) : null;
+    return html`<div class="card"><h2>Studio</h2>
+      <p class="small">${l.draft.title || l.slug} belongs to <b>${s.name}</b>. Its members edit it, and the site shows it as ${s.name}’s.${cdn ? html` Moving it disconnects it from ${s.name}’s Vault CDN game <span class="mono">${cdn.slug}</span>.` : ''}</p>
+      <form data-api="/portal/api/s/${s.slug}/listings/${l.slug}/studio" data-then="go" data-confirm="Move ${l.draft.title || l.slug} to the chosen studio?" class="stack">
+        <select name="studio" required aria-label="New studio"><option value="">Move to…</option>${others.map((x) => html`<option value="${x.slug}">${x.name}</option>`)}</select>
+        <button class="btn sm">Move to this studio</button>${err}</form></div>`;
+  }
+
   function editor(u: User, s: Studio, l: ListingRow, g: Game | null): { form: Html; side: Html } {
     const edit = canEdit(u, s), vault = canPublish(u);
     const f = l.draft;
@@ -140,7 +151,7 @@ export function listingPieces(h: ListingHelpers) {
           <form data-api="${api}/publish" data-then="reload" data-confirm="Publish ${f.title || l.slug} to the site?"><button class="btn brass" ${changed.length || !l.published ? '' : 'disabled'}>Publish the draft</button>${err}</form>
           ${l.review === 'submitted' ? html`<form data-api="${api}/return" data-then="reload" class="stack" style="margin-top:10px"><input name="note" placeholder="What to change" aria-label="Why it’s being sent back"><button class="btn sm">Send back</button>${err}</form>` : ''}
           ${l.published ? html`<form data-api="${api}/unpublish" data-then="reload" data-confirm="Take ${f.title || l.slug} off the site?" style="margin-top:10px"><button class="btn sm">Take off the site</button>${err}</form>` : ''}` : ''}
-      </div>`;
+      </div>${h.isVaultAdmin(u) ? studioCard(s, l) : ''}`;
     return { form, side };
   }
 
@@ -364,6 +375,23 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     db.unpublishListing(l.id);
     db.audit(h.actor(u), 'listing.unpublish', `${s.slug}:${l.slug}`);
     return c.json({ ok: true });
+  });
+
+  // Vault admins: move a listing to another studio.
+  app.post('/portal/api/s/:studio/listings/:slug/studio', async (c) => {
+    const u = h.apiUser(c);
+    if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can move games between studios.');
+    const { s, l } = apiListing(c, u);
+    const to = db.studioBySlug(String((await jsonBody(c)).studio ?? ''));
+    if (!to) fail(404, 'Choose a studio.');
+    if (to.id === s.id) fail(400, `${l.draft.title || l.slug} already belongs to ${s.name}.`);
+    if (l.game_id && (l.draft.play_source === 'cdn' || l.published?.play_source === 'cdn'))
+      fail(400, `It plays from ${s.name}’s Vault CDN game. Switch it back to its web address first.`);
+    // "Made by" that just named the old studio follows the game; anything else (co-makers, a person) is kept.
+    const rename = (f: ListingFields): ListingFields => (f.makers.length === 1 && f.makers[0] === s.name ? { ...f, makers: [to.name] } : f);
+    db.moveListing(l.id, to.id, rename(l.draft), l.published ? rename(l.published) : null, h.actor(u));
+    db.audit(h.actor(u), 'listing.move', l.slug, { from: s.slug, to: to.slug, ...(l.game_id ? { unlinked_game: l.game_id } : {}) });
+    return c.json({ ok: true, url: `/s/${to.slug}/g/${l.slug}` });
   });
 
   app.post('/portal/api/vault/listings/import', async (c) => {

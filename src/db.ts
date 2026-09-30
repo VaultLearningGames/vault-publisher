@@ -811,6 +811,13 @@ export class Db {
     this.sqlite.prepare('UPDATE listings SET game_id = ? WHERE id = ?').run(gameId, id);
   }
 
+  // Vault admins move a site listing to another studio. Its CDN link is dropped (CDN games belong to a studio), and
+  // the caller passes the draft/published fields to keep (e.g. "Made by" renamed to the new studio).
+  moveListing(id: number, studioId: number, draft: ListingFields, published: ListingFields | null, by: string) {
+    this.sqlite.prepare(`UPDATE listings SET studio_id = ?, game_id = NULL, draft_json = ?, published_json = ?, updated_by = ?, updated_at = ? WHERE id = ?`)
+      .run(studioId, JSON.stringify(draft), published ? JSON.stringify(published) : null, by, now(), id);
+  }
+
   listingsForGame(gameId: number) {
     return this.sqlite.prepare(`${this.LISTING_SELECT} WHERE l.game_id = ? ORDER BY l.slug`).all(gameId).map((r) => this.listingRow(r as Record<string, unknown>)!);
   }

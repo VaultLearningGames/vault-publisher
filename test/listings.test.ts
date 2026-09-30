@@ -446,3 +446,57 @@ describe('Vault → Site games: one table with featured games and availability',
     assert.match(await (await boss.get('/vault/listings')).text(), /Uploads need the Vault CDN storage/);
   });
 });
+
+describe('Vault admins move a game to another studio', () => {
+  const move = (who: ReturnType<typeof as>, slug: string, studio: string, from = 'fieldday') => who.post(`/portal/api/s/${from}/listings/${slug}/studio`, { studio });
+
+  test('the listing, its “Made by” and the catalog follow it; the old address redirects', async () => {
+    const boss = as('boss', 'admin');
+    await boss.post(L, { slug: 'transformations-quest', title: 'Transformations Quest' });
+    assert.equal((await boss.post(`${L}/transformations-quest`, { short_description: 'Blocks!', play_url: 'https://example.org/tq/', 'grades:Grades 5-8': true, publish: true })).status, 200);
+    await boss.post(`${L}/transformations-quest`, { short_description: 'Draft only' });
+    assert.match(await (await boss.get('/s/fieldday/g/transformations-quest')).text(), /Move to this studio/);
+
+    const res = await move(boss, 'transformations-quest', 'ucalgary');
+    assert.equal(res.status, 200);
+    assert.equal(((await res.json()) as { url: string }).url, '/s/ucalgary/g/transformations-quest');
+    const l = db.listing('transformations-quest')!;
+    assert.equal(l.studio_slug, 'ucalgary');
+    assert.deepEqual(l.draft.makers, ['University of Calgary']);
+    assert.deepEqual(l.published!.makers, ['University of Calgary']);
+    assert.equal(l.draft.short_description, 'Draft only', 'unpublished edits stay unpublished');
+    const [g] = await catalog();
+    assert.deepEqual([g.studio.slug, g.studio.name], ['ucalgary', 'University of Calgary']);
+    assert.equal(g.short_description, 'Blocks!');
+    assert.equal((await boss.get('/s/fieldday/g/transformations-quest')).headers.get('location'), '/s/ucalgary/g/transformations-quest');
+    assert.equal((await move(boss, 'transformations-quest', 'ucalgary', 'ucalgary')).status, 400, 'already there');
+    assert.equal((await move(boss, 'transformations-quest', 'nowhere', 'ucalgary')).status, 404);
+  });
+
+  test('co-makers are kept; only Vault admins can move games', async () => {
+    const boss = as('boss', 'admin');
+    await boss.post(L, { slug: 'shady-sam', title: 'Shady Sam' });
+    await boss.post(`${L}/shady-sam`, { makers: 'Field Day Lab\nSomeone Else' });
+    assert.equal((await move(as('mia', 'none', 'maintainer'), 'shady-sam', 'ucalgary')).status, 403);
+    assert.equal((await move(as('rita', 'release_manager'), 'shady-sam', 'ucalgary')).status, 403);
+    assert.doesNotMatch(await (await as('rita', 'release_manager').get('/s/fieldday/g/shady-sam')).text(), /Move to this studio/);
+    assert.equal((await move(boss, 'shady-sam', 'ucalgary')).status, 200);
+    assert.deepEqual(db.listing('shady-sam')!.draft.makers, ['Field Day Lab', 'Someone Else']);
+  });
+
+  test('a connected CDN game stays with its studio: refused while playing from it, disconnected otherwise', async () => {
+    const boss = as('boss', 'admin');
+    await boss.post(L, { slug: 'aquatic-lab', title: 'Aqualab' });
+    await boss.post(`${L}/aquatic-lab`, { play_url: 'https://old.test/', publish: true });
+    await boss.post(`${L}/aquatic-lab/link`, { game: 'aqualab' });
+    await boss.post('/portal/api/s/fieldday/g/aqualab/release', { version: 'v1.0', ref: 'v1.0', makeCurrent: true });
+    await boss.post(`${L}/aquatic-lab`, { play_source: 'cdn', publish: true });
+    const refused = await move(boss, 'aquatic-lab', 'ucalgary');
+    assert.equal(refused.status, 400);
+    assert.match(((await refused.json()) as { error: string }).error, /web address first/);
+    await boss.post(`${L}/aquatic-lab`, { play_source: 'url', publish: true });
+    assert.equal((await move(boss, 'aquatic-lab', 'ucalgary')).status, 200);
+    assert.equal(db.listing('aquatic-lab')!.game_id, null);
+    assert.ok(db.game(db.studioBySlug('fieldday')!.id, 'aqualab'), 'the CDN game itself stays with Field Day');
+  });
+});

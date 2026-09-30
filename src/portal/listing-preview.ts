@@ -91,8 +91,7 @@ export function registerListingPreview(app: Hono, h: ListingHelpers, store = new
 // and may submit it for review.
 export function saveControls(canPublish: boolean, l: ListingRow): Html {
   if (canPublish) return html`<input type="hidden" name="publish" value="1"><button class="btn pri">Save and Publish Changes</button>`;
-  return html`<label class="check"><input type="checkbox" name="submit" ${l.review === 'submitted' ? 'checked' : ''}> Submit for Vault review when saved</label>
-    <button class="btn pri">Save</button>`;
+  return html`<button class="btn pri">Save and Submit for Review</button>`;
 }
 
 // Preview buttons: the first site is "Preview", the others "Preview (Label)". None without preview sites.

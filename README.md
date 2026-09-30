@@ -78,7 +78,7 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   leave it alone, and a build containing a top-level `_vault-assets/` folder can't be released.
 * Vault publishes them from **Vault → Site games**, sends them back with a note, or takes the game off the site.
 * Vault staff's editor has one **Save and Publish Changes** button (saves the draft and publishes it); studio members
-  save the draft and may tick *Submit for Vault review*.
+  have **Save and Submit for Review**: every studio save goes to Vault for review.
 * **Preview** shows the editor's unsaved edits on the website: the form is cleaned up as a save would (nothing is
   saved), turned into the game object `/v1/catalog` would publish and kept for 30 minutes (in memory) under a random
   token. The site shows it at `SITE/_preview/TOKEN/`, reading public `GET /v1/listing-previews/TOKEN` →

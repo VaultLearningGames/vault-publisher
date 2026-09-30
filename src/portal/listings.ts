@@ -317,14 +317,14 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const draft = normalize(b, l.draft);
     const flag = (v: unknown) => v === true || v === '1' || v === 'on';
     const wantsPublish = flag(b.publish) && P.canPublish(u);
-    const wantsSubmit = flag(b.submit) && !wantsPublish;
+    // Studio saves always go to Vault for review; Vault staff save and publish in one step.
+    const wantsSubmit = !wantsPublish && !P.canPublish(u);
     const bad = problems(draft, { forPublish: wantsPublish || wantsSubmit, cdnReady: cdnReady(l) });
     if (bad.length) fail(400, bad.join(' '));
     db.saveListingDraft(l.id, draft, h.actor(u));
     db.audit(h.actor(u), 'listing.save', `${s.slug}:${l.slug}`, { fields: changedFields(l.draft, draft) });
     if (wantsPublish) { db.publishListing(l.id, h.actor(u)); db.audit(h.actor(u), 'listing.publish', `${s.slug}:${l.slug}`); }
-    else if (wantsSubmit && l.review !== 'submitted') { db.setListingReview(l.id, 'submitted', h.actor(u), null); db.audit(h.actor(u), 'listing.submit', `${s.slug}:${l.slug}`); }
-    else if (!wantsSubmit && l.review === 'submitted' && !P.canPublish(u)) db.setListingReview(l.id, 'editing', h.actor(u), null);
+    else if (wantsSubmit) { db.setListingReview(l.id, 'submitted', h.actor(u), null); db.audit(h.actor(u), 'listing.submit', `${s.slug}:${l.slug}`); }
     return c.json({ ok: true });
   });
 

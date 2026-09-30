@@ -116,15 +116,18 @@ describe('save and publish', () => {
     assert.equal(t.db.listing('wake')!.published!.title, 'Wake 2');
   });
 
-  test('studio members keep Save and “Submit for Vault review”', async () => {
+  test('every studio save goes to Vault for review', async () => {
     const mia = t.as('mia', 'none', 'maintainer');
     const page = await (await mia.get('/s/fieldday/g/wake')).text();
-    assert.match(page, /Submit for Vault review when saved/);
-    assert.match(page, /<button class="btn pri">Save<\/button>/);
-    assert.doesNotMatch(page, /Save and Publish|name="publish"/);
+    assert.match(page, /<button class="btn pri">Save and Submit for Review<\/button>/);
+    assert.doesNotMatch(page, /name="submit"|Save and Publish|name="publish"/);
+    // A plain save (no submit flag) is submitted; asking to publish doesn't publish.
     assert.equal((await mia.post(`${L}/wake`, { title: 'Wake 3', publish: '1' })).status, 200);
-    assert.equal(t.db.listing('wake')!.published!.title, 'Wake', 'studio members can’t publish');
-    assert.equal(t.db.listing('wake')!.draft.title, 'Wake 3');
+    const l = t.db.listing('wake')!;
+    assert.equal(l.published!.title, 'Wake', 'studio members can’t publish');
+    assert.equal(l.draft.title, 'Wake 3');
+    assert.equal(l.review, 'submitted');
+    assert.equal(l.submitted_by, 'user:mia');
   });
 });
 

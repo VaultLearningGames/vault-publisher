@@ -8,6 +8,55 @@ Publishes web game builds to Vault Learning Games:
 
 Studios manage games, members and release requests at **https://portal.vaultlearninggames.org**.
 
+## Architecture
+
+| | |
+| --- | --- |
+| Runtime | Node 24 (native TypeScript, ESM) |
+| Framework | [Hono](https://hono.dev) (`@hono/node-server`) — one app serves the machine API, portal UI and site forms |
+| Database | `node:sqlite`, plain SQL + numbered migrations (`src/db.ts`); no ORM (Postgres-portable) |
+| Storage | Cloudflare R2 via AWS SDK v3 (`src/storage.ts`); uploads are presigned PUTs — the API never proxies bytes |
+| Auth | `jose`: GitHub Actions OIDC tokens (CI), Google ID tokens (scheduled tasks); portal login is interactive GitHub OAuth → HMAC-signed `vault_session` cookie (`src/portal/session.ts`) |
+| Deps | `hono`, `@hono/node-server`, `@aws-sdk/client-s3` + `s3-request-presigner`, `jose` — nothing else |
+
+### Code layout
+
+| File | Role |
+| --- | --- |
+| `src/server.ts` | Entrypoint: config, DB + R2 init, one-time release relayout, clean SIGTERM close |
+| `src/app.ts` | `createApp()` — all `/v1/*` routes and shared auth/ownership checks |
+| `src/auth.ts` | OIDC/Google token verification (`jose`) |
+| `src/db.ts` | Schema, migrations, all SQL access |
+| `src/portal/routes.ts` | Portal HTML pages + `/portal/api/*` routes |
+| `src/portal/{listings,people,featured,listing-preview,image-migration,availability}.ts` | Portal features by domain |
+| `src/{releases,storage,paths,config,forms,catalog,game-checks}.ts` | Domain logic |
+
+### API
+
+Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutation writes an audit row.
+
+| Auth | Method & path | Purpose |
+| --- | --- | --- |
+| GitHub OIDC (studio's CI) | `POST /v1/previews` | Start a build upload → presigned PUTs per file |
+| | `POST /v1/previews/:uploadId/finalize` | Verify files landed, prune stale, record build |
+| | `POST /v1/previews/delete` | Remove a branch preview |
+| | `POST /v1/admin/previews` + `/finalize` | Same, for Vault uploads into any studio's game |
+| | `POST /v1/admin/releases/approve` · `promote` | Approve staging build as release; make current / roll back |
+| | `POST /v1/admin/game-checks` | Post availability-check results |
+| | `GET /v1/releases/:studio/:game[/check]` | Read-only: a game's releases, or pre-flight check of a release run |
+| | `GET /v1/catalog` | Public: site listings, studios, featured games |
+| Google ID token | `POST /v1/tasks/cleanup` | Nightly: expire stale previews (Cloud Scheduler) |
+| Public (site) | `POST /v1/forms/:name` | Website forms → Google Sheets |
+| Session cookie | `GET /`, `/s/:studio`, `/s/:studio/g/:game`, `/vault/…` | Studio and Vault admin UI (HTML) |
+| | `POST /portal/api/s/:studio/listings[/:slug][…]` | Listing CRUD, link, publish, unpublish, move studio, preview |
+| | `POST /portal/api/s/:studio/g/:game/…` | `release`, `promote`, `withdraw`, `delete`, `freeze`, `request` |
+| | `POST /portal/api/requests/:id/…` | Release requests: `approve`, `reject`, `withdraw` |
+| | `POST /portal/api/s/:studio/members[?]` | Studio members add/remove, website URL |
+| | `POST /portal/api/vault/…` | Vault-admin: studios CRUD, users/roles, listings import, featured |
+| | `GET /v1/listing-previews/:token` | Unsaved listing previews |
+
+**Admin-lane** routes (`/v1/admin/*`) additionally require the token's repository to be the admin repo running in the protected environment; **portal mutations** require a signed-in Vault-admin session.
+
 Vault also runs a separate staging copy of all of this (site, portal, test builds, releases) on
 `vaultlearninggames-staging.org` for trying new versions. Studios never need it. See [docs/setup.md](docs/setup.md).
 

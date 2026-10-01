@@ -15,6 +15,7 @@ import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '..
 import type { PortalDeps } from './routes.ts';
 import { imageField } from './listing-assets.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
+import { migrationCard } from './image-migration.ts';
 
 export interface ListingHelpers {
   db: Db;
@@ -270,7 +271,8 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
         <form data-api="/portal/api/vault/listings/import" data-then="reload" class="fields">
           <label class="field full"><span class="lab">games-export.json</span><textarea name="pages" rows="4" required></textarea></label>
           <label class="field full"><span class="lab">import-overrides.json (optional)</span><textarea name="overrides" rows="3"></textarea></label>
-          <div class="form-foot"><button class="btn pri">Import</button>${err}</div></form></div>` : ''}`;
+          <div class="form-foot"><button class="btn pri">Import</button>${err}</div></form></div>` : ''}
+      ${h.isVaultAdmin(u) ? migrationCard(h) : ''}`;
     return h.page(c, 'Site games', body, { active: 'vault-listings' });
   });
 

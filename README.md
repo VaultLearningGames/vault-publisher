@@ -134,6 +134,10 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   `{ "version": 1, "game": <a catalog game>, "studios": <as in the catalog> }` (`Cache-Control: no-store`; 404 once
   expired). Sites come from `PREVIEW_SITES`, space-separated `label=url` pairs; the first is the main Preview button,
   the others "Preview (Label)". Empty hides the buttons.
+* **Copy site images to the Vault CDN** (Vault admins, on Site games) downloads every listing image and featured image
+  that is still a site path (published and draft) from the site (`SITE_URL` by default), stores it like an upload in
+  `STUDIO/GAME/_vault-assets/` and relinks it. Published listings change only those links, so nothing needs review
+  again; external links are left alone and listed; re-running changes nothing. The last run's summary is on the page.
 * The public **`GET /v1/catalog`** lists published games with their play URL resolved. That's either the web address or
   `cdn.vaultlearninggames.org/STUDIO/GAME/` plus an optional folder, so one CDN game can hold a collection (The Yard).
   The site ([vault-rebuild](https://github.com/fielddaylab/vault-rebuild)) is built from it. Each game's `studio`

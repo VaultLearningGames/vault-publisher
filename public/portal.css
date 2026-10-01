@@ -426,6 +426,11 @@ tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
 .img-up { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .field .img-up input[type=file] { font-size: 12px; max-width: 240px; width: auto; border: 0; padding: 1px; background: none; }
 
+/* Copy site images to the Vault CDN: the last run's summary. */
+.mig-result { margin-top: 14px; border-top: 1px solid var(--line-2); padding-top: 12px; }
+.mig-result details { margin-top: 6px; }
+.mig-list { margin: 6px 0 0; padding-left: 18px; max-height: 320px; overflow: auto; overflow-wrap: anywhere; }
+
 /* Vault → People: each person's studio memberships, one row each */
 .mem-list { display: flex; flex-direction: column; gap: 6px; }
 .mem { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

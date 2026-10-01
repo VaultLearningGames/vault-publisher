@@ -1,0 +1,50 @@
+[
+  {
+    "slug": "yardgames",
+    "displayName": "The Yard",
+    "doitUrl": "https://theyardgames.org/",
+    "r2Prefix": "fieldday/yardgames",
+    "entryFile": "index.html",
+    "status": "pending"
+  },
+  {
+    "slug": "jowilder",
+    "displayName": "Jo Wilder and the Capitol Case",
+    "doitUrl": "https://fielddaylab.wisc.edu/play/jowilder/game/",
+    "r2Prefix": "fieldday/jowilder/doit",
+    "entryFile": "index.html",
+    "status": "pending"
+  },
+  {
+    "slug": "lakeland",
+    "displayName": "Lakeland",
+    "doitUrl": "https://fielddaylab.wisc.edu/play/lakeland/game/",
+    "r2Prefix": "fieldday/lakeland/doit",
+    "entryFile": "index.html",
+    "status": "pending"
+  },
+  {
+    "slug": "forevermine",
+    "displayName": "Lost at the Forever Mine",
+    "doitUrl": "https://fielddaylab.wisc.edu/play/forevermine/game/",
+    "r2Prefix": "fieldday/forevermine/doit",
+    "entryFile": "index.html",
+    "status": "pending"
+  },
+  {
+    "slug": "thermovr",
+    "displayName": "ThermoVR (desktop)",
+    "doitUrl": "https://fielddaylab.wisc.edu/play/thermovr/ci/desktop/",
+    "r2Prefix": "fieldday/thermovr/desktop",
+    "entryFile": "index.html",
+    "status": "pending"
+  },
+  {
+    "slug": "shadowspect",
+    "displayName": "Shadowspect",
+    "doitUrl": "https://fielddaylab.wisc.edu/play/partner/shadowspect/ci/main/",
+    "r2Prefix": "mit-education-arcade/shadowspect/main",
+    "entryFile": "index.html",
+    "status": "pending"
+  }
+]

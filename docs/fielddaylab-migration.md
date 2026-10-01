@@ -69,7 +69,8 @@ Notes:
 
 Copying needs the DoIT file tree (directory listings aren't public), so it runs as a one-time admin job with VPN access:
 rsync each folder from DoIT, then upload it to staging under the game's name. These games have no repository claim
-on the publisher yet, so the upload goes through an admin-only path.
+on the publisher yet, so the upload goes through an admin-only path. The tooling for this job — manifest,
+idempotent upload script and runbook — lives in [`scripts/r2-migrate/`](../scripts/r2-migrate/README.md).
 
 ## C. Out of scope for the web CDN
 

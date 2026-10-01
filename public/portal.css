@@ -438,3 +438,36 @@ tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
 .card.danger h2 { color: var(--bad); }
 .btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .btn.danger:hover { filter: brightness(1.08); }
+
+/* ---------- Search on small screens (320–767px) ----------
+   Contract for the portal's search UIs (global header search; Game Catalog table filter): the portal
+   currently ships no search UI — no type="search" inputs, no header search, no table filter — so these
+   rules make any search UI added to the portal render correctly on phones: the container is a full-width
+   block on its own row, input type ≥16px (iOS must not zoom on focus), tap target ≥44px, icon/clear
+   button sit in reserved padding, and the results dropdown is clamped to the viewport. With border-box
+   (global) + width:100% + min-width:0 a 100-char query scrolls inside the input and no search element
+   can add horizontal page scroll at any width ≥320px (200% zoom on a 768px window is a 384px viewport).
+   Every rule lives inside this max-width:767px block, so rendering at ≥768px is byte-for-byte unchanged.
+   No new toggle is introduced: a search box, if present, stays always visible. */
+@media (max-width: 767px) {
+  .search { display: block; width: 100%; max-width: 100%; min-width: 0; position: relative; }
+  /* Search takes its own row when its siblings (filters, buttons, title) don't fit. The host rows
+     (.page-head, .filters, .actions, .inline-form) already flex-wrap: wrap at all widths. */
+  .page-head .search, .filters .search, .actions .search, .inline-form .search { flex: 1 1 100%; }
+  .search > * { min-width: 0; }
+  /* 40px of side padding (a 24px icon + 8px clearance) keeps typed text clear of the search icon
+     (left) and the clear button (right); min-height 44px is the tap target. */
+  input[type=search] {
+    box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0;
+    font-size: 16px; min-height: 44px; padding: 8px 40px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink);
+  }
+  .search .btn { min-height: 44px; }
+  /* Results dropdown/popover: horizontally clamped to the viewport with a 16px gutter, scrolls
+     vertically at ~60vh, and long game names / empty-results messages wrap instead of overflowing. */
+  .search-results {
+    position: absolute; top: 100%; left: 0; width: 100%; max-width: calc(100vw - 16px);
+    max-height: 60vh; overflow-y: auto;
+  }
+  .search-results a, .search-results p, .search-results span { overflow-wrap: anywhere; }
+}

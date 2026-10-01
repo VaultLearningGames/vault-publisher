@@ -57,6 +57,16 @@ single, replaceable version (no version folders).
 | Shadowspect (MIT Education Arcade) | `/play/partner/shadowspect/ci/main/` | `shadowspect` (Unity 2018.4) | External studio | `mit-education-arcade/shadowspect/main/` |
 | Transformation Quest (University of Calgary) | `/play/transformation-quest/ci/develop/` | `transformation-quest` | External studio, JavaScript | `ucalgary/transformation-quest/develop/` |
 
+Notes:
+- **Transformation Quest stable URL (probed 2026-10-01, card 1875268217925011099):** the only public build is the
+  `develop` CI build — `https://fielddaylab.wisc.edu/play/partner/transformation-quest/ci/develop/` (the path without
+  `partner/` serves the same build); every non-CI and every main/master/production/release path is 403/404, no build
+  exists on the Vault CDN (`ucalgary/...`), and the game repo (`fielddaylab/transformation-quest`) has only
+  `develop`/`unstable` branches (no tags; CI deploys `develop` only; last push 2024-02-22). No stable URL exists to
+  point the game record at, so it stays on `ci/develop` — allowlisted in the catalog CI-URL guard (see
+  `fielddaylab/vault-rebuild` `migration/transformations-quest-url.md`) — until Field Day Lab / University of
+  Calgary publishes a release.
+
 Copying needs the DoIT file tree (directory listings aren't public), so it runs as a one-time admin job with VPN access:
 rsync each folder from DoIT, then upload it to staging under the game's name. These games have no repository claim
 on the publisher yet, so the upload goes through an admin-only path.

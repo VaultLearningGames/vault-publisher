@@ -298,8 +298,8 @@ export function createApp(deps: AppDeps) {
   });
 
   // Public: every published site listing, which the Vault website is built from, and the home page's featured
-  // games. A listing that plays from the Vault CDN gets its game's current release URL here, so releasing or rolling
-  // back a game changes what the site plays on the next site build without anyone editing the listing.
+  // games. A listing hosted on the Vault CDN gets its game's current release URL here, so releasing or rolling
+  // back a game changes what the site serves on the next site build without anyone editing the listing.
   // `studios` is every studio with a game on the site and its website, so the site can link any maker name that
   // matches a studio (a game can list several makers).
   app.get('/v1/catalog', (c) => {

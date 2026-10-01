@@ -143,7 +143,7 @@ export function classify(game: { url: string; embed: boolean }, probe: Probe | n
   const siteHttps = new URL(opts.siteOrigin).protocol === 'https:';
   if (start.protocol === 'http:' && siteHttps) {
     // Browsers block an http:// page inside an https:// site before even requesting it.
-    (game.embed ? fails : warns).push(game.embed ? 'Plays from http://, which browsers block inside the https site' : 'Plays from http:// (not https)');
+    (game.embed ? fails : warns).push(game.embed ? 'Its play URL is http://, which browsers block inside the https site' : 'Its play URL is http:// (not https)');
   }
   if (!probe) { fails.push('Not checked'); return done(); }
   if (probe.error) { fails.push(errorText(probe.error, opts.timeoutMs ?? 15000)); return done(); }

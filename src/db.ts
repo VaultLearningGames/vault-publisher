@@ -162,7 +162,7 @@ const MIGRATIONS = [
     created_at      TEXT NOT NULL
   );
   `,
-  // v7: a site listing plays from its linked CDN game once it has a release (several listings can share one CDN game,
+  // v7: a site listing is hosted on its linked CDN game once it has a release (several listings can share one CDN game,
   // each in its own folder, e.g. The Yard). Games Vault uploads for a studio (before the studio's own CI publishes)
   // have repository '' and repository_id 'vault:STUDIO/GAME' until a repository claims them.
   `

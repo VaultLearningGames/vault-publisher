@@ -369,27 +369,27 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       return html`<tr>
         <td class="proj"><a href="/s/${s.slug}/g/${slug}"><b>${l?.draft.title || slug}</b></a><span>${l ? html`/games/${l.slug}/` : 'not on the site'}${g ? html` · CDN <span class="mono">${g.slug}</span>` : ''}</span></td>
         <td>${l?.published ? pill('ok', 'Published') : pill('off', 'Testing Only')}</td>
-        <td>${LP.playsFrom(l, g)}${cur && !playsCdn && l ? html`<br><span class="small">${pill('ok', `CDN ${cur.version} ready`)}</span>` : ''}</td>
+        <td>${LP.hosting(l, g)}${cur && !playsCdn && l ? html`<br><span class="small">${pill('ok', `CDN ${cur.version} ready`)}</span>` : ''}</td>
         <td>${g ? (builds.length ? html`<div class="refs">${shown.map((bd) => html`<a class="ref-chip ${bd.ref_type}" href="${deps.previewUrl(s, g, bd.ref_name)}" title="${bd.ref_type} · ${ago(bd.updated_at)}">${bd.ref_name}</a>`)}${builds.length > shown.length ? html`<span class="muted small">+${builds.length - shown.length}</span>` : ''}</div>` : html`<span class="muted small">No test versions</span>`)
           : html`<span class="muted small">Not on the CDN yet</span>`}</td>
         <td>${cur ? html`<span class="rel">${cur.version}</span> <span class="muted small">${ago(cur.approved_at)}</span>` : html`<span class="muted small">—</span>`}</td></tr>`;
     });
-    const body = html`${head(s.name, html`Every ${s.name} game on Vault. Games play from their <b>web address</b> until they move to the <b>Vault CDN</b>: staging is yours to test on, production is what classrooms play, released by Vault.`,
+    const body = html`${head(s.name, html`Every ${s.name} game on Vault. Games are hosted at their <b>web address</b> until they move to the <b>Vault CDN</b>: staging is yours to test on, production is what classrooms play, released by Vault.`,
       html`<a class="btn" href="/s/${s.slug}/register">Set up CDN builds</a>`)}
       <div class="kpis four">
         <div class="kpi"><div class="v">${entries.length}</div><div class="l">Games</div></div>
-        <div class="kpi"><div class="v">${onCdn}</div><div class="l">Playing from the Vault CDN</div></div>
+        <div class="kpi"><div class="v">${onCdn}</div><div class="l">Hosted on the Vault CDN</div></div>
         <div class="kpi"><div class="v">${ready}</div><div class="l">CDN release ready to switch</div></div>
         <div class="kpi"><div class="v">${testVersions}</div><div class="l">Test versions on staging</div></div>
       </div>
       ${openRequests.length ? html`<p class="small">${pill('wait', `${openRequests.length} release request${openRequests.length > 1 ? 's' : ''} waiting for Vault`)}</p>` : ''}
-      ${entries.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Status</th><th>Plays from</th><th>Staging (testing)</th><th>Production</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      ${entries.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Status</th><th>Hosted by</th><th>Staging (testing)</th><th>Production</th></tr></thead><tbody>${rows}</tbody></table></div>`
         : html`<div class="card"><p>No games yet. <a href="/s/${s.slug}/register">Set up CDN builds</a>, or ask Vault to add your games to the site.</p></div>`}
       ${LP.canEdit(u, s) ? html`<div class="card" style="margin-top:18px"><h2>Add a game to the site</h2><form data-api="/portal/api/s/${s.slug}/listings" data-then="reload" class="inline-form">
           <label class="field"><span class="lab">Title</span><input name="title" required autocomplete="off"></label>
           <label class="field"><span class="lab">Page address</span><input name="slug" required pattern="[a-z0-9][a-z0-9-]*" autocomplete="off" placeholder="my-game"></label>
           <button class="btn pri">Add</button><span class="err" role="status" aria-live="polite"></span></form>
-          <p class="small muted">It plays from a web address until it has a release on the Vault CDN.</p></div>` : ''}`;
+          <p class="small muted">It is hosted at its web address until it has a release on the Vault CDN.</p></div>` : ''}`;
     return page(c, s.name, body, { studio: s, active: 'studio' });
   });
 
@@ -498,7 +498,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
               ? html`<form data-api="${api}/freeze" data-then="reload" data-confirm="Let ${s.name} switch versions again?"><input type="hidden" name="frozen" value=""><button class="btn sm">Unfreeze</button><span class="err" role="status" aria-live="polite"></span></form>`
               : html`<form data-api="${api}/freeze" data-then="reload" class="inline-form"><input type="hidden" name="frozen" value="1"><input name="note" required placeholder="Why (e.g. study until Dec 15)" aria-label="Reason for freezing"><button class="btn sm">Freeze</button><span class="err" role="status" aria-live="polite"></span></form>`) : ''}</div>
           ${canDeleteGame(u, s) ? html`<div class="card danger"><h2>Danger zone</h2>
-            <p class="small">Delete <b class="mono">${g.slug}</b> from Vault: every test version on staging${releases.length ? html`, <b>all ${releases.length} production release${releases.length > 1 ? 's' : ''}</b> (classrooms lose the game)` : ''} and its history here.${db.listingsForGame(g.id).length ? ' Its site listing stays, but no longer plays from the CDN.' : ''} This can’t be undone.</p>
+            <p class="small">Delete <b class="mono">${g.slug}</b> from Vault: every test version on staging${releases.length ? html`, <b>all ${releases.length} production release${releases.length > 1 ? 's' : ''}</b> (classrooms lose the game)` : ''} and its history here.${db.listingsForGame(g.id).length ? ' Its site listing stays, but is no longer hosted on the CDN.' : ''} This can’t be undone.</p>
             <p class="small muted">If the repository’s workflow still publishes, its next push adds the game back. Remove the workflow first.</p>
             <form data-api="${api}/delete" data-then="/s/${s.slug}" data-busy="Deleting ${g.slug}’s files. This can take a minute; keep this page open.">
               <label class="field"><span class="lab">Type <b class="mono">${g.slug}</b> to confirm</span><input name="confirm" required autocomplete="off" spellcheck="false" aria-label="Type ${g.slug} to confirm"></label>
@@ -534,8 +534,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     return { main, side, dialogs };
   }
 
-  // A game's page: its site listing and/or its CDN game. Games already on the site that only play from a web address
-  // have just a listing; once they're on the Vault CDN, the same page switches them over.
+  // A game's page: its site listing and/or its CDN game. Games already on the site that are only hosted at a
+  // web address have just a listing; once they're on the Vault CDN, the same page switches them over.
   app.get('/s/:studio/g/:game', (c) => {
     const u = signedIn(c); if (u instanceof Response) return u;
     const s = studioFor(c, u); if (s instanceof Response) return s;

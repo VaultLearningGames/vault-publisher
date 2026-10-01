@@ -6,7 +6,7 @@ import { catalogEntry, type ListingFields } from './listings.ts';
 type Row = Listing & { studio_slug: string; studio_name: string; studio_website?: string | null };
 
 // The catalog entry for listing `l` with fields `f` (its published fields, or a draft for a preview). A listing that
-// plays from the Vault CDN gets its game's current release URL.
+// is hosted on the Vault CDN gets its game's current release URL.
 export function catalogGame(db: Db, prodPublicUrl: string, l: Row, f: ListingFields) {
   let cdn: { url: string; release: string } | null = null;
   if (f.play_source === 'cdn' && l.game_id) {

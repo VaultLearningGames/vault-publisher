@@ -1,7 +1,7 @@
 // Site listings: what vaultlearninggames.org shows for each game (title, descriptions, grades, images, and how to
 // play it). Studios edit a draft; Vault publishes it. The site is built from the published listings (/v1/catalog).
 //
-// A listing plays either from an HTML URL in Vault's in-page player (the first version of the site), or from the
+// A listing is hosted either at an HTML URL in Vault's in-page player (the first version of the site), or on the
 // Vault CDN: the current release of one of the studio's games at https://cdn.vaultlearninggames.org/STUDIO/GAME/.
 import { isSlug } from './paths.ts';
 
@@ -93,10 +93,10 @@ export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady
   }
   if (!isFit(f.fit)) out.push('Player fit must be six whole numbers: page width, page height, x, y, width, height.');
   for (const g of f.grades) if (!(GRADES as readonly string[]).includes(g)) out.push(`Unknown grade band “${g}”.`);
-  if (f.play_source === 'cdn' && !opts.cdnReady) out.push('To play from the Vault CDN, the game needs a CDN game with a current release.');
+  if (f.play_source === 'cdn' && !opts.cdnReady) out.push('To be hosted on the Vault CDN, the game needs a CDN game with a current release.');
   if (opts.forPublish) {
     if (!f.title) out.push('Add a title.');
-    if (f.play_source === 'url' && !f.play_url) out.push('Add the URL the game plays from.');
+    if (f.play_source === 'url' && !f.play_url) out.push('Add the URL the game is hosted at.');
   }
   return out;
 }
@@ -114,7 +114,7 @@ export const FIELD_LABEL: Record<keyof ListingFields, string> = {
   title: 'Title', short_description: 'Short description', about: 'About this game', makers: 'Made by', grades: 'Grades',
   subjects: 'Subjects', topics: 'Topics', standards: 'Standards', related_curriculum: 'Related curriculum',
   gameplay_video: 'Gameplay video', hero_image: 'Hero image', thumb_image: 'Thumbnail', screenshots: 'Screenshots',
-  play_source: 'Plays from', play_url: 'Play URL', cdn_path: 'CDN folder', embed: 'Opens in', fit: 'Player fit',
+  play_source: 'Hosted by', play_url: 'Play URL', cdn_path: 'CDN folder', embed: 'Opens in', fit: 'Player fit',
 };
 
 // The public catalog entry for a published listing. `cdn` is the linked game's current production URL and release,

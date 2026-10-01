@@ -1,13 +1,14 @@
 // Site listings: what vaultlearninggames.org shows for each game, edited on the game's page in the portal.
 // A game in the portal is its site listing and/or its CDN game (builds and releases), linked together:
-//   - Games already on the site that play from a web address have only a listing until they move to the CDN.
-//   - A listing switches to "plays from the Vault CDN" once its linked CDN game has a current release.
+//   - Games already on the site that are hosted at a web address have only a listing until they move to the CDN.
+//   - A listing is hosted on the Vault CDN once its linked CDN game has a current release.
 // Studios edit a listing's draft; Vault publishes it. The site is built from GET /v1/catalog (published listings).
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
 import type { Db, Game, Listing, Studio, StudioRole, User } from '../db.ts';
 import { importListings, type ExportedPage, type Override } from '../listings-import.ts';
 import { changedFields, FIELD_LABEL, GRADES, isListingSlug, normalize, problems, type ListingFields } from '../listings.ts';
+import { getHosting, hostingCell } from './hosting.ts';
 import { html, type Html } from './html.ts';
 import { ago, head, pill, who } from './routes.ts';
 import { availabilityCells, availabilityLine, AVAILABILITY_HEADS } from './availability.ts';
@@ -52,13 +53,11 @@ export function listingPieces(h: ListingHelpers) {
     return changedFields(l.published, l.draft).length ? pill('run', 'Unpublished changes') : pill('ok', 'On the site');
   }
 
-  // Where the site plays the game from today (the published listing), for tables.
-  function playsFrom(l: ListingRow | null, g: Game | null): Html {
-    const f = l?.published ?? l?.draft;
-    if (!f) return html`<span class="muted small">—</span>`;
-    const cur = currentOf(g);
-    if (f.play_source === 'cdn' && cur) return html`${pill('brass', 'Vault CDN')} <span class="mono small">${cur.version}</span>`;
-    return f.play_url ? html`<span class="small">Web address</span> <span class="mono small muted">${hostOf(f.play_url)}</span>${f.embed ? '' : html` <span class="muted small">(new tab)</span>`}` : html`<span class="muted small">not set</span>`;
+  // The "Hosted by" column: how the site hosts the game today (its published listing, else the draft).
+  function hosting(l: ListingRow | null, g: Game | null): Html {
+    if (!l) return hostingCell(getHosting({}, h.deps.prodPublicUrl));
+    const f = l.published ?? l.draft;
+    return hostingCell(getHosting({ play_source: f.play_source, play_url: f.play_url, version: currentOf(g)?.version ?? null }, h.deps.prodPublicUrl));
   }
 
   // The "where it plays" card at the top of a game page, with the one-step move to (or back from) the Vault CDN.
@@ -131,7 +130,7 @@ export function listingPieces(h: ListingHelpers) {
       </div>
       <h2 style="margin-top:18px">Playing</h2>
       <div class="fields">
-        <div class="field full"><span class="lab">Plays from</span>
+        <div class="field full"><span class="lab">Hosted by</span>
           <label class="check"><input type="radio" name="play_source" value="url" ${f.play_source === 'url' ? 'checked' : ''} ${dis}> Its web address, shown in Vault’s player</label>
           <label class="check"><input type="radio" name="play_source" value="cdn" ${f.play_source === 'cdn' ? 'checked' : ''} ${cur ? dis : 'disabled'}> The Vault CDN: ${g ? html`<span class="mono">${s.slug}/${g.slug}</span>, ${cur ? html`currently <b class="mono">${cur.version}</b>` : 'nothing released yet'}` : 'no CDN game yet'}</label></div>
         ${txt('play_url', 'Web address', 'The page that shows only the game (what Vault’s player wraps). Also the fallback if the CDN game has no release.')}
@@ -177,7 +176,7 @@ export function listingPieces(h: ListingHelpers) {
         <button class="btn">Connect</button>${err}</form>` : ''}</div>`;
   }
 
-  return { canEdit, canPublish, state, playsFrom, playCard, editor, createListingCard, linkCard };
+  return { canEdit, canPublish, state, hosting, playCard, editor, createListingCard, linkCard };
 }
 
 export function registerListingPages(app: Hono, h: ListingHelpers) {
@@ -262,7 +261,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
       .map(({ l }) => {
         const e = featBy.get(l.slug);
         return html`<tr id="game-${l.slug}" class="${e ? 'is-feat' : ''}"><td class="proj"><a href="${link(l)}"><b>${l.draft.title || l.slug}</b></a><span>${l.slug}</span></td>
-          <td>${l.studio_name}</td><td>${P.state(l)}</td><td>${featCell(l, e)}</td><td>${P.playsFrom(l, gameOf(l))}</td>
+          <td>${l.studio_name}</td><td>${P.state(l)}</td><td>${featCell(l, e)}</td><td>${P.hosting(l, gameOf(l))}</td>
           ${availabilityCells(run, l.slug)}<td class="small nowrap">${ago(l.updated_at)}</td></tr>${e ? featRow(l, e) : ''}`;
       });
     const checked = run ? html` Availability from the latest daily check, ${ago(run.checked_at)}: ${run.fail_count} failing, ${run.warn_count} worth a look (hover a result for why).` : ' No availability checks yet.';
@@ -270,7 +269,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const actions = html`<a class="btn" href="https://github.com/${h.deps.adminRepository}/actions/workflows/check-games.yml" target="_blank" rel="noopener">Run a check ↗</a><a class="btn" href="/v1/catalog" target="_blank">Catalog JSON ↗</a>`;
     const body = html`${head('Site games', sub, actions)}
       ${queue.length ? html`<h2>Waiting for Vault (${queue.length})</h2><div class="grid">${queue}</div>` : html`<div class="card"><p class="muted">No site changes are waiting for review.</p></div>`}
-      <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th>Game</th><th>Studio</th><th>Site</th><th>Featured</th><th>Plays from</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
+      <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th>Game</th><th>Studio</th><th>Site</th><th>Featured</th><th>Hosted by</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
         <tbody>${rows.length ? rows : html`<tr><td colspan="${COLS}" class="muted">No games yet.</td></tr>`}</tbody></table></div>
       ${featuring ? '' : html`<p class="small muted">Only Vault release managers can change the featured games.</p>`}
       ${h.isVaultAdmin(u) ? html`<div class="card" style="margin-top:22px"><h2>Import from the Hugo site prototype</h2>
@@ -335,7 +334,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     return c.json({ ok: true });
   });
 
-  // Connect (or disconnect, with game: "") the CDN game a listing plays from.
+  // Connect (or disconnect, with game: "") the CDN game that hosts a listing on the Vault.
   app.post('/portal/api/s/:studio/listings/:slug/link', async (c) => {
     const u = h.apiUser(c);
     const { s, l } = apiListing(c, u);
@@ -393,7 +392,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     if (!to) fail(404, 'Choose a studio.');
     if (to.id === s.id) fail(400, `${l.draft.title || l.slug} already belongs to ${s.name}.`);
     if (l.game_id && (l.draft.play_source === 'cdn' || l.published?.play_source === 'cdn'))
-      fail(400, `It plays from ${s.name}’s Vault CDN game. Switch it back to its web address first.`);
+      fail(400, `It is hosted on ${s.name}’s Vault CDN game. Switch it back to its web address first.`);
     // "Made by" that just named the old studio follows the game; anything else (co-makers, a person) is kept.
     const rename = (f: ListingFields): ListingFields => (f.makers.length === 1 && f.makers[0] === s.name ? { ...f, makers: [to.name] } : f);
     db.moveListing(l.id, to.id, rename(l.draft), l.published ? rename(l.published) : null, h.actor(u));
@@ -414,6 +413,3 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
   });
 }
 
-function hostOf(url: string) {
-  try { return new URL(url).host; } catch { return url; }
-}

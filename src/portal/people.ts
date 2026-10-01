@@ -278,10 +278,9 @@ export function registerPeople(app: Hono, h: Helpers) {
       <td class="small">${s.website ? html`<a href="${s.website}" target="_blank" rel="noopener">${s.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}</a>` : html`<span class="muted">—</span>`}</td>
       <td class="small">${githubCell(s)}</td>
       <td class="r num"><a href="/s/${s.slug}">${s.listings}</a></td><td class="r num">${s.cdn_games}</td>
-      <td class="r num"><a href="/s/${s.slug}/members">${s.members}</a>${s.invited ? html` <span class="muted small">+${s.invited} invited</span>` : ''}</td>
-      <td>${sourceCell(s)}</td></tr>`);
+      <td class="r num"><a href="/s/${s.slug}/members">${s.members}</a>${s.invited ? html` <span class="muted small">+${s.invited} invited</span>` : ''}</td></tr>`);
     const body = html`${head('Studios', 'Every studio on Vault. Studios listed in studios.json get their name and GitHub organization from that file; the rest are managed here.')}
-      <div class="tbl-wrap"><table><thead><tr><th>Studio</th><th>Website</th><th>GitHub</th><th class="r">Site games</th><th class="r">CDN games</th><th class="r">Members</th><th>Created by</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Studio</th><th>Website</th><th>GitHub</th><th class="r">Published Games</th><th class="r">CDN games</th><th class="r">Members</th></tr></thead><tbody>${rows}</tbody></table></div>
       ${admin ? html`<div class="card" style="margin-top:18px"><h2>New studio</h2><form data-api="/portal/api/vault/studios" data-then="reload">
           ${studioFields(null, true)}
           <p style="margin-top:14px"><button class="btn pri">Create studio</button> ${errSlot}</p></form>
@@ -296,7 +295,7 @@ export function registerPeople(app: Hono, h: Helpers) {
     if (!s) return h.denied(c, 'That studio doesn’t exist.', 404);
     const admin = h.isVaultAdmin(u);
     const fromFile = s.source === 'file';
-    const body = html`${head(s.name, html`<span class="mono">${s.slug}</span> · ${s.listings} site games · ${s.cdn_games} CDN games · ${s.members} members${s.invited ? ` (+${s.invited} invited)` : ''}`,
+    const body = html`${head(s.name, html`<span class="mono">${s.slug}</span> · ${s.listings} published games · ${s.cdn_games} CDN games · ${s.members} members${s.invited ? ` (+${s.invited} invited)` : ''}`,
       html`<a class="btn" href="/s/${s.slug}">Games</a> <a class="btn" href="/s/${s.slug}/members">Members</a>`, html`<a href="/vault/studios">Studios</a> / ${s.name}`)}
       <div class="grid g-main"><div class="grid" style="align-content:start">
         ${admin ? html`<div class="card"><h2>Edit</h2>

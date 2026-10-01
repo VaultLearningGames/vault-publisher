@@ -294,6 +294,15 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
   wherever the studio is named as a game's maker, via `/v1/catalog`), applied at startup only to studios whose website
   has never been set. After that the website is changed in the portal (the studio's **Members** page, for studio
   admins and Vault admins, or **Vault → Studios**), and portal edits, including clearing it, always win over the file.
+- **Removing a studio:** a Vault admin opens **Vault → Studios → the studio** and confirms *Delete studio*, or runs
+  `node scripts/remove-studio.ts STUDIO-ID-OR-SLUG` against a copy of the database (it is a dry run without `--yes`,
+  and prints every row that would be removed). Only an empty studio can go: any CDN game or site listing, in any
+  state, refuses the removal with the counts (its members are removed with it; the removal is written to the audit
+  log). The delete is scoped to the studio's own primary key and changes nothing by the studio's GitHub owner id, so
+  a studio that shares an owner id with the publisher's organization removes without touching that organization's
+  publishing setup. A studio listed in `studios.json` comes back at the next startup unless its entry is removed from
+  the file, which is why the empty *Vault Learning Games* studio (the publisher's own organization) goes by removing
+  its `studios.json` entry and then deleting the row.
 - **Game availability:** `check-games.yml` runs daily at 11:23 UTC for both systems (or by hand for one, *Run
   workflow* → environment). It fetches every game in the portal's `/v1/catalog`, checks that its play address loads
   and, for games shown in the site's player, that it allows being framed by the site. It posts the run to that

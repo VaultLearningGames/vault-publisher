@@ -4,7 +4,7 @@
 // "invited", and the membership takes effect the first time they sign in with GitHub.
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
-import { studioWebsite, type Db, type Studio, type StudioRole, type StudioSource, type User, type VaultRole } from '../db.ts';
+import { studioWebsite, StudioNotEmptyError, type Db, type Studio, type StudioRole, type StudioSource, type User, type VaultRole } from '../db.ts';
 import { isSlug } from '../paths.ts';
 import { html, type Html } from './html.ts';
 import { ago, head, pill, ROLE_LABEL, VAULT_LABEL, who } from './routes.ts';
@@ -303,7 +303,11 @@ export function registerPeople(app: Hono, h: Helpers) {
           ${fromFile ? html`<p class="small">${pill('brass', 'studios.json')} This studio’s name and GitHub organization come from <span class="mono">studios.json</span> and are reset from it at every deploy; change them there. Its website can be changed here.</p>` : ''}
           <form data-api="/portal/api/vault/studios/${s.slug}" data-then="reload">
             ${studioFields(s, false, fromFile)}
-            <p style="margin-top:14px"><button class="btn pri">Save</button> ${errSlot}</p></form></div>`
+            <p style="margin-top:14px"><button class="btn pri">Save</button> ${errSlot}</p></form></div>
+          ${admin ? html`<div class="card"><h2>Delete</h2>
+            <p class="small">Only an empty studio can be deleted: its CDN games and site listings must be gone first. Its members go with it. Only the studio's own rows are removed, so nothing other studios or the publisher's repositories rely on changes.</p>
+            ${fromFile ? html`<p class="small">${pill('brass', 'studios.json')} This studio is listed in <span class="mono">studios.json</span>; remove that entry from the repository or it comes back at the next deploy.</p>` : ''}
+            <form data-api="/portal/api/vault/studios/${s.slug}/delete" data-then="/vault/studios" data-confirm="${s.members + s.invited ? `Delete ${s.name} and remove its ${s.members + s.invited} member(s)?` : `Delete ${s.name}?`}"><button class="btn">Delete studio</button> ${errSlot}</form></div>` : ''}</div>`
         : html`<div class="card"><table class="kv"><tbody><tr><th>Name</th><td>${s.name}</td></tr><tr><th>Website</th><td>${s.website || '—'}</td></tr><tr><th>GitHub</th><td>${githubCell(s)}</td></tr></tbody></table></div>`}
       </div><div class="grid" style="align-content:start">
         <div class="card small"><h2>About</h2><table class="kv"><tbody>
@@ -374,5 +378,22 @@ export function registerPeople(app: Hono, h: Helpers) {
     }
     if (Object.keys(changes).length) db.audit(h.actor(u), 'studio.update', s.slug, changes);
     return c.json({ ok: true });
+  });
+
+  // Remove an empty studio. Refused (409) while it still owns CDN games or site listings; its members go with it.
+  // The removal is scoped to the studio's own id, so a GitHub owner id it shares (for instance with the publisher's
+  // own organization) reaches no other studio's records.
+  app.post('/portal/api/vault/studios/:slug/delete', (c) => {
+    const u = h.apiUser(c);
+    if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can delete studios.');
+    const s = db.studioBySlug(c.req.param('slug'));
+    if (!s) fail(404, 'unknown studio');
+    try {
+      const r = db.removeStudio(s.id, { actor: h.actor(u) });
+      return c.json({ ok: true, studio: r.studio.slug, members_removed: r.memberships.length, warnings: r.warnings });
+    } catch (err) {
+      if (err instanceof StudioNotEmptyError) fail(409, err.message, { games: err.blockers.games, listings: err.blockers.listings });
+      throw err;
+    }
   });
 }

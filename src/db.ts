@@ -235,6 +235,34 @@ export interface Studio {
 
 export type StudioSource = 'file' | 'import' | 'portal';
 
+// What keeps a studio from being removed: its CDN games (with their builds, releases and requests) and its site
+// listings, in any state. Members are not a blocker: they go with the studio.
+export interface StudioRemovalBlockers { games: number; listings: number }
+export class StudioNotFoundError extends Error {
+  constructor(studioId: number) { super(`no studio with id ${studioId}`); }
+}
+export class StudioNotEmptyError extends Error {
+  readonly blockers: StudioRemovalBlockers;
+  constructor(blockers: StudioRemovalBlockers) {
+    const parts: string[] = [];
+    if (blockers.games) parts.push(`${blockers.games} CDN game${blockers.games === 1 ? '' : 's'}`);
+    if (blockers.listings) parts.push(`${blockers.listings} site listing${blockers.listings === 1 ? '' : 's'}`);
+    super(`the studio still has ${parts.join(' and ')}; remove those first`);
+    this.blockers = blockers;
+  }
+}
+// The studio, the rows that go with it and everything the caller needs to know it was safe.
+export interface RemoveStudioResult {
+  dryRun: boolean;
+  studio: Studio;
+  // Every membership row removed (dry run: that would be removed).
+  memberships: Membership[];
+  // Other studios carrying the same GitHub owner id. Their rows are never touched by a removal: the delete is
+  // scoped to the studio's own id, and this system keeps no other org-scoped records to revoke.
+  sharedWith: Studio[];
+  warnings: string[];
+}
+
 export interface StudioSummary extends Studio {
   cdn_games: number;
   listings: number;
@@ -429,6 +457,46 @@ export class Db {
     this.sqlite.prepare('UPDATE studios SET name = ?, github_owner = ?, github_owner_id = ? WHERE id = ?').run(s.name, s.github_owner, s.github_owner_id, id);
   }
 
+  // Remove a studio by its own primary key, never by GitHub owner id: a studio that shares its owner id with
+  // anything else (another studio, the organization the publisher's repositories belong to) loses only its own rows.
+  // Refused while the studio still owns CDN games or site listings; its members are removed with it. The audit row
+  // keeps what was removed. dryRun snapshots every row that would go without writing anything.
+  removeStudio(id: number, opts: { dryRun?: boolean; actor: string }): RemoveStudioResult {
+    const studio = this.studioById(id);
+    if (!studio) throw new StudioNotFoundError(id);
+    const sharedWith = this.sqlite
+      .prepare('SELECT * FROM studios WHERE github_owner_id = ? AND id <> ? ORDER BY id')
+      .all(studio.github_owner_id, id) as unknown as Studio[];
+    const warnings: string[] = [];
+    if (sharedWith.length)
+      warnings.push(`GitHub owner id ${studio.github_owner_id} is also registered to ${sharedWith.map((s) => s.name).join(', ')}; only this studio's own rows are removed.`);
+    if (studio.source === 'file')
+      warnings.push('This studio is listed in studios.json; it is created again at the next startup unless that entry is removed.');
+    this.sqlite.exec('BEGIN');
+    try {
+      const games = Number((this.sqlite.prepare('SELECT COUNT(*) AS n FROM games WHERE studio_id = ?').get(id) as { n: number }).n);
+      const listings = Number((this.sqlite.prepare('SELECT COUNT(*) AS n FROM listings WHERE studio_id = ?').get(id) as { n: number }).n);
+      if (games || listings) throw new StudioNotEmptyError({ games, listings });
+      const memberships = this.memberships(id);
+      if (opts.dryRun) {
+        this.sqlite.exec('ROLLBACK');
+        return { dryRun: true, studio, memberships, sharedWith, warnings };
+      }
+      // Builds, uploads, releases and release requests all hang off games, which the guard above ruled out.
+      for (const m of memberships) this.removeMembership(m.studio_id, m.github_login);
+      this.sqlite.prepare('DELETE FROM studios WHERE id = ?').run(id);
+      this.audit(opts.actor, 'studio.delete', studio.slug, {
+        name: studio.name, github: studio.github_owner || null, github_owner_id: studio.github_owner_id,
+        members_removed: memberships.length, shared_owner_id_with: sharedWith.map((s) => s.slug), warnings,
+      });
+      this.sqlite.exec('COMMIT');
+      return { dryRun: false, studio, memberships, sharedWith, warnings };
+    } catch (err) {
+      this.sqlite.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
   // Every studio with its counts, for Vault's Studios page. Members have signed in; invited people haven't yet.
   studioSummaries(): StudioSummary[] {
     return this.sqlite.prepare(`SELECT s.*,
@@ -460,7 +528,13 @@ export class Db {
   }
 
   studioByOwnerId(ownerId: string): Studio | undefined {
-    return this.sqlite.prepare('SELECT * FROM studios WHERE github_owner_id = ?').get(ownerId) as Studio | undefined;
+    // Deterministic if the unique owner id ever covers more than one studio: the oldest wins, and the ambiguity is
+    // logged, so a lookup can never depend on row order or silently resolve to the wrong studio.
+    const rows = this.sqlite
+      .prepare('SELECT * FROM studios WHERE github_owner_id = ? ORDER BY created_at, id')
+      .all(ownerId) as unknown as Studio[];
+    if (rows.length > 1) console.error(`studios: ${rows.length} studios share GitHub owner id ${ownerId}; resolving to ${rows[0].slug}`);
+    return rows[0];
   }
 
   studioBySlug(slug: string): Studio | undefined {

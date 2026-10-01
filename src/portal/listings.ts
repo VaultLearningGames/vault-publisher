@@ -11,6 +11,7 @@ import { changedFields, FIELD_LABEL, GRADES, isListingSlug, normalize, problems,
 import { html, type Html } from './html.ts';
 import { ago, head, pill, who } from './routes.ts';
 import { availabilityCells, availabilityLine, AVAILABILITY_HEADS } from './availability.ts';
+import { compareByTestingStatus, deriveTestingStatus } from './testingStatus.ts';
 import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '../featured.ts';
 import type { PortalDeps } from './routes.ts';
 import { imageField } from './listing-assets.ts';
@@ -246,20 +247,26 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
         </div></div></td></tr>`;
     };
 
-    // Availability: the latest check-games run's result for each game.
+    // Availability: the latest check-games run's result for each game (its Testing Status).
     const run = db.gameCheck();
-    // Featured games first, in home-page order; then the rest by page address.
+    // The previous default order: featured games first, in home-page order; then the rest by page address.
+    // On top of it, the table leads with failures: Failure rows first, then Needs Review, then Passing; within
+    // each status group the previous order is kept (each row's place in it is the tie-break, so it's stable).
     const bySlug = new Map(all.map((l) => [l.slug, l]));
     const titleOf = (slug: string) => { const l = bySlug.get(slug); return l ? (l.published ?? l.draft).title : undefined; };
     const first = sortFeatured(feat.games, titleOf).map((e) => bySlug.get(e.slug)).filter((l) => l !== undefined);
-    const rows = [...first, ...all.filter((l) => !featBy.has(l.slug))].map((l) => {
-      const e = featBy.get(l.slug);
-      return html`<tr id="game-${l.slug}" class="${e ? 'is-feat' : ''}"><td class="proj"><a href="${link(l)}"><b>${l.draft.title || l.slug}</b></a><span>${l.slug}</span></td>
-        <td>${l.studio_name}</td><td>${P.state(l)}</td><td>${featCell(l, e)}</td><td>${P.playsFrom(l, gameOf(l))}</td>
-        ${availabilityCells(run, l.slug)}<td class="small nowrap">${ago(l.updated_at)}</td></tr>${e ? featRow(l, e) : ''}`;
-    });
+    const levelOf = (l: ListingRow) => run?.games.find((g) => g.slug === l.slug)?.level;
+    const rows = [...first, ...all.filter((l) => !featBy.has(l.slug))]
+      .map((l, i) => ({ l, i, status: deriveTestingStatus(levelOf(l)) }))
+      .sort((a, b) => compareByTestingStatus(a.status, b.status) || a.i - b.i)
+      .map(({ l }) => {
+        const e = featBy.get(l.slug);
+        return html`<tr id="game-${l.slug}" class="${e ? 'is-feat' : ''}"><td class="proj"><a href="${link(l)}"><b>${l.draft.title || l.slug}</b></a><span>${l.slug}</span></td>
+          <td>${l.studio_name}</td><td>${P.state(l)}</td><td>${featCell(l, e)}</td><td>${P.playsFrom(l, gameOf(l))}</td>
+          ${availabilityCells(run, l.slug)}<td class="small nowrap">${ago(l.updated_at)}</td></tr>${e ? featRow(l, e) : ''}`;
+      });
     const checked = run ? html` Availability from the latest daily check, ${ago(run.checked_at)}: ${run.fail_count} failing, ${run.warn_count} worth a look (hover a result for why).` : ' No availability checks yet.';
-    const sub = html`${count((l) => !!l.published)} of ${all.length} games are on the site; ${count(onCdn)} play from the Vault CDN. ${feat.games.length} of at most ${MAX_FEATURED} are featured on the home page, in ascending sequence (ties by title); they come first here, in that order.${checked} The site is built from /v1/catalog.`;
+    const sub = html`${count((l) => !!l.published)} of ${all.length} games are on the site; ${count(onCdn)} play from the Vault CDN. ${feat.games.length} of at most ${MAX_FEATURED} are featured on the home page, in ascending sequence (ties by title). Rows are in Testing Status order — Failure first, then Needs Review, then Passing — and within each group, featured games keep that order, then the rest by page address.${checked} The site is built from /v1/catalog.`;
     const actions = html`<a class="btn" href="https://github.com/${h.deps.adminRepository}/actions/workflows/check-games.yml" target="_blank" rel="noopener">Run a check ↗</a><a class="btn" href="/v1/catalog" target="_blank">Catalog JSON ↗</a>`;
     const body = html`${head('Site games', sub, actions)}
       ${queue.length ? html`<h2>Waiting for Vault (${queue.length})</h2><div class="grid">${queue}</div>` : html`<div class="card"><p class="muted">No site changes are waiting for review.</p></div>`}

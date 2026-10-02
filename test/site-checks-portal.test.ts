@@ -116,6 +116,40 @@ describe('POST /v1/admin/site-checks', () => {
   });
 });
 
+describe('GET /v1/site-checks/badge/:name (the README dashboard)', () => {
+  const badge = async (name: string) => { const r = await h.app.request(`/v1/site-checks/badge/${name}`); return { status: r.status, cache: r.headers.get('cache-control'), json: (await r.json()) as any }; };
+
+  test('public, cacheable, and grey before any run', async () => {
+    const b = await badge('links');
+    assert.equal(b.status, 200);
+    assert.equal(b.cache, 'public, max-age=300');
+    assert.deepEqual(b.json, { schemaVersion: 1, label: 'broken links', message: 'no runs yet', color: 'lightgrey', cacheSeconds: 300 });
+    assert.equal((await badge('all')).json.message, 'no runs yet');
+    assert.equal((await badge('when')).json.message, 'never');
+    assert.equal((await badge('typos')).status, 404);
+  });
+
+  test('each check, the run as a whole and when it ran, from the latest run', async () => {
+    await postRun([finding(), finding({ level: 'warn', code: 'link.unverified', target: 'https://x.example.org/' }), finding({ check: 'spelling', level: 'warn', code: 'spelling.unknown', target: 'widsom' })]);
+    assert.deepEqual([(await badge('links')).json.message, (await badge('links')).json.color], ['1 failing · 1 to look at', 'red']);
+    assert.deepEqual([(await badge('spelling')).json.message, (await badge('spelling')).json.color], ['1 to look at', 'yellow']);
+    assert.equal((await badge('all')).json.message, '1 failing · 2 to look at');
+    assert.match((await badge('when')).json.message, /^\d{4}-\d\d-\d\d \d\d:\d\d UTC$/);
+    assert.equal((await badge('games')).json.message, 'no runs yet');   // no run has included it
+    // The badges say how many, never what.
+    assert.doesNotMatch(JSON.stringify((await badge('links')).json), /gone\.example/);
+  });
+
+  test('a later run of one check updates that check and leaves the others as they were', async () => {
+    await postRun([finding(), finding({ check: 'spelling', level: 'warn', code: 'spelling.unknown', target: 'widsom' })]);
+    const linksOnly = { ...posted([]), checks: ['links'], summaries: [{ check: 'links', status: 'done', note: '', checked: 40, warn: 0, fail: 0, ms: 1 }] };
+    assert.equal((await post('checker', linksOnly)).status, 200);
+    assert.deepEqual([(await badge('links')).json.message, (await badge('links')).json.color], ['passing', 'brightgreen']);
+    assert.equal((await badge('spelling')).json.message, '1 to look at');
+    assert.equal((await badge('all')).json.message, 'passing');
+  });
+});
+
 describe('the portal pages', () => {
   test('staff only', async () => {
     const id = await postRun();

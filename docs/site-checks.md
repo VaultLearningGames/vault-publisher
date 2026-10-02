@@ -152,6 +152,15 @@ run's address. A full run is about 300 KB, well inside the 4 MB limit on request
 The job fails when `check-site.ts` exits non-zero (see `fail_on`), after the summary, the post to the portal and the
 issue are done, so GitHub notifies the people watching the repository. A post the portal refuses fails the job too.
 
+## The dashboard
+
+The README opens with a table of badges, one column per system: the latest run, when it ran, and each of the six
+checks. They are [shields.io endpoint badges](https://shields.io/badges/endpoint-badge) reading
+`GET PORTAL/v1/site-checks/badge/NAME` (`all`, `when`, or a check's name), which the portal answers from the latest
+run it was sent. The endpoint is public and gives counts only ("3 failing · 12 to look at", "passing", "no runs
+yet"); a check's badge comes from the most recent run that included it, so a run of one check by hand doesn't blank
+the others. "Last run" turns orange when nothing has reported for two days.
+
 ## Accepting a word
 
 Spelling warns about words the dictionary doesn't know. Game titles, studio names and the makers named in the catalog

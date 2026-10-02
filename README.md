@@ -14,6 +14,29 @@ The portal publishes web game builds to Vault Learning Games:
 
 Studios manage games, members and release requests at **https://portal.vaultlearninggames.org**.
 
+## Site checks dashboard
+
+[![Check site](https://github.com/VaultLearningGames/vault-publisher/actions/workflows/check-site.yml/badge.svg)](https://github.com/VaultLearningGames/vault-publisher/actions/workflows/check-site.yml)
+
+How the two websites did in their latest daily [site checks](#site-checks). Red is failing (visitors hit it), yellow
+is worth a look, grey means no run has reported yet. Each badge opens that system's **Vault → Site checks** page,
+which lists every finding; the badge above opens the workflow's runs, where a run can be started by hand.
+
+| | Staging | Production |
+| --- | --- | --- |
+| Site | [vaultlearninggames-staging.org](https://vaultlearninggames-staging.org) | [vaultlearninggames.org](https://vaultlearninggames.org) |
+| Latest run | [![Latest run, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fall)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Latest run, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fall)](https://portal.vaultlearninggames.org/vault/site-checks) |
+| When | [![When, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fwhen)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![When, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fwhen)](https://portal.vaultlearninggames.org/vault/site-checks) |
+| Games load | [![Games load, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fgames)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Games load, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fgames)](https://portal.vaultlearninggames.org/vault/site-checks) |
+| Missing assets | [![Missing assets, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fassets)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Missing assets, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fassets)](https://portal.vaultlearninggames.org/vault/site-checks) |
+| Broken links | [![Broken links, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Flinks)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Broken links, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Flinks)](https://portal.vaultlearninggames.org/vault/site-checks) |
+| Spelling | [![Spelling, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fspelling)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Spelling, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fspelling)](https://portal.vaultlearninggames.org/vault/site-checks) |
+| Large files and slow loading | [![Large files and slow loading, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fperformance)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Large files and slow loading, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fperformance)](https://portal.vaultlearninggames.org/vault/site-checks) |
+| Responsive design | [![Responsive design, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fresponsive)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Responsive design, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fresponsive)](https://portal.vaultlearninggames.org/vault/site-checks) |
+
+Badges refresh within about ten minutes of a run. A portal that doesn't have the site checks yet (production, until
+this version reaches the `production` branch) shows its badges as not found.
+
 ## Architecture
 
 | | |
@@ -68,6 +91,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `GET /v1/admin/listings` · `POST /v1/admin/listings/{import,migrate-images,move,update}` | [Admin tasks](#admin-tasks): the Vault-admin listing operations, for workflows |
 | | `GET /v1/releases/:studio/:game[/check]` | Read-only: a game's releases, or pre-flight check of a release run |
 | | `GET /v1/catalog` | Public: site listings, studios, featured games |
+| | `GET /v1/site-checks/badge/:name` | Public: the [dashboard](#site-checks-dashboard)'s badges (`all`, `when`, or a check's name) from the latest site checks run, as shields.io endpoint JSON; counts only |
 | Google ID token | `POST /v1/tasks/cleanup` | Nightly: expire stale previews, then check URL monitors for up to 100 s (Cloud Scheduler) |
 | | `POST /v1/tasks/monitors` | Check every URL monitor (up to 12 min) |
 | Public (site) | `POST /v1/forms/:name` | Website forms → Google Sheets |

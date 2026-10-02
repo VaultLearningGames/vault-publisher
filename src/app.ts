@@ -8,7 +8,7 @@ import { copyRelease, makeLive, ReleaseLayoutError, releasePrefix } from './rele
 import { buildCatalog } from './catalog.ts';
 import type { PreviewSite } from './config.ts';
 import { parseRun } from './game-checks.ts';
-import { parseRun as parseSiteRun } from './site-checks.ts';
+import { checkBadge, CHECKS, parseRun as parseSiteRun, runBadge, whenBadge, type CheckName, type CheckSummary, type SiteCheckRun } from './site-checks.ts';
 import { registerPortal, type PortalConfig } from './portal/routes.ts';
 import type { SitePreviewer } from './portal/site-preview.ts';
 import { registerForms, type FormsConfig } from './forms.ts';
@@ -462,6 +462,35 @@ export function createApp(deps: AppDeps) {
     const runId = db.addSiteCheck(run, by);
     db.audit(by, 'site_checks.post', run.site, { run: runId, ...run.counts, source: run.source });
     return c.json({ id: runId, counts: run.counts, url: `${deps.portal.baseUrl.replace(/\/+$/, '')}/vault/site-checks/${runId}` });
+  });
+
+  // The README's dashboard: one badge per check, one for the latest run and one for when it ran, as shields.io
+  // endpoint JSON (public; counts only). A check's badge comes from the most recent run that included it, so a
+  // run of one check by hand doesn't blank the others. Worked out once per run, not once per badge.
+  let badges: { id: number; latest: SiteCheckRun; by: Map<CheckName, CheckSummary> } | null = null;
+  function badgeState() {
+    const rows = db.siteChecks(15);
+    if (!rows.length) return null;
+    if (badges?.id === rows[0].id) return badges;
+    const by = new Map<CheckName, CheckSummary>();
+    let latest: SiteCheckRun | undefined;
+    for (const row of rows) {
+      if (latest && by.size === CHECKS.length) break;
+      const run = db.siteCheck(row.id)!.run;
+      latest ??= run;
+      for (const s of run.summaries) if (!by.has(s.check)) by.set(s.check, s);
+    }
+    return (badges = { id: rows[0].id, latest: latest!, by });
+  }
+  app.get('/v1/site-checks/badge/:name', (c) => {
+    const name = c.req.param('name');
+    const state = badgeState();
+    const badge = name === 'all' ? runBadge(state?.latest) : name === 'when' ? whenBadge(state?.latest)
+      : CHECKS.includes(name as CheckName) ? checkBadge(name as CheckName, state?.by.get(name as CheckName)) : null;
+    if (!badge) fail(404, `unknown badge ${name}; the badges are all, when, ${CHECKS.join(', ')}`);
+    c.header('Access-Control-Allow-Origin', '*');
+    c.header('Cache-Control', 'public, max-age=300');
+    return c.json(badge);
   });
 
   // Delete a preview, e.g. from a workflow triggered by branch deletion.

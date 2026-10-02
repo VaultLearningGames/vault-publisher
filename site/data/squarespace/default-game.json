@@ -1,0 +1,276 @@
+{
+ "_note": "Layouts for a game page whose game has no entry in the temporary games.json (e.g. a game published after the Squarespace snapshot): Aquation's (standard) and Wake's (hero) Squarespace layouts, with images and text taken from the catalog.",
+ "standard": {
+  "sections": [
+   {
+    "theme": "white",
+    "height": "small",
+    "custom": 1,
+    "valign": "middle",
+    "rows": {
+     "m": 14,
+     "d": 17
+    },
+    "overlay": 0.3,
+    "blocks": [
+     {
+      "aream": "3/2/9/10",
+      "aread": "5/2/14/13",
+      "zm": "0",
+      "zd": "0",
+      "jm": "flex-start",
+      "jd": "flex-start",
+      "am": "flex-start",
+      "ad": "flex-start",
+      "role": "text"
+     },
+     {
+      "aream": "9/4/11/8",
+      "aread": "15/2/17/7",
+      "zm": "2",
+      "zd": "2",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "role": "button",
+      "style": "primary",
+      "size": "medium",
+      "align": "center"
+     },
+     {
+      "aream": "12/4/15/8",
+      "aread": "2/14/18/26",
+      "zm": "3",
+      "zd": "3",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "stickym": true,
+      "sticky": true,
+      "role": "cover",
+      "fit": "contain",
+      "ratio": "1055/660"
+     }
+    ]
+   },
+   {
+    "theme": "white",
+    "height": "medium",
+    "custom": 10,
+    "valign": "middle",
+    "rows": {
+     "m": 16,
+     "d": 13
+    },
+    "overlay": 0.15,
+    "blocks": [
+     {
+      "aream": "1/2/9/10",
+      "aread": "2/16/14/24",
+      "zm": "1",
+      "zd": "1",
+      "jm": "flex-start",
+      "jd": "flex-start",
+      "am": "flex-start",
+      "ad": "flex-start",
+      "role": "accordion"
+     },
+     {
+      "aream": "9/2/13/6",
+      "aread": "1/2/7/8",
+      "zm": "2",
+      "zd": "2",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "role": "shot1",
+      "fit": "contain",
+      "radius": "4px 4px 4px 4px",
+      "ratio": "1056/660"
+     },
+     {
+      "aream": "9/6/13/10",
+      "aread": "7/2/13/8",
+      "zm": "3",
+      "zd": "3",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "role": "shot2",
+      "fit": "contain",
+      "radius": "4px 4px 4px 4px",
+      "ratio": "1056/660"
+     },
+     {
+      "aream": "13/6/17/10",
+      "aread": "7/8/13/14",
+      "zm": "4",
+      "zd": "4",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "role": "shot3",
+      "fit": "contain",
+      "radius": "4px 4px 4px 4px",
+      "ratio": "1056/660"
+     },
+     {
+      "aream": "13/2/17/6",
+      "aread": "1/8/7/14",
+      "zm": "3",
+      "zd": "3",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "role": "shot4",
+      "fit": "contain",
+      "radius": "4px 4px 4px 4px",
+      "ratio": "1056/660"
+     }
+    ]
+   }
+  ]
+ },
+ "hero": {
+  "sections": [
+   {
+    "theme": "black-bold",
+    "height": "small",
+    "custom": 1,
+    "valign": "middle",
+    "rows": {
+     "m": 17,
+     "d": 13
+    },
+    "overlay": 0.3,
+    "blocks": [
+     {
+      "aream": "6/2/14/10",
+      "aread": "8/2/11/16",
+      "zm": "0",
+      "zd": "0",
+      "jm": "flex-start",
+      "jd": "flex-start",
+      "am": "flex-start",
+      "ad": "flex-start",
+      "role": "text"
+     },
+     {
+      "aream": "14/2/16/6",
+      "aread": "11/2/13/8",
+      "zm": "2",
+      "zd": "2",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "role": "button",
+      "style": "secondary",
+      "size": "large",
+      "align": "center"
+     }
+    ],
+    "bg": {
+     "catalog": "__hero__"
+    }
+   },
+   {
+    "theme": "white",
+    "height": "medium",
+    "custom": 10,
+    "valign": "middle",
+    "rows": {
+     "m": 23,
+     "d": 12
+    },
+    "overlay": 0.15,
+    "blocks": [
+     {
+      "aream": "1/2/9/10",
+      "aread": "3/16/13/24",
+      "zm": "1",
+      "zd": "1",
+      "jm": "flex-start",
+      "jd": "flex-start",
+      "am": "flex-start",
+      "ad": "flex-start",
+      "role": "accordion"
+     },
+     {
+      "aream": "10/2/16/6",
+      "aread": "1/2/7/8",
+      "zm": "2",
+      "zd": "2",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "role": "shot1",
+      "fit": "cover",
+      "radius": "4px 4px 4px 4px",
+      "ratio": "2116/1392"
+     },
+     {
+      "aream": "10/6/16/10",
+      "aread": "1/8/7/14",
+      "zm": "3",
+      "zd": "3",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "role": "shot2",
+      "fit": "cover",
+      "radius": "4px 4px 4px 4px",
+      "ratio": "2494/1580"
+     },
+     {
+      "aream": "16/2/22/6",
+      "aread": "7/2/13/8",
+      "zm": "3",
+      "zd": "3",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "role": "shot3",
+      "fit": "cover",
+      "radius": "4px 4px 4px 4px",
+      "ratio": "2508/1546"
+     },
+     {
+      "aream": "16/6/22/10",
+      "aread": "7/8/13/14",
+      "zm": "4",
+      "zd": "4",
+      "jm": "center",
+      "jd": "center",
+      "am": "center",
+      "ad": "center",
+      "role": "shot4",
+      "fit": "cover",
+      "radius": "4px 4px 4px 4px",
+      "ratio": "2500/1604"
+     },
+     {
+      "aream": "22/2/24/10",
+      "aread": "1/16/3/24",
+      "zm": "5",
+      "zd": "5",
+      "jm": "flex-start",
+      "jd": "flex-start",
+      "am": "flex-start",
+      "ad": "flex-start",
+      "role": "heading"
+     }
+    ]
+   }
+  ]
+ }
+}

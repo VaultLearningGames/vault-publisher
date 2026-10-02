@@ -1,0 +1,47 @@
+# Next Generation Science Standards (NGSS)
+# Format: code: full_description
+
+# Physical Science
+physical_science:
+  "MS-PS1-1": "Develop models to describe the atomic composition of simple molecules and extended structures."
+  "MS-PS1-4": "Develop a model that predicts and describes changes in particle motion, temperature, and state of a pure substance when thermal energy is added or removed."
+  "MS-PS3-1": "Construct and interpret graphical displays of data to describe the relationships of kinetic energy to the mass of an object and to the speed of an object."
+  "MS-PS3-3": "Apply scientific principles to design, construct, and test a device that either minimizes or maximizes thermal energy transfer."
+  
+  "HS-PS1-1": "Use the periodic table as a model to predict the relative properties of elements based on the patterns of electrons in the outermost energy level of atoms."
+  "HS-PS1-4": "Develop a model to illustrate that the release or absorption of energy from a chemical reaction system depends upon the changes in total bond energy."
+  "HS-PS3-1": "Create a computational model to calculate the change in the energy of one component in a system when the change in energy of the other component(s) and energy flows in and out of the system are known."
+
+# Life Science
+life_science:
+  "MS-LS1-1": "Conduct an investigation to provide evidence that living things are made of cells; either one cell or many different numbers and types of cells."
+  "MS-LS1-2": "Develop and use a model to describe the function of a cell as a whole and ways parts of cells contribute to the function."
+  "MS-LS1-3": "Use argument supported by evidence for how the body is a system of interacting subsystems composed of groups of cells."
+  "MS-LS1-4": "Use argument based on empirical evidence and scientific reasoning to support an explanation for how characteristic animal behaviors and specialized plant structures affect the probability of successful reproduction of animals and plants respectively."
+  
+  "HS-LS1-1": "Construct an explanation based on evidence for how the structure of DNA determines the structure of proteins which carry out the essential functions of life through systems of specialized cells."
+  "HS-LS1-2": "Develop and use a model to illustrate the hierarchical organization of interacting systems that provide specific functions within multicellular organisms."
+
+# Earth Science
+earth_science:
+  "MS-ESS1-1": "Develop and use a model of the Earth-sun-moon system to describe the cyclic patterns of lunar phases, eclipses of the sun and moon, and seasons."
+  "MS-ESS1-2": "Develop and use a model to describe the role of gravity in the motions within galaxies and the solar system."
+  "MS-ESS1-3": "Analyze and interpret data to determine scale properties of objects in the solar system."
+  
+  "MS-ESS2-1": "Develop a model to describe the cycling of Earth's materials and the flow of energy that drives this process."
+  "MS-ESS2-4": "Develop a model to describe the cycling of water through Earth's systems driven by energy from the sun and the force of gravity."
+  
+  "HS-ESS1-1": "Develop a model based on evidence to illustrate the life span of the sun and the role of nuclear fusion in the sun's core to release energy that eventually reaches Earth in the form of radiation."
+  "HS-ESS1-2": "Construct an explanation of the Big Bang theory based on astronomical evidence of light spectra, motion of distant galaxies, and composition of matter in the universe."
+
+# Engineering & Science Practices
+engineering_practices:
+  "MS-ETS1-1": "Define the criteria and constraints of a design problem with sufficient precision to ensure a successful solution, taking into account relevant scientific principles and potential impacts on people and the natural environment that may limit possible solutions."
+  "MS-ETS1-2": "Evaluate competing design solutions using a systematic process to determine how well they meet the criteria and constraints of the problem."
+  "MS-ETS1-3": "Analyze data from tests to determine similarities and differences among several design solutions to identify the best characteristics of each that can be combined into a new solution to better meet the criteria for success."
+  
+  "HS-ETS1-1": "Analyze a major global challenge to specify qualitative and quantitative criteria and constraints for solutions that account for societal needs and wants."
+  "HS-ETS1-2": "Design a solution to a complex real-world problem by breaking it down into smaller, more manageable problems that can be solved through engineering."
+
+# Additional standards can be added here...
+

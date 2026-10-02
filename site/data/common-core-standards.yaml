@@ -1,0 +1,44 @@
+# Common Core Standards
+# Format: code: full_description
+
+# Math Standards
+math:
+  # Grade 4 - Operations & Algebraic Thinking
+  "4.OA.A.2": "Multiply or divide to solve word problems involving multiplicative comparison, e.g., by using drawings and equations with a symbol for the unknown number to represent the problem, distinguishing multiplicative comparison from additive comparison."
+  "4.OA.C.5": "Generate a number or shape pattern that follows a given rule. Identify apparent features of the pattern that were not explicit in the rule itself. For example, given the rule 'Add 3' and the starting number 1, generate terms in the resulting sequence and observe that the terms appear to alternate between odd and even numbers. Explain informally why the numbers will continue to alternate in this way."
+  "4.OA.A.3": "Solve multistep word problems posed with whole numbers and having whole-number answers using the four operations, including problems in which remainders must be interpreted. Represent these problems using equations with a letter standing for the unknown quantity. Assess the reasonableness of answers using mental computation and estimation strategies including rounding."
+  
+  # Grade 5 - Operations & Algebraic Thinking
+  "5.OA.A.2": "Write simple expressions that record calculations with numbers, and interpret numerical expressions without evaluating them."
+  "5.OA.B.3": "Generate two numerical patterns using two given rules. Identify apparent relationships between corresponding terms. Form ordered pairs consisting of corresponding terms from the two patterns, and graph the ordered pairs on a coordinate plane. For example, given the rule 'Add 3' and the starting number 0, and given the rule 'Add 6' and the starting number 0, generate terms in the resulting sequences, and observe that the terms in one sequence are twice the corresponding terms in the other sequence. Explain informally why this is so."
+  "5.G.A.1": "Use a pair of perpendicular number lines, called axes, to defne a coordinate system, with the intersection of the lines (the origin) arranged to coincide with the 0 on each line and a given point in the plane located by using an ordered pair of numbers, called its coordinates. Understand that the frst number indicates how far to travel from the origin in the direction of one axis, and the second number indicates how far to travel in the direction of the second axis, with the convention that the names of the two axes and the coordinates correspond (e.g., x-axis and x-coordinate, y-axis and y-coordinate)."
+  "5.OA.A.1": "Use parentheses, brackets, or braces in numerical expressions, and evaluate expressions with these symbols."
+  "5.G.A.2": "Represent real world and mathematical problems by graphing points in the frst quadrant of the coordinate plane, and interpret coordinate values of points in the context of the situation."
+  "5.GB.4": "Classify two-dimensional fgures in a hierarchy based on properties."
+  
+  # Grade 6
+  "6.EE.A.4": "Identify when two expressions are equivalent (i.e., when the two expressions name the same number regardless of which value is substituted into them). For example, the expressions y + y + y and 3y are equivalent because they name the same number regardless of which number y stands for..."
+  "6.EE.B.6": "Use variables to represent numbers and write expressions when solving a real-world or mathematical problem; understand that a variable can represent an unknown number, or, depending on the purpose at hand, any number in a specified set."
+  "6.EE.C.9": "Use variables to represent two quantities in a real-world problem that change in relationship to one another; write an equation to express one quantity, thought of as the dependent variable, in terms of the other quantity, thought of as the independent variable. Analyze the relationship between the dependent and independent variables using graphs and tables, and relate these to the equation. For example, in a problem involving motion at constant speed, list and graph ordered pairs of distances and times, and write the equation d = 65t to represent the relationship between distance and time."
+  "6.NS.C.6.C": "Find and position integers and other rational numbers on a horizontal or vertical number line diagram; fnd and position pairs of integers and other rational numbers on a coordinate plane."
+  "6.SP.B.4": "Display numerical data in plots on a number line, including dot plots, histograms, and box plots."
+  "6.SP.B.5": "Summarize numerical data sets in relation to their context, such as by: (a) Reporting the number of observations. (b) Describing the nature of the attribute under investigation, including how it was measured and its units of measurement."
+  # Additional standards can be added here...
+
+# ELA Standards
+ela:
+  # Grade 4 - Reading
+  "CCSS.ELA-LITERACY.RL.4.1": "Refer to details and examples in a text when explaining what the text says explicitly and when drawing inferences from the text."
+  "CCSS.ELA-LITERACY.RL.4.2": "Determine a theme of a story, drama, or poem from details in the text; summarize the text."
+  "CCSS.ELA-LITERACY.RL.4.3": "Describe in depth a character, setting, or event in a story or drama, drawing on specific details in the text (e.g., a character's thoughts, words, or actions)."
+  
+  # Grade 5 - Reading
+  "CCSS.ELA-LITERACY.RL.5.1": "Quote accurately from a text when explaining what the text says explicitly and when drawing inferences from the text."
+  "CCSS.ELA-LITERACY.RL.5.2": "Determine a theme of a story, drama, or poem from details in the text, including how characters in a story or drama respond to challenges or how the speaker in a poem reflects upon a topic; summarize the text."
+  
+  # Writing Standards
+  "CCSS.ELA-LITERACY.W.4.2": "Write informative/explanatory texts to examine a topic and convey ideas and information clearly."
+  "CCSS.ELA-LITERACY.W.5.1": "Write opinion pieces on topics or texts, supporting a point of view with reasons and information."
+  
+  # Additional standards can be added here...
+

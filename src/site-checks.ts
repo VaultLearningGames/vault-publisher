@@ -690,6 +690,37 @@ export function fingerprint(findings: Finding[]): string {
   return `${findings.length}-${h.toString(16).padStart(8, '0')}`;
 }
 
+// ---------- the README's dashboard ----------
+// Badges for the dashboard at the top of the README, in the shape shields.io's "endpoint" badge reads
+// (https://shields.io/badges/endpoint-badge). The portal serves them from the latest run it was sent, publicly:
+// they say how many problems each check found, never what they are.
+export interface Badge { schemaVersion: 1; label: string; message: string; color: string; cacheSeconds: number }
+const badge = (label: string, message: string, color: string): Badge => ({ schemaVersion: 1, label, message, color, cacheSeconds: 300 });
+const tally = (fail: number, warn: number): [string, string] =>
+  fail ? [`${fail} failing${warn ? ` · ${warn} to look at` : ''}`, 'red'] : warn ? [`${warn} to look at`, 'yellow'] : ['passing', 'brightgreen'];
+
+// One check, from the most recent run that included it.
+export function checkBadge(check: CheckName, summary: CheckSummary | undefined): Badge {
+  const label = CHECK_LABEL[check].toLowerCase();
+  if (!summary) return badge(label, 'no runs yet', 'lightgrey');
+  if (summary.status !== 'done') return badge(label, summary.status === 'error' ? 'could not run' : 'did not run', 'lightgrey');
+  return badge(label, ...tally(summary.fail, summary.warn));
+}
+
+// The latest run as a whole.
+export function runBadge(run: SiteCheckRun | undefined): Badge {
+  if (!run) return badge('site checks', 'no runs yet', 'lightgrey');
+  if (run.status !== 'done') return badge('site checks', 'did not finish', 'orange');
+  return badge('site checks', ...tally(run.counts.fail, run.counts.warn));
+}
+
+// When the latest run finished. A daily check that hasn't reported for two days is itself a problem.
+export function whenBadge(run: SiteCheckRun | undefined, now = Date.now()): Badge {
+  if (!run) return badge('last run', 'never', 'lightgrey');
+  const at = Date.parse(run.finished_at);
+  return badge('last run', `${run.finished_at.slice(0, 16).replace('T', ' ')} UTC`, now - at > 2 * 24 * 60 * 60 * 1000 ? 'orange' : 'blue');
+}
+
 // GitHub workflow commands: an ::error for each failure and a ::warning for each warning, up to GitHub's ten of
 // each per step, with one line for the rest.
 export function annotations(run: SiteCheckRun, max = 10): string[] {

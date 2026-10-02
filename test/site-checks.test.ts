@@ -1,9 +1,9 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  allowList, annotations, assetFindings, CHECKS, finishRun, fingerprint, gameFindings, groupFindings, hrefProblem, issueMarkdown,
+  allowList, annotations, assetFindings, checkBadge, CHECKS, runBadge, whenBadge, finishRun, fingerprint, gameFindings, groupFindings, hrefProblem, issueMarkdown,
   LIMITS, linkFinding, MAX_FINDINGS, MAX_PAGES_LISTED, parseRun, parseStart, performanceFindings, responsiveFindings, runFails, runMarkdown, spellingFindings, wordsOf,
-  type Dictionary, type GameLoad, type LinkProbe, type LinkSeen, type PageLoad, type RawFinding, type ResourceSeen, type SiteCheckRun, type ViewSeen,
+  type CheckSummary, type Dictionary, type GameLoad, type LinkProbe, type LinkSeen, type PageLoad, type RawFinding, type ResourceSeen, type SiteCheckRun, type ViewSeen,
 } from '../src/site-checks.ts';
 
 const SITE = 'https://vaultlearninggames.org';
@@ -384,6 +384,31 @@ describe('a run', () => {
     const b = groupFindings([raw({ target: 'https://other.example/', message: 'reworded' }), raw()]);
     assert.equal(fingerprint(a), fingerprint(b));
     assert.notEqual(fingerprint(a), fingerprint(a.slice(0, 1)));
+  });
+});
+
+describe('the dashboard’s badges', () => {
+  const summary = (s: Partial<CheckSummary> = {}): CheckSummary => ({ check: 'links', status: 'done', note: '', checked: 10, warn: 0, fail: 0, ms: 1, ...s });
+  const base = { site: SITE, checks: [...CHECKS], started_at: '2026-10-02T12:00:00.000Z', source: null, started_by: 'cli', pages: 3, games: 1 };
+
+  test('a check: passing, to look at, failing, and not run', () => {
+    assert.deepEqual(checkBadge('links', summary()), { schemaVersion: 1, label: 'broken links', message: 'passing', color: 'brightgreen', cacheSeconds: 300 });
+    assert.deepEqual([checkBadge('links', summary({ warn: 3 })).message, checkBadge('links', summary({ warn: 3 })).color], ['3 to look at', 'yellow']);
+    assert.deepEqual([checkBadge('links', summary({ fail: 2, warn: 3 })).message, checkBadge('links', summary({ fail: 2 })).message], ['2 failing · 3 to look at', '2 failing']);
+    assert.equal(checkBadge('links', summary({ fail: 2 })).color, 'red');
+    assert.deepEqual([checkBadge('games', undefined).message, checkBadge('games', summary({ status: 'error' })).message, checkBadge('games', summary({ status: 'skipped' })).message], ['no runs yet', 'could not run', 'did not run']);
+    assert.equal(checkBadge('performance', undefined).label, 'large files and slow loading');
+  });
+
+  test('the run as a whole, and when it ran', () => {
+    const run = finishRun(base, [{ check: 'links', status: 'done', checked: 1, ms: 1, findings: [{ check: 'links', level: 'fail', code: 'link.broken', page: '/', target: 'x', message: 'm' }] }]);
+    assert.deepEqual([runBadge(run).message, runBadge(run).color], ['1 failing', 'red']);
+    assert.deepEqual([runBadge(undefined).message, runBadge({ ...run, status: 'error' }).message], ['no runs yet', 'did not finish']);
+    const at = Date.parse('2026-10-02T12:30:00.000Z');
+    const when = whenBadge({ ...run, finished_at: '2026-10-02T12:07:00.000Z' }, at);
+    assert.deepEqual([when.label, when.message, when.color], ['last run', '2026-10-02 12:07 UTC', 'blue']);
+    assert.equal(whenBadge({ ...run, finished_at: '2026-09-29T12:07:00.000Z' }, at).color, 'orange');   // nothing for two days
+    assert.equal(whenBadge(undefined).message, 'never');
   });
 });
 

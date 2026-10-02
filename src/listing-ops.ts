@@ -74,7 +74,7 @@ export function moveListingToStudio(db: Db, l: ListingRow, from: Studio, to: Stu
 export const LAST_MIGRATION_KEY = 'listing_image_migration';
 const migrating = new WeakSet<Db>();
 
-// One run at a time per database. A real run's result is kept in settings (Vault → Site games shows it).
+// One run at a time per database. A real run's result is kept in settings (the portal no longer shows it).
 export async function copySiteImages(deps: { db: Db; production: Storage | null; prodPublicUrl: string; fetch?: typeof fetch }, base: string, actor: string,
   opts: { dryRun?: boolean; budgetMs?: number } = {}): Promise<MigrationResult> {
   const { db } = deps;

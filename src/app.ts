@@ -436,7 +436,7 @@ export function createApp(deps: AppDeps) {
   });
 
   // A game availability run from the check-games workflow (scripts/check-games.ts --out), shown on
-  // Vault → Site games (the latest run's result per game). Only this repository's workflow in this system's environment may post.
+  // Vault → Game Catalog (the latest run's result per game). Only this repository's workflow in this system's environment may post.
   app.post('/v1/admin/game-checks', async (c) => {
     const id = await admin(c);
     const run = parseRun(await jsonBody(c));

@@ -193,8 +193,7 @@ describe('admin task: migrate-images', () => {
     assert.equal(fetched.length, 0);
     assert.equal(t.production.puts, 0);
     assert.equal(snapshot(), before);
-    assert.match(await (await t.as('boss', 'admin').get('/vault/listings')).text(), /Copy site images/, 'no "last run" from a dry run');
-    assert.equal(t.db.setting('listing_image_migration'), undefined);
+    assert.equal(t.db.setting('listing_image_migration'), undefined, 'no "last run" from a dry run');
   });
 
   test('copies, relinks, audits; running it again changes nothing', async () => {
@@ -206,8 +205,9 @@ describe('admin task: migrate-images', () => {
     assert.match(hero, /^https:\/\/prod\.test\/fieldday\/wake\/_vault-assets\/hero-[0-9a-f]{16}\.png$/);
     assert.equal(json.migrated[0].to, hero);
     assert.deepEqual(audits('listing.images.migrate').map((a) => [a.actor, a.target, a.detail.migrated]), [['github:octo', 'https://site.test', 2]]);
-    // The portal's page shows this run.
-    assert.match(await (await t.as('boss', 'admin').get('/vault/listings')).text(), /<b>2<\/b> migrated \(1 new files\)/);
+    // The run is kept as the last result (the portal has no page for it).
+    const last = JSON.parse(t.db.setting('listing_image_migration')!);
+    assert.deepEqual([last.migrated.length, last.objects_written], [2, 1]);
 
     const snap = JSON.stringify(t.db.listing('wake'));
     const again = await post('migrate-images', { base: 'https://site.test' });

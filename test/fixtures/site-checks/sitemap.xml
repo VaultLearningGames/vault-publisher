@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>{{SITE}}/</loc></url>
+  <url><loc>{{SITE}}/broken/</loc></url>
+  <url><loc>{{SITE}}/spelling/</loc></url>
+  <url><loc>{{SITE}}/narrow/</loc></url>
+  <url><loc>{{SITE}}/big/</loc></url>
+  <url><loc>{{SITE}}/game/</loc></url>
+  <url><loc>{{SITE}}/noframe/</loc></url>
+  <url><loc>{{SITE}}/ghost/</loc></url>
+</urlset>

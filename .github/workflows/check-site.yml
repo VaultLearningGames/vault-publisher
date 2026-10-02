@@ -1,0 +1,163 @@
+name: Check site
+
+# Runs the site checks (scripts/check-site.ts, docs/site-checks.md) against a Vault site: every game opens, no missing
+# assets, no broken links, spelling, large files and slow loading, and responsive design. The runner does the
+# looking, in headless Chromium; the portal only keeps the results. Each run:
+#   - posts its result to that system's portal (Vault → Site checks),
+#   - writes a job summary and ::error / ::warning annotations, and keeps the full result as the site-checks.json artifact,
+#   - keeps one open issue per environment ("Site checks (staging)", label site-checks) listing what fails, and
+#     closes it when nothing does.
+# Unlike check-games, failures fail the run, so GitHub notifies; the summary, the post and the issue come first.
+# --fail-on warn also fails on warnings, never only on a run that couldn't finish. Daily for both systems, a little
+# after check-games; run it by hand for one, or call it from another workflow. A run takes about seven to fifteen
+# minutes.
+on:
+  schedule:
+    - cron: '47 11 * * *'   # 11:47 UTC, early morning in the US
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which system to check
+        type: choice
+        options: [staging, production]
+        default: staging
+      checks:
+        description: 'Which checks: all, or a list of games, assets, links, spelling, performance, responsive'
+        type: string
+        default: all
+      limit:
+        description: Visit at most this many pages (blank means the whole site)
+        type: number
+        required: false
+      fail_on:
+        description: What fails the run
+        type: choice
+        options: [fail, warn, never]
+        default: fail
+  workflow_call:
+    inputs:
+      environment:
+        description: Which system to check (staging or production)
+        type: string
+        default: staging
+      checks:
+        description: 'Which checks: all, or a list of games, assets, links, spelling, performance, responsive'
+        type: string
+        default: all
+      limit:
+        description: Visit at most this many pages (blank means the whole site)
+        type: number
+        required: false
+      fail_on:
+        description: What fails the run (fail, warn or never)
+        type: string
+        default: fail
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(github.event_name == 'schedule' && '["staging","production"]' || format('["{0}"]', inputs.environment)) }}
+    # Runs in the system's environment: its variables, and an OIDC token that system's portal accepts.
+    environment: ${{ matrix.environment }}
+    concurrency: check-site-${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ENVIRONMENT: ${{ matrix.environment }}
+      PORTAL: ${{ vars.PORTAL_URL }}
+      SITE: ${{ vars.SITE_URL }}     # optional; defaults to the portal's address without "portal."
+      CHECKS: ${{ inputs.checks || 'all' }}
+      LIMIT: ${{ inputs.limit }}
+      FAIL_ON: ${{ inputs.fail_on || 'fail' }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+        cache: npm
+    - run: npm ci
+    - run: npx playwright install --with-deps chromium-headless-shell
+
+    # Never fails by itself: it records the script's exit code (0 passed, 1 failures, 2 couldn't run) so the post,
+    # summary and issue steps below run first, and the last step ends the job failed.
+    - name: Check the site
+      id: check
+      run: |
+        set -uo pipefail
+        code=0
+        site="${SITE:-$(echo "$PORTAL" | sed 's#://portal\.#://#')}"
+        node scripts/check-site.ts --site "$site" --catalog "$PORTAL" --guard --source "$RUN_URL" --portal-page "$PORTAL/vault/site-checks" \
+          --checks "$CHECKS" --fail-on "$FAIL_ON" ${LIMIT:+--limit "$LIMIT"} \
+          --out site-checks.json --summary summary.md --issue issue.md || code=$?
+        echo "code=$code" >> "$GITHUB_OUTPUT"
+
+    - name: Job summary
+      if: ${{ !cancelled() && hashFiles('summary.md') != '' }}
+      run: cat summary.md >> "$GITHUB_STEP_SUMMARY"
+
+    - uses: actions/upload-artifact@v7
+      if: ${{ !cancelled() && hashFiles('site-checks.json') != '' }}
+      with:
+        name: site-checks-${{ matrix.environment }}
+        path: site-checks.json
+
+    # Only when the check produced a run (exit 0 or 1). A portal that doesn't have the route yet answers 404: a notice.
+    - name: Post results to the portal
+      if: ${{ !cancelled() && (steps.check.outputs.code == '0' || steps.check.outputs.code == '1') }}
+      run: |
+        set -euo pipefail
+        token=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=vault-publisher" | jq -r .value)
+        res=$(curl -sS -w '\n%{http_code}' -X POST "$PORTAL/v1/admin/site-checks" \
+          -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data-binary @site-checks.json)
+        code=$(echo "$res" | tail -1); json=$(echo "$res" | sed '$d')
+        if [ "$code" = 404 ]; then echo "::notice title=Not posted ($ENVIRONMENT)::$PORTAL doesn't have the site checks yet"; exit 0; fi
+        if [ "$code" != 200 ]; then echo "::error::Posting to $PORTAL failed (HTTP $code): $(echo "$json" | jq -r .error 2>/dev/null || echo "$json")"; exit 1; fi
+        echo "Posted: $(echo "$json" | jq -r .url)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+    # Runs even if posting failed, so the issue stays current. Runs when the check found failures (exit 1) as well as
+    # when it passed, but not when it couldn't run (exit 2).
+    - name: Update the tracking issue
+      if: ${{ !cancelled() && (steps.check.outputs.code == '0' || steps.check.outputs.code == '1') }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+        R: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        title="Site checks ($ENVIRONMENT)"
+        label=site-checks
+        gh label create "$label" -R "$R" --color d93f0b --description 'Problems the site checks found on the Vault site' 2>/dev/null || true
+        num=$(gh issue list -R "$R" --label "$label" --state open --limit 50 --json number,title \
+          --jq "map(select(.title == \"$title\"))[0].number // empty")
+        fails=$(jq '.counts.fail' site-checks.json)
+        # A run that didn't finish says nothing about what is fixed, so it never closes the issue.
+        finished=$(jq -r '.status == "done" and ([.summaries[].status] | all(. != "error"))' site-checks.json)
+        if [ "$fails" -gt 0 ]; then
+          if [ -z "$num" ]; then
+            gh issue create -R "$R" --title "$title" --label "$label" --body-file issue.md
+          else
+            # Comment when the set of failures changes, so watchers hear about it; the body always updates.
+            before=$(gh issue view "$num" -R "$R" --json body --jq .body | grep -o 'failing: [^ ]*' || true)
+            after=$(grep -o 'failing: [^ ]*' issue.md || true)
+            gh issue edit "$num" -R "$R" --body-file issue.md
+            if [ "$before" != "$after" ]; then
+              gh issue comment "$num" -R "$R" --body "Failing problems changed: now ${after#failing: } ($RUN_URL)."
+            fi
+          fi
+        elif [ -n "$num" ] && [ "$finished" = true ]; then
+          gh issue close "$num" -R "$R" --comment "Nothing fails as of $RUN_URL."
+        fi
+
+    - name: Fail the job if the check failed
+      if: ${{ !cancelled() && steps.check.outputs.code != '0' }}
+      run: |
+        echo "::error title=Site checks $ENVIRONMENT::The check exited ${{ steps.check.outputs.code || 'without finishing' }} (1: problems found or the run didn't finish; 2: it couldn't run). See the job summary and log."
+        exit 1

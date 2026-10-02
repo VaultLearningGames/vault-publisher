@@ -8,6 +8,7 @@ import { copyRelease, makeLive, ReleaseLayoutError, releasePrefix } from './rele
 import { buildCatalog } from './catalog.ts';
 import type { PreviewSite } from './config.ts';
 import { parseRun } from './game-checks.ts';
+import { parseRun as parseSiteRun } from './site-checks.ts';
 import { registerPortal, type PortalConfig } from './portal/routes.ts';
 import type { SitePreviewer } from './portal/site-preview.ts';
 import { registerForms, type FormsConfig } from './forms.ts';
@@ -449,6 +450,18 @@ export function createApp(deps: AppDeps) {
     const runId = db.addGameCheck(run, `github:${id.actor}`);
     db.audit(`github:${id.actor}`, 'game_checks.post', run.site, { run: runId, ...run.counts, source: run.source });
     return c.json({ id: runId, counts: run.counts, url: `${deps.portal.baseUrl.replace(/\/+$/, '')}/vault/listings` });
+  });
+
+  // A site checks run from the check-site workflow (scripts/check-site.ts --out), shown on Vault → Site checks. The
+  // workflow does the looking on its own runner; this stores the finished run. Same lane as the game checks.
+  app.post('/v1/admin/site-checks', async (c) => {
+    const id = await admin(c);
+    const run = parseSiteRun(await jsonBody(c));
+    if (typeof run === 'string') fail(400, run);
+    const by = `github:${id.actor}`;
+    const runId = db.addSiteCheck(run, by);
+    db.audit(by, 'site_checks.post', run.site, { run: runId, ...run.counts, source: run.source });
+    return c.json({ id: runId, counts: run.counts, url: `${deps.portal.baseUrl.replace(/\/+$/, '')}/vault/site-checks/${runId}` });
   });
 
   // Delete a preview, e.g. from a workflow triggered by branch deletion.

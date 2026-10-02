@@ -14,6 +14,7 @@ import { parsePreviewSites } from '../src/config.ts';
 import { buildCatalog } from '../src/catalog.ts';
 import { SitePreviewer } from '../src/portal/site-preview.ts';
 import { countLevels, parseRun, type GameCheck } from '../src/game-checks.ts';
+import { parseRun as parseSiteRun } from '../src/site-checks.ts';
 
 class MemoryStorage implements Storage {
   objects = new Map<string, Uint8Array>();
@@ -123,6 +124,14 @@ if (process.env.GAME_CHECKS) {
     const run = { checked_at: day(n), site: 'https://vaultlearninggames.org', source: 'https://github.com/VaultLearningGames/vault-publisher/actions', games: n ? games.map((g) => ({ ...g, level: 'ok' as const, problems: [] })) : games };
     db.addGameCheck({ ...run, counts: countLevels(run.games) }, 'github:dev');
   }
+}
+
+// A finished site-check run to look at without waiting for one: SITE_CHECKS_JSON=run.json (what
+// `npm run site:audit -- --site … --out run.json` writes).
+if (process.env.SITE_CHECKS_JSON && existsSync(process.env.SITE_CHECKS_JSON)) {
+  const run = parseSiteRun(JSON.parse(readFileSync(process.env.SITE_CHECKS_JSON, 'utf8')));
+  if (typeof run === 'string') console.error(`SITE_CHECKS_JSON: ${run}`);
+  else db.addSiteCheck(run, 'github:dev');
 }
 
 const app = createApp({

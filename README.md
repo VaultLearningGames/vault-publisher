@@ -179,9 +179,10 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   repository's workflow in the `production` environment, like releases.
 * A game Vault uploaded is taken over by the studio's repository on its first CI publish, with its releases.
 
-Vault admins can import the Hugo prototype's game pages once, from that repo's `migration/` folder. The import creates
-missing studios as Vault-managed studios. `node scripts/dev-portal.ts` does it automatically when `vault-rebuild` is
-checked out next to this repo; sign in as `lee` to edit NMSU's games.
+Vault admins can import the Hugo prototype's game pages once, from that repo's `migration/` folder
+(`POST /portal/api/vault/listings/import` with `pages` and optional `overrides`; the portal has no form for it). The
+import creates missing studios as Vault-managed studios. `node scripts/dev-portal.ts` does it automatically when
+`vault-rebuild` is checked out next to this repo; sign in as `lee` to edit NMSU's games.
 
 ## Admin tasks
 

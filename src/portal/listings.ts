@@ -190,7 +190,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
   app.get('/vault/featured', (c) => c.redirect('/vault/listings'));
   app.get('/vault/availability', (c) => c.redirect('/vault/listings'));
 
-  // ---------- Vault → Game Catalog: review queue, every game on the site (featured, availability), import ----------
+  // ---------- Vault → Game Catalog: review queue, every game on the site (featured, availability) ----------
   app.get('/vault/listings', (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isStaff(u)) return h.denied(c, 'Only Vault staff can see this page.');
@@ -272,12 +272,6 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
       <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th>Game</th><th>Studio</th><th>Site</th><th>Featured</th><th>Hosted by</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
         <tbody>${rows.length ? rows : html`<tr><td colspan="${COLS}" class="muted">No games yet.</td></tr>`}</tbody></table></div>
       ${featuring ? '' : html`<p class="small muted">Only Vault release managers can change the featured games.</p>`}
-      ${h.isVaultAdmin(u) ? html`<div class="card" style="margin-top:22px"><h2>Import from the Hugo site prototype</h2>
-        <p class="small">Paste <span class="mono">migration/games-export.json</span> and <span class="mono">migration/import-overrides.json</span> from <a href="https://github.com/fielddaylab/vault-rebuild" target="_blank" rel="noopener">vault-rebuild</a>. Games that already have a listing are skipped; studios that don’t exist yet are created as Vault-managed studios.</p>
-        <form data-api="/portal/api/vault/listings/import" data-then="reload" class="fields">
-          <label class="field full"><span class="lab">games-export.json</span><textarea name="pages" rows="4" required></textarea></label>
-          <label class="field full"><span class="lab">import-overrides.json (optional)</span><textarea name="overrides" rows="3"></textarea></label>
-          <div class="form-foot"><button class="btn pri">Import</button>${err}</div></form></div>` : ''}
       ${h.isVaultAdmin(u) ? migrationCard(h) : ''}`;
     return h.page(c, 'Game Catalog', body, { active: 'vault-listings' });
   });
@@ -385,6 +379,8 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     return c.json({ ok: true, url: `/s/${to.slug}/g/${l.slug}` });
   });
 
+  // Vault admins: the one-time import of the Hugo prototype's game pages (../listings-import.ts). It has no form in
+  // the portal; Body: { pages, overrides? }, each the JSON itself or its text.
   app.post('/portal/api/vault/listings/import', async (c) => {
     const u = h.apiUser(c);
     if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can import listings.');

@@ -336,7 +336,7 @@ describe('Vault → Game Catalog: one table with featured games and availability
     assert.match(page, /<h1>Game Catalog<\/h1>/);
     assert.match(page, /<a href="\/vault\/listings" class="on">Game Catalog<\/a>/, 'the Vault nav entry, at the same address');
     assert.doesNotMatch(page, /Site games/);
-    assert.match(page, /Import from the Hugo site prototype/);
+    assert.doesNotMatch(page, /Import from the Hugo site prototype|listings\/import/, 'the import has no form on the page; its API stays');
     for (const gone of ['On the CDN (', 'CDN release ready', 'Unpublished changes', 'Not on the site</a>', 'show=']) assert.ok(!page.includes(gone), gone);
     assert.doesNotMatch(page, /href="\/vault\/(featured|availability)"/, 'no separate nav entries');
 

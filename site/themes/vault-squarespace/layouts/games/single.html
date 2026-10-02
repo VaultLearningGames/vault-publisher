@@ -42,7 +42,11 @@
     {{- $nb := $b -}}
     {{- if eq $r "text" }}
       {{- $title := "" }}
-      {{- if eq $layout "standard" }}{{ $title = cond (ne $lg.title_strong false) (printf "<h1><strong>%s</strong></h1>" ($p.Title | htmlEscape)) (printf "<h1>%s</h1>" ($p.Title | htmlEscape)) }}
+      {{- if eq $layout "standard" }}
+        {{- /* --fit: the widest word in em; the CSS makes the title smaller when that word wouldn't fit its column */ -}}
+        {{- $bold := ne $lg.title_strong false }}
+        {{- $fit := partial "sq/title-fit.html" (dict "text" $p.Title "bold" $bold "upper" true "spacing" -0.02) }}
+        {{- $title = printf "<h1 class=\"fit\" style=\"--fit:%v\">%s</h1>" $fit (cond $bold (printf "<strong>%s</strong>" ($p.Title | htmlEscape)) ($p.Title | htmlEscape)) }}
       {{- else }}
         {{- $hasLogo := false }}{{ range $s.blocks }}{{ if eq .role "titleimg" }}{{ $hasLogo = true }}{{ end }}{{ end }}
         {{- if not $hasLogo }}{{ $title = printf "<div class=\"sqsrte-scaled-text-container\"><span class=\"sqsrte-scaled-text\"><h1><span class=\"sqsrte-text-color--white\">%s</span></h1></span></div>" ($p.Title | htmlEscape) }}{{ end }}
@@ -61,7 +65,7 @@
       {{- if not $src }}{{ $src = partial "sq/game-image.html" (dict "ref" (dict "src" $b.src) "page" $p) }}{{ end }}
       {{- $nb = merge $b (dict "type" "image" "src" $src "alt" ($b.alt | default "")) }}
     {{- else if eq $r "heading" }}
-      {{- $nb = merge $b (dict "type" "text" "html" (printf "<h4>%s</h4>" ($p.Title | htmlEscape))) }}
+      {{- $nb = merge $b (dict "type" "text" "html" (printf "<h4 class=\"fit\" style=\"--fit:%v\">%s</h4>" (partial "sq/title-fit.html" (dict "text" $p.Title "upper" true "spacing" -0.02)) ($p.Title | htmlEscape))) }}
     {{- else if eq $r "accordion" }}
       {{- $nb = merge $b (dict "type" "accordion" "items" (partial "sq/game-accordion.html" (dict "page" $p "live" ($b.live_items | default slice)))) }}
     {{- end }}

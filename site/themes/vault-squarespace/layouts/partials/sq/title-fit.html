@@ -1,0 +1,24 @@
+{{- /*
+  How wide a title's widest word is, in em, set in the heading font (Base 9 Sans): the number a title's --fit is set
+  to, so that the CSS can cap its font size at (the width it has) / --fit and a long word ("Transformations",
+  "Constitutional") is made smaller rather than overflowing its column or breaking in the middle.
+  Params: text; bold (the <strong> titles of the standard game pages); upper (text-transform: uppercase);
+  spacing (letter-spacing in em, -0.02 for the headings).
+  Base 9 Sans is drawn on a grid of ninths of an em, so the advance widths below are exact (measured in the browser
+  from the Adobe kit); anything not listed counts as 6/9. Words end at spaces and after a hyphen. 3% is added for
+  kerning and rounding. The stand-in font (Share Tech Mono, 0.54em a character) is never wider.
+*/ -}}
+{{- $t := .text | default "" -}}
+{{- if .upper }}{{ $t = upper $t }}{{ end -}}
+{{- $ls := .spacing | default 0.0 -}}
+{{- $w9 := "→" }}{{ $w7 := "MWmw" }}{{ $w5 := "EFISTVXYZcfstvxyz-/" }}{{ $w4 := "JLr:;,.!’" }}{{ $w3 := "ijl'" -}}
+{{- if .bold }}{{ $w9 = "Wmw→" }}{{ $w7 = "" }}{{ $w5 = "CEFIJSTYZcfstxz-/&" }}{{ $w4 = "Lr:;,.!’" }}{{ end -}}
+{{- $max := 0.0 -}}
+{{- range split (replace $t "-" "- ") " " -}}
+  {{- $n := 0 -}}
+  {{- range split . "" -}}
+    {{- $n = add $n (cond (in $w9 .) 9 (cond (in $w7 .) 7 (cond (in $w5 .) 5 (cond (in $w4 .) 4 (cond (in $w3 .) 3 6))))) -}}
+  {{- end -}}
+  {{- $max = math.Max $max (add (div (float $n) 9) (mul $ls (strings.RuneCount .))) -}}
+{{- end -}}
+{{- return (div (math.Round (mul $max 103)) 100) -}}

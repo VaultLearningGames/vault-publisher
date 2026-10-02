@@ -24,7 +24,8 @@
         <span class="blog-delim" aria-hidden="true"></span>
         <time class="blog-date" datetime="{{ .date.Format "2006-01-02" }}">{{ .date.Format "1/2/06" }}</time>
       </div>
-      <h1 class="blog-title"><a href="{{ $href }}">{{ with $p.Params.legacy }}{{ .card_title | default $p.Title }}{{ else }}{{ $p.Title }}{{ end }}</a></h1>
+      {{- $title := $p.Title }}{{ with $p.Params.legacy }}{{ with .card_title }}{{ $title = . }}{{ end }}{{ end }}
+      <h1 class="blog-title" style="{{ printf "--fit:%v" (partial "sq/title-fit.html" (dict "text" $title "upper" true "spacing" -0.02)) | safeCSS }}"><a href="{{ $href }}">{{ $title }}</a></h1>
       <div class="blog-excerpt"><p>{{ partial "sq/game-desc.html" $p }}</p></div>
       <a class="blog-more" href="{{ $href }}">Read More</a>
     </article>

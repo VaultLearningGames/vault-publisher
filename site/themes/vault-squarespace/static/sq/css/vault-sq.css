@@ -1,6 +1,10 @@
 /*
   Vault — the original (Squarespace) design, rebuilt as plain CSS for the Hugo site.
   Values are measured from vaultlearninggames.org as rendered on 2026-09-29 (1440px and 390px wide).
+  Heading sizes are fluid, as Squarespace's are: 16px plus a multiple of --hu, which is 1.2% of the window's height
+  on phones (of 900px at most) and 1.2% of its width from 768px up (of 1400px at most); so --h1 is 48.4px on a tall
+  phone, 43.6px at 768px wide and 66.4px from 1400px. A title that is a game's name (.fit, .gg-title, .blog-title)
+  is also capped at the size at which its widest word fits the column: see "Titles that fit" below.
   Layout model: sections (partials/sq/section.html) hold a 24-column grid (8 on phones) whose rows and block
   positions come from the page data (data/squarespace/*.json), like Squarespace's "fluid engine".
 */
@@ -18,10 +22,11 @@
   --text: 17.08px; --text-lh: 1.5;
   --large: 20.32px;
   --small: 14.92px;
-  --h1: 48.4px; --h1-lh: 1.056;
-  --h2: 35.44px; --h2-lh: 1.1136;
-  --h3: 28.96px; --h3-lh: 1.2;
-  --h4: 22.48px; --h4-lh: 1.1712;
+  --hu: calc(.012 * min(100vh, 900px));
+  --h1: calc(16px + 3 * var(--hu)); --h1-lh: 1.056;
+  --h2: calc(16px + 1.8 * var(--hu)); --h2-lh: 1.1136;
+  --h3: calc(16px + 1.2 * var(--hu)); --h3-lh: 1.2;
+  --h4: calc(16px + .6 * var(--hu)); --h4-lh: 1.1712;
 }
 @media (min-width: 768px) {
   :root {
@@ -30,10 +35,7 @@
     --text: 17.68px;
     --large: 22.72px;
     --small: 14.272px;
-    --h1: 66.4px;
-    --h2: 46.24px;
-    --h3: 36.16px;
-    --h4: 26.08px;
+    --hu: min(1.2vw, 16.8px);
   }
 }
 /* Without the Adobe kit, Share Tech Mono (self-hosted, OFL) stands in for Base 9 Sans: the same monospaced, evenly
@@ -183,6 +185,14 @@ main { display: block; }
 .sq-text h4 { font-size: var(--h4); line-height: var(--h4-lh); }
 .sq-text h2 + h4 { margin-top: 0; }
 .sq-text :is(h1, h2, h3, h4) + p { margin-top: 16px; }
+/* Titles that fit: a game's name is set no larger than the size at which its widest word fits the width it has
+   (--fit is that word's width in em, from partials/sq/title-fit.html; the width is the block's or the card's, a
+   size container), and never under 12px. So a long word makes the title smaller instead of overflowing the column,
+   running into the next card or breaking in the middle; titles that fit at the design's size are unchanged.
+   overflow-wrap is the last resort, for a word too long even at 12px. */
+.role-text > .sq-text, .role-heading > .sq-text, .gg-item, .blog-item { container-type: inline-size; }
+.sq-text h1.fit { font-size: clamp(12px, calc(100cqw / var(--fit)), var(--h1)); }
+.sq-text h4.fit { font-size: clamp(12px, calc(100cqw / var(--fit)), var(--h4)); }
 .sq-text h1 strong, .sq-text h2 strong, .sq-text h3 strong, .sq-text h4 strong { font-weight: 700; }
 .sq-text strong { font-weight: 700; }
 .sq-text a { color: var(--link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; }
@@ -246,7 +256,7 @@ main { display: block; }
 
 /* ---------- Newsletter (Join Vault) ---------- */
 .sq-news { width: 100%; text-align: center; }
-.news-title { margin: 0 0 16px; font: 400 28.96px/1.2 var(--heading); letter-spacing: -0.02em; text-transform: uppercase; color: var(--hd); }
+.news-title { margin: 0 0 16px; font: 400 var(--h3)/1.2 var(--heading); letter-spacing: -0.02em; text-transform: uppercase; color: var(--hd); }
 .news-desc p { margin: 16px 0; }
 .news-fields { display: flex; flex-direction: column; align-items: center; gap: 16px; margin: 32px 0 0; padding: 8px 0; }
 .news-field input { width: 280px; height: 66px; padding: 22.4px 32px; background: #fff; color: #000; border: 1px solid rgba(0, 0, 0, .12);
@@ -274,7 +284,6 @@ main { display: block; }
   background: #cc3b3b url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M1 1l5 5M6 1L1 6' stroke='%23fff' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat 9px 50%; }
 .news-form .field-error:focus:not(:focus-visible) { outline: none; }
 @media (min-width: 768px) {
-  .news-title { font-size: 36.16px; }
   .news-fields { flex-direction: row; justify-content: center; gap: 13px; }
 }
 
@@ -302,7 +311,8 @@ main { display: block; }
 .gg-item[hidden] { display: none; }
 .gg-thumb { display: block; position: relative; padding-bottom: 66.67%; overflow: hidden; border-radius: 10px; }
 .gg-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
-.gg-title { margin: 15px 0 10px; font: 400 30px/36px var(--heading); color: #000; }
+.gg-title { margin: 15px 0 10px; font: 400 30px/1.2 var(--heading); color: #000; overflow-wrap: break-word;
+  font-size: clamp(12px, calc(100cqw / var(--fit, 1)), 30px); }   /* see "Titles that fit" */
 .gg-title a { text-decoration: none; }
 .gg-excerpt { margin-bottom: 10px; }
 .gg-excerpt p { margin: 0; font-size: 14px; line-height: 19.6px; }
@@ -365,34 +375,36 @@ main { display: block; }
 @media (min-width: 1359px) { .gg-list { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 
 /* ---------- /game-cards (blog grid) ---------- */
+/* As on Squarespace: the grid is 1400px wide at most, padded by 4vw (6vw at the sides on phones), and a card's text
+   is inset by a tenth of the card's width on each side. */
 .sq-blog { min-height: 0; }
-.blog-grid { padding: 15.6px var(--gutter); }
+.blog-grid { width: 100%; max-width: 1400px; margin: 0 auto; padding: 4vw var(--gutter); }
 .blog-item { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 30px; }
 .blog-item[hidden] { display: none; }
 .blog-img { display: block; position: relative; width: 100%; padding-bottom: 66.67%; overflow: hidden; }
 .blog-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.blog-meta { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 16.6px 30px 7.8px; font: 500 16px/24px var(--meta); }
+.blog-meta { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 16.6px 10% 7.8px; font: 500 16px/24px var(--meta); }
 .blog-cats a { text-decoration: none; }
 .blog-delim::before { content: "\00b7"; }
-.blog-title { margin: 0 30px 25px; font: 400 28.96px/1.2 var(--heading); letter-spacing: -0.02em; text-transform: uppercase; }
+.blog-title { margin: 0 10% 25px; font: 400 var(--h3)/1.2 var(--heading); letter-spacing: -0.02em; text-transform: uppercase;
+  max-width: 80%; overflow-wrap: break-word;
+  font-size: clamp(12px, calc(80cqw / var(--fit, 1)), var(--h3)); }   /* see "Titles that fit" */
 .blog-title a { text-decoration: none; }
 .blog-title a::after { content: " \2192"; }
-.blog-excerpt { margin: 0 30px; font-size: 14.92px; line-height: 1.5; }
+.blog-excerpt { margin: 0 10%; font-size: 14.92px; line-height: 1.5; }
 .blog-excerpt p { margin: 0; }
 .blog-more { padding-top: 7.8px; font-size: 14.92px; line-height: 1.5; text-decoration: underline; text-underline-offset: .2em; }
-.blog-pages { display: flex; justify-content: space-between; padding: 0 var(--gutter); margin: 23.4px 0 11.7px; }
+.blog-pages { display: flex; justify-content: space-between; width: 100%; max-width: 1400px; padding: 0 var(--gutter); margin: 6vw auto 3vw; }
 .blog-pages a { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; }
 .blog-older { margin-left: auto; }
 .chev { width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
 .blog-newer .chev { transform: rotate(135deg); }
 @media (min-width: 768px) {
-  .blog-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 21px; row-gap: 100px; padding: 57.6px 77.6px; }
+  .blog-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 21px; row-gap: 100px; }
   .blog-item { margin-bottom: 0; }
-  .blog-meta { margin: 35px 30px 25px; }
-  .blog-title { font-size: 36.16px; }
+  .blog-meta { margin: 35px 10% 25px; }
   .blog-excerpt, .blog-more { font-size: 14.272px; }
   .blog-more { padding-top: 20px; }
-  .blog-pages { padding: 0 77.6px; margin: 86.4px 0 43.2px; }
 }
 
 /* ---------- Submit a Game form ---------- */

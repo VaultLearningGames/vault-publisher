@@ -21,6 +21,10 @@ fonts or third-party Squarespace plugins are used, and nothing is loaded from Sq
 * `/game-cards` (20 per page, `?offset=` like Squarespace), its card URLs (redirects to the game pages) and its
   `/game-cards/category|tag/...` pages come from `content/game-cards/`. `npm run site:build` runs
   `site/scripts/squarespace-paths.mjs` after Hugo to put the filter pages at folder names Hugo can't write.
+* Heading sizes are fluid, as Squarespace's are (`--hu` in `vault-sq.css`). A game's title is also never set larger
+  than the size at which its widest word fits its column or card, so a long word ("Transformations") shrinks the
+  title instead of overflowing, running into the next card or breaking in the middle: `partials/sq/title-fit.html`
+  works out the word's width from Base 9 Sans's advance widths and the CSS ("Titles that fit") does the rest.
 * Fonts: Montserrat and Archivo are self-hosted (OFL). Headings are Base 9 Sans (Adobe Fonts): set
   `params.fonts.adobe_kit` to an Adobe Fonts web project containing Base 9 Sans Regular and Bold (and italics);
   until then Share Tech Mono (self-hosted, OFL) stands in.

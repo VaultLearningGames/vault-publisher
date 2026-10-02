@@ -4,6 +4,7 @@
 // runs scripts/admin-task.ts). The audit log records the workflow's GitHub actor ("github:LOGIN").
 //
 //   GET  /v1/admin/listings[?slug=a&slug=b]     drafts, published listings and review state, to verify a task
+//   POST /v1/admin/studios                      { studios: [{ slug, name?, website? }] }
 //   POST /v1/admin/featured                     { games: [{ slug, sequence?, blurb?, image? }] }
 //   POST /v1/admin/listings/import              { source, slugs?, pages?, overrides? }
 //   POST /v1/admin/listings/migrate-images      { base, budget_seconds? }
@@ -16,6 +17,7 @@ import { fail, jsonBody, type AppDeps } from './app.ts';
 import type { GitHubIdentity } from './auth.ts';
 import { MAX_FEATURED, normalizeFeatured, readFeatured, saveFeatured, sortFeatured } from './featured.ts';
 import { isSlug } from './paths.ts';
+import { studioWebsite } from './db.ts';
 import { changedFields, EMPTY_LISTING, normalize, type ListingFields } from './listings.ts';
 import { baseUrl, copySiteImages, draftProblems, importFromExport, moveListingToStudio, saveListing, type ListingRow } from './listing-ops.ts';
 
@@ -211,6 +213,50 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
       })),
       unchanged: plans.filter((p) => !todo.includes(p)).map((p) => p.l.slug),
     });
+  });
+
+  // Create Vault-managed studios (no GitHub organization) or change existing studios' names and websites, as
+  // Vault → Studios does. A studio is found by its short name (slug); one that doesn't exist is created and needs a
+  // name. Listings' "Made by" names are not touched: follow a rename with an `update` of the listings' makers.
+  app.post('/v1/admin/studios', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const dry = dryRun(body);
+    if (!Array.isArray(body.studios) || !body.studios.length) fail(400, 'studios must be a list of { slug, name?, website? }');
+    const all = db.studios();
+    const plans = (body.studios as Record<string, unknown>[]).map((raw) => {
+      const slug = typeof raw?.slug === 'string' ? raw.slug.trim() : '';
+      if (!isSlug(slug)) fail(400, `"${slug}" isn’t a valid short name (lowercase letters, numbers and dashes).`);
+      const existing = db.studioBySlug(slug);
+      const name = raw.name === undefined ? undefined : String(raw.name).trim();
+      if (name !== undefined && (!name || name.length > 100)) fail(400, `${slug}: the name must be 1 to 100 characters.`);
+      if (!existing && !name) fail(400, `${slug}: a new studio needs a name.`);
+      if (name && all.some((x) => x.slug !== slug && x.name.toLowerCase() === name.toLowerCase())) fail(409, `There’s already a studio named ${name}.`);
+      if (existing && name && name !== existing.name && existing.source === 'file') fail(409, `${existing.name}’s name comes from studios.json; change it there.`);
+      let website: string | null | undefined;
+      if (raw.website !== undefined) { try { website = studioWebsite(raw.website); } catch (err) { fail(400, `${slug}: ${(err as Error).message}`); } }
+      return { slug, existing, name, website };
+    });
+    if (new Set(plans.map((p) => p.slug)).size !== plans.length) fail(400, 'Each studio can be listed once.');
+    const out = plans.map((p) => {
+      if (!p.existing) {
+        if (!dry) {
+          db.createStudio({ slug: p.slug, name: p.name!, github_owner: '', github_owner_id: `vault:${p.slug}`, website: p.website ?? null });
+          db.audit(actorOf(id), 'studio.create', p.slug, { name: p.name, github: null, website: p.website ?? null, via: 'admin task' });
+        }
+        return { slug: p.slug, created: true, name: p.name, website: p.website ?? null };
+      }
+      const changes: Record<string, unknown> = {};
+      if (p.name && p.name !== p.existing.name) changes.name = { from: p.existing.name, to: p.name };
+      if (p.website !== undefined && (p.website ?? '') !== (p.existing.website ?? '')) changes.website = { from: p.existing.website ?? null, to: p.website };
+      if (!dry && Object.keys(changes).length) {
+        if (changes.name) db.updateStudio(p.existing.id, { name: p.name!, github_owner: p.existing.github_owner, github_owner_id: p.existing.github_owner_id });
+        if (changes.website) db.setStudioWebsite(p.existing.id, p.website ?? null);
+        db.audit(actorOf(id), 'studio.update', p.slug, { ...changes, via: 'admin task' });
+      }
+      return { slug: p.slug, created: false, changes };
+    });
+    return c.json({ dry_run: dry, studios: out });
   });
 
   // The home page's Featured Games, as Vault → Game Catalog sets them: the whole list is replaced (games unticked

@@ -446,3 +446,33 @@ describe('admin task: featured', () => {
     assert.deepEqual((await (await t.app.request('/v1/catalog')).json() as any).featured, []);
   });
 });
+
+describe('admin task: studios', () => {
+  const studios = async (body: unknown, token: string | null = 'admin') => {
+    const res = await call('POST', '/v1/admin/studios', token, body);
+    return { status: res.status, json: (await res.json()) as any };
+  };
+
+  test('creates Vault-managed studios and renames existing ones; dry runs and bad input change nothing', async () => {
+    const before = t.db.studios().length;
+    const dry = await studios({ dry_run: true, studios: [{ slug: 'cmu', name: 'Carnegie Mellon University', website: 'https://www.cmu.edu' }] });
+    assert.equal(dry.status, 200);
+    assert.equal(t.db.studios().length, before);
+    assert.equal((await studios({ studios: [{ slug: 'cmu' }] })).status, 400, 'a new studio needs a name');
+    assert.equal((await studios({ studios: [{ slug: 'cmu', name: 'X', website: 'not a url' }] })).status, 400);
+    assert.equal((await studios({ studios: [{ slug: 'cmu', name: 'Carnegie Mellon University' }] }, null)).status, 401);
+    assert.equal(t.db.studios().length, before);
+
+    const r = await studios({ studios: [{ slug: 'cmu', name: 'Carnegie Mellon University', website: 'https://www.cmu.edu' }] });
+    assert.equal(r.status, 200);
+    const cmu = t.db.studioBySlug('cmu')!;
+    assert.deepEqual([cmu.name, cmu.github_owner_id, cmu.website], ['Carnegie Mellon University', 'vault:cmu', 'https://www.cmu.edu']);
+
+    const again = await studios({ studios: [{ slug: 'cmu', name: 'CMU', website: 'https://www.etc.cmu.edu' }] });
+    assert.deepEqual(again.json.studios[0].changes, { name: { from: 'Carnegie Mellon University', to: 'CMU' }, website: { from: 'https://www.cmu.edu', to: 'https://www.etc.cmu.edu' } });
+    assert.equal(t.db.studioBySlug('cmu')!.name, 'CMU');
+    // A second studio can't take a name already in use.
+    assert.equal((await studios({ studios: [{ slug: 'other', name: 'cmu' }] })).status, 409);
+    assert.deepEqual(audits('studio.create', 'studio.update').map((a) => [a.action, a.target]).sort(), [['studio.create', 'cmu'], ['studio.update', 'cmu']]);
+  });
+});

@@ -6,10 +6,16 @@
     "github_owner_id": "1881825"
   },
   {
-    "slug": "mit-education-arcade",
-    "name": "MIT Education Arcade",
+    "slug": "vault",
+    "name": "Vault Learning Games",
     "github_owner": "VaultLearningGames",
     "github_owner_id": "214136763"
+  },
+  {
+    "slug": "mit-education-arcade",
+    "name": "MIT Education Arcade",
+    "github_owner": "",
+    "github_owner_id": "vault:mit-education-arcade"
   },
   {
     "slug": "ucalgary",

@@ -204,14 +204,16 @@ const MIGRATIONS = [
     created_at   TEXT NOT NULL
   );
   `,
-  // v12: MIT Education Arcade's games build in the VaultLearningGames org (hosted-shadowspect and the
-  // other hosted-* repositories), whose CI publishes them; bind the studio to that org so its
-  // repositories may publish for it (and take over builds Vault has uploaded, e.g. the copy of
-  // Shadowspect from DoIT). Rebinds only rows still on the placeholder id, which can never match a
-  // real (numeric) GitHub id; fresh databases get the binding from studios.json.
+  // v12: withdrawn. It gave MIT Education Arcade the VaultLearningGames organization's GitHub id, but that id is
+  // unique and already belongs to the "vault" studio wherever that studio exists, so the statement failed and the
+  // service could not start (staging, 2026-10-01). One organization can't stand for several studios; see v13.
   `
-  UPDATE studios SET github_owner_id = '214136763', github_owner = 'VaultLearningGames'
-  WHERE slug = 'mit-education-arcade' AND github_owner_id = 'vault:mit-education-arcade';
+  SELECT 1;
+  `,
+  // v13: undo v12 where it did apply (databases created while it was in place).
+  `
+  UPDATE studios SET github_owner_id = 'vault:mit-education-arcade', github_owner = ''
+  WHERE slug = 'mit-education-arcade' AND github_owner_id = '214136763';
   `,
 ];
 

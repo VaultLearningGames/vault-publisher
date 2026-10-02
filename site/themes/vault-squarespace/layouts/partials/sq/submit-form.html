@@ -1,9 +1,13 @@
 {{- /* The Submit a Game form (fields from content/submit-a-game.md). Posts to params.forms.submit_game (the portal's
        /v1/forms/submit-game, set at build time from VAULT_PORTAL); when that's empty it says the form isn't connected.
-       vault-sq.js checks the required fields, sends it and shows the result the way Squarespace's form block does. */ -}}
+       vault-sq.js checks the required fields, sends it and shows the result (errors as Squarespace's form block
+       does; the confirmation is ours). */ -}}
 {{- $p := .page -}}
 {{- $action := site.Params.forms.submit_game -}}
-<div class="sq-form">
+{{- /* The page's first form block is where the portal's #form-submitted points after a plain POST (JavaScript off):
+       the CSS shows that block's thanks through :target. Only one block per page can have the id. */ -}}
+{{- $target := not (page.Store.Get "form-target") }}{{ page.Store.Set "form-target" true -}}
+<div class="sq-form"{{ if and $target $action }} id="form-submitted"{{ end }}>
   <form class="sub-form" method="post" {{ with $action }}action="{{ . }}" data-vault-form{{ else }}data-unconnected{{ end }} novalidate>
     {{- range $i, $f := $p.Params.form }}
     {{- $id := printf "f-%s-%d" ($f.name | default "x") $i }}
@@ -30,6 +34,19 @@
     {{- end }}
     {{ partial "sq/form-honeypot.html" . }}
     <div class="form-submit"><button type="submit" class="btn btn--primary"><span class="sub-btn-label">{{ $p.Params.submit_label | default "Submit" }}</span><span class="sub-btn-dot" aria-hidden="true"></span></button></div>
-    <div class="form-msg" role="status" hidden>{{ if $action }}Thank you!{{ else }}This form isn't connected yet.{{ end }}</div>
+    {{- if not $action }}
+    <div class="form-msg" role="status" hidden>This form isn't connected yet.</div>
+    {{- end }}
   </form>
+  {{- /* What replaces the form once it has been sent (the page's `done` front matter): thanks, what happens next,
+         and the two ways on. Squarespace's own message here was only "Thank you!". */}}
+  {{- $d := $p.Params.done | default dict }}
+  <div class="form-done sq-text" role="status" tabindex="-1" hidden>
+    <h2>{{ $d.title | default "Thank you!" }}</h2>
+    <p class="sqsrte-large">{{ $d.text | default "We'll take a look at your game." }}</p>
+    <div class="form-done-links">
+      <button type="button" class="btn form-again">{{ $d.again | default "Submit another game" }}</button>
+      <a class="btn btn--secondary" href="{{ "/" | relURL }}">{{ $d.back | default "Back to the games" }}</a>
+    </div>
+  </div>
 </div>

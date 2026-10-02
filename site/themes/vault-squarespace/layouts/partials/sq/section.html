@@ -26,9 +26,12 @@
   {{- end }}
   <div class="sq-wrap">
     {{- if $s.blocks }}
+    {{- /* the blocks' grid areas, kept from running under one another: partials/sq/areas.html */}}
+    {{- $am := partial "sq/areas.html" (dict "blocks" $s.blocks "key" "aream") }}
+    {{- $ad := partial "sq/areas.html" (dict "blocks" $s.blocks "key" "aread") }}
     <div class="fe" style="--rm:{{ $rows.m | default 1 }};--rd:{{ $rows.d | default 1 }}">
       {{- range $i, $b := $s.blocks }}
-      {{- $style := printf "--am:%s;--ad:%s;--zm:%v;--zd:%v;--jm:%s;--jd:%s;--alm:%s;--ald:%s" ($b.aream | default "auto") ($b.aread | default "auto") ($b.zm | default 0) ($b.zd | default 0) ($b.jm | default "flex-start") ($b.jd | default "flex-start") ($b.am | default "flex-start") ($b.ad | default "flex-start") }}
+      {{- $style := printf "--am:%s;--ad:%s;--zm:%v;--zd:%v;--jm:%s;--jd:%s;--alm:%s;--ald:%s" (index $am $i) (index $ad $i) ($b.zm | default 0) ($b.zd | default 0) ($b.jm | default "flex-start") ($b.jd | default "flex-start") ($b.am | default "flex-start") ($b.ad | default "flex-start") }}
       <div class="fb fb-{{ $b.type }}{{ if or $b.sticky $b.stickym }} sticky-m{{ end }}{{ if $b.stickyd }} sticky-d{{ end }}{{ with $b.role }} role-{{ . }}{{ end }}" style="{{ $style | safeCSS }}">
         {{- $hook := "" }}{{ with $.hooks }}{{ $hook = index . $b.type | default "" }}{{ end }}
         {{- if $hook }}{{ partial $hook (dict "b" $b "page" $.page "key" (printf "%s-%d" $.key $i)) }}

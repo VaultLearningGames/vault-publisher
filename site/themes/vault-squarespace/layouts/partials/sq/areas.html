@@ -1,0 +1,37 @@
+{{- /*
+  The grid areas of a section's blocks ("row/column/row/column", as in the page data), with one correction: content
+  blocks never share a grid cell. Squarespace's editor lets a block's box run on under the block below it (a heading
+  given three rows with the paragraph starting on its third; a description whose box also holds the Play button; the
+  Submit a Game text and its form). That shows nothing wrong at the width the page was designed at, but the rows are
+  a fixed height while the text is fluid, so at other widths the upper block's text wraps onto the lower block and is
+  drawn through it. Here the upper block ends on the row where the lower one starts: the rows then grow with its
+  text and push the lower block down. Blocks that already fit are where they were.
+  Images are left alone (text is laid over pictures on purpose), and so are blocks that start on the same row.
+  Params: blocks, key ("aream" for phones, "aread" from 768px). Returns one area per block.
+*/ -}}
+{{- $key := .key -}}
+{{- $boxes := slice -}}
+{{- range .blocks -}}
+  {{- $p := split (index . $key | default "") "/" -}}
+  {{- if and (ne .type "image") (eq (len $p) 4) -}}
+    {{- $boxes = $boxes | append (dict "ok" true "r1" (int (index $p 0)) "c1" (int (index $p 1)) "r2" (int (index $p 2)) "c2" (int (index $p 3))) -}}
+  {{- else -}}
+    {{- $boxes = $boxes | append (dict "ok" false) -}}
+  {{- end -}}
+{{- end -}}
+{{- $out := slice -}}
+{{- range $i, $b := .blocks -}}
+  {{- $a := index $boxes $i -}}
+  {{- $area := index $b $key | default "auto" -}}
+  {{- if $a.ok -}}
+    {{- $end := $a.r2 -}}
+    {{- range $j, $o := $boxes -}}
+      {{- if and $o.ok (ne $i $j) -}}
+        {{- if and (gt $o.r1 $a.r1) (lt $o.r1 $end) (lt $o.c1 $a.c2) (lt $a.c1 $o.c2) }}{{ $end = $o.r1 }}{{ end -}}
+      {{- end -}}
+    {{- end -}}
+    {{- $area = printf "%d/%d/%d/%d" $a.r1 $a.c1 $end $a.c2 -}}
+  {{- end -}}
+  {{- $out = $out | append $area -}}
+{{- end -}}
+{{- return $out -}}

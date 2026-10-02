@@ -25,6 +25,19 @@ fonts or third-party Squarespace plugins are used, and nothing is loaded from Sq
   than the size at which its widest word fits its column or card, so a long word ("Transformations") shrinks the
   title instead of overflowing, running into the next card or breaking in the middle: `partials/sq/title-fit.html`
   works out the word's width from Base 9 Sans's advance widths and the CSS ("Titles that fit") does the rest.
+* Blocks never run into each other. Squarespace's grid rows have a fixed minimum height while the type is fluid, and
+  its editor lets one block's box run on under the next (a heading given three rows with its paragraph starting on
+  the third; a game's description whose box also holds the Play button). `partials/sq/areas.html` ends such a block
+  where the next one starts, so its rows grow with its text and push the next block down instead of the two being
+  drawn through each other; blocks that fit are where they were. Images are left alone: text over pictures is the
+  design.
+* The forms (`partials/sq/newsletter.html`, `partials/sq/submit-form.html`, the script in `vault-sq.js`) post to the
+  portal. Submit a Game marks each field that needs attention under its label; one message at the top of the form
+  is only for a failure that belongs to no field (the portal is down or refuses the form). Once sent, the form gives
+  way to a confirmation (the `done` texts in `content/submit-a-game.md`) and the grid rows the form needed are
+  closed up. After signing up, Join Vault is only its `success` line (`pages.json`, the footer's newsletter block),
+  centred in a block no taller than it needs. With JavaScript off the portal sends the browser back to
+  `#form-submitted`, the id of the page's form block, and the CSS shows the same thanks (`:target`).
 * Fonts: Montserrat and Archivo are self-hosted (OFL). Headings are Base 9 Sans (Adobe Fonts): set
   `params.fonts.adobe_kit` to an Adobe Fonts web project containing Base 9 Sans Regular and Bold (and italics);
   until then Share Tech Mono (self-hosted, OFL) stands in.

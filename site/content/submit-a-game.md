@@ -21,4 +21,11 @@ form:
   - { name: description, label: "What is the full description of this game?", desc: "Feel free to link to an external site or paste the text below", type: textarea }
   - { name: subjects, label: "What is the subject of the game", desc: "Select all that apply", type: checkbox, options: ["Art", "Business (marketing, personal finance)", "Ecology", "English Language Learning / English as a second Language", "Family & Consumer Science Education", "Health", "Information Technology", "Language Arts", "Math", "Science", "Social Studies", "Technology Education", "World Languages"] }
 submit_label: "Submit"
+# What replaces the form once it has been sent: a heading, a sentence, and the labels of the two ways on (send
+# another game: the empty form again; back: the home page, where the games are).
+done:
+  title: "Thank you!"
+  text: "We'll take a look at your game."
+  again: "Submit another game"
+  back: "Back to the games"
 ---

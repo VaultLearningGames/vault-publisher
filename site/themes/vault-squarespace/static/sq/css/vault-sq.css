@@ -154,17 +154,20 @@ main { display: block; }
 }
 @media (prefers-reduced-motion: reduce) { .sq-gen i { animation: none; } }
 
-.fe { --gg: 11px; --gut: calc(var(--gutter) - var(--gg)); --cw: calc((1500px - var(--gg) * 7) / 8);
+/* Rows are at least --row high and grow with what is in them. Blocks that hold text or controls never share a cell
+   (partials/sq/areas.html), so a block that needs more room pushes the ones below it down instead of being drawn
+   through them. */
+.fe { --gg: 11px; --gut: calc(var(--gutter) - var(--gg)); --cw: calc((1500px - var(--gg) * 7) / 8); --row: 24px;
   display: grid; position: relative; gap: var(--gg);
   grid-template-columns: minmax(var(--gut), 1fr) repeat(8, minmax(0, var(--cw))) minmax(var(--gut), 1fr);
-  grid-template-rows: repeat(var(--rm), minmax(24px, auto)); overflow-x: clip; }
+  grid-template-rows: repeat(var(--rm), minmax(var(--row), auto)); overflow-x: clip; }
 .fb { grid-area: var(--am); z-index: var(--zm); display: flex; flex-direction: column; justify-content: var(--jm);
   --j: var(--jm); --al: var(--alm); min-width: 0; }
 .fb.sticky-m { position: sticky; top: var(--hh); }
 @media (min-width: 768px) {
-  .fe { --cw: calc((1500px - var(--gg) * 23) / 24); --cont: min(1500px, calc(100vw - var(--gutter) * 2));
+  .fe { --cw: calc((1500px - var(--gg) * 23) / 24); --cont: min(1500px, calc(100vw - var(--gutter) * 2)); --row: calc(var(--cont) * .0215);
     grid-template-columns: minmax(var(--gut), 1fr) repeat(24, minmax(0, var(--cw))) minmax(var(--gut), 1fr);
-    grid-template-rows: repeat(var(--rd), minmax(calc(var(--cont) * .0215), auto)); }
+    grid-template-rows: repeat(var(--rd), minmax(var(--row), auto)); }
   .fb { grid-area: var(--ad); z-index: var(--zd); justify-content: var(--jd); --j: var(--jd); --al: var(--ald); }
   .fb.sticky-m { position: relative; top: auto; align-self: stretch; }
   .fb.sticky-d { position: sticky; top: var(--hh); }
@@ -269,6 +272,16 @@ main { display: block; }
 .news-msg { margin-top: 16px; }
 .news-msg:first-child, .sq-news [hidden] + .news-msg { margin-top: 0; }
 .news-form > [hidden] { display: none; }
+/* Signed up (vault-sq.js): the form is gone and only its thank-you line is left. The section stops being a grid of
+   form-sized rows and becomes that line, centred, with the same space above it as below: in the footer the credits
+   underneath start one empty row down, so the space below is that much less here. */
+.news-form.is-done .news-msg { max-width: 22em; margin: 0 auto; font-size: var(--h4); line-height: 1.4; text-wrap: balance; }
+.fe.is-done { --pad: clamp(56px, 9vw, 104px); display: block; padding: var(--pad) var(--gutter) calc(var(--pad) - var(--row) - var(--gg)); }
+/* The same with JavaScript off: after a plain POST the portal sends the browser back to #form-submitted, which is the
+   id of the page's sign-up block (partials/sq/newsletter.html). */
+html:not(.js) .sq-news:target .news-form > * { display: none; }
+html:not(.js) .sq-news:target .news-form > .news-msg { display: block; max-width: 22em; margin: 0 auto; font-size: var(--h4); line-height: 1.4; text-wrap: balance; }
+html:not(.js) .fe:has(.sq-news:target) { --pad: clamp(56px, 9vw, 104px); display: block; padding: var(--pad) var(--gutter) calc(var(--pad) - var(--row) - var(--gg)); }
 /* sending: Squarespace's spinner in place of the label */
 .news-btn { position: relative; }
 .news-spin { visibility: hidden; position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; }
@@ -425,8 +438,25 @@ main { display: block; }
 .form-submit .btn { height: 52.8px; padding: 16px 20.8px; font-size: 16px; line-height: normal; }
 .form-msg { margin-top: 16px; }
 .sub-form > [hidden] { display: none; }
-.sub-form .form-msg:not([hidden]) { margin-top: 0; }
-/* errors: Squarespace's red pills, one at the top of the form and one under each field's label */
+/* Sent (vault-sq.js): the confirmation takes the form's place, in the page's own heading and text styles on a panel
+   of the fields' colour, with the two ways on as buttons. */
+.sq-form.is-done { padding: 0; border: 0; margin: 21px 0; }
+.form-done { padding: clamp(28px, 7%, 56px); background: var(--light-accent); border-radius: 0 45px 45px 45px; }
+.form-done[hidden] { display: none; }
+.form-done:focus { outline: none; }
+.form-done h2 { margin-bottom: 12px; }
+.form-done p { margin: 0; }
+.form-done-links { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; }
+.form-done-links .btn { min-height: 52.8px; padding: 12px 24px; color: var(--btn-fg); text-decoration: none; }
+.form-done-links .btn--secondary { padding: 8px 24px; color: var(--btn2); }
+.form-done-links .btn:focus-visible { outline: 3px solid var(--dark-accent); outline-offset: 3px; }
+/* The same with JavaScript off (#form-submitted is the form block's id on this page). The rows the form needed stay,
+   since only the script can take them out, and "Submit another game" needs the script too. */
+html:not(.js) .sq-form:target { padding: 0; border: 0; margin: 21px 0; }
+html:not(.js) .sq-form:target .sub-form, html:not(.js) .form-again { display: none; }
+html:not(.js) .sq-form:target .form-done { display: block; }
+/* errors: Squarespace's red pills, one under the label of each field that needs attention; one at the top of the form
+   (--top) only for a failure that belongs to no field (the form could not be sent or saved) */
 .form-field-error { display: flex; align-items: flex-start; gap: 10px; width: fit-content; max-width: 100%; margin: 0 0 4px; padding: 6px 10px;
   border-radius: 23.86px; background: #ce2c30; color: #fff; font: 400 14px/21px var(--body); }
 .form-field-error svg { flex: none; margin: 3px 0; }

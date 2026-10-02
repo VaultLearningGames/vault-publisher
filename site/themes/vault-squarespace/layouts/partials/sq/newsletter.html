@@ -1,9 +1,12 @@
 {{- /* Join Vault sign-up. Posts to params.forms.newsletter (the portal's /v1/forms/newsletter, set at build time from
-       VAULT_PORTAL); when that's empty the form says it isn't connected. vault-sq.js sends it and shows the result the
-       way Squarespace's newsletter block does. */ -}}
+       VAULT_PORTAL); when that's empty the form says it isn't connected. vault-sq.js sends it and shows the result:
+       an error the way Squarespace's newsletter block does, and after signing up only the block's `success` line. */ -}}
 {{- $b := .b -}}
 {{- $action := site.Params.forms.newsletter -}}
-<div class="sq-news">
+{{- /* The page's first form block is where the portal's #form-submitted points after a plain POST (JavaScript off):
+       the CSS shows that block's thanks through :target. Only one block per page can have the id. */ -}}
+{{- $target := not (page.Store.Get "form-target") }}{{ page.Store.Set "form-target" true -}}
+<div class="sq-news"{{ if and $target $action }} id="form-submitted"{{ end }}>
   <form class="news-form" method="post" {{ with $action }}action="{{ . }}" data-vault-form{{ else }}data-unconnected{{ end }}>
     <h2 class="news-title">{{ $b.title }}</h2>
     <div class="news-desc">{{ $b.description | safeHTML }}</div>
@@ -16,7 +19,7 @@
     </div>
     {{ partial "sq/form-honeypot.html" . }}
     <div class="news-submit"><button type="submit" class="btn btn--primary news-btn"><span class="news-spin" aria-hidden="true"></span><span class="news-btn-label">{{ $b.button }}</span></button></div>
-    <div class="news-msg" role="status" hidden>{{ if $action }}{{ $b.success | default "Thank you!" }}{{ else }}Sign-up isn't connected yet.{{ end }}</div>
+    <div class="news-msg" role="status" hidden>{{ if $action }}{{ $b.success | default "Thanks for Joining! We'll be in Touch Soon!" }}{{ else }}Sign-up isn't connected yet.{{ end }}</div>
     <div class="news-foot">{{ $b.footnote | safeHTML }}</div>
   </form>
 </div>

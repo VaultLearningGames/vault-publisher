@@ -111,13 +111,24 @@ export function createApp(deps: AppDeps) {
     }
   }
 
+  // Which studio a repository publishes for. A repository assigned to a studio (studio_repositories) publishes for
+  // that studio whatever organization owns it, so one organization can hold several studios' games; every other
+  // repository publishes for the studio registered for its owner. Both are matched by GitHub's numeric ids, which
+  // survive renames.
   function studioFor(id: GitHubIdentity): Studio {
+    const binding = db.repositoryBinding(id.repositoryId);
+    if (binding) {
+      if (binding.repository !== id.repository) db.renameBoundRepository(binding.repository_id, id.repository);
+      return db.studioById(binding.studio_id)!;
+    }
     const studio = db.studioByOwnerId(id.ownerId);
-    if (!studio) fail(403, `GitHub owner ${id.owner} is not a registered studio`);
+    if (!studio) fail(403, `GitHub owner ${id.owner} is not a registered studio, and ${id.repository} is not assigned to one`);
     return studio;
   }
 
-  // A game belongs to the repository that first published it.
+  // A game belongs to the repository that first published it. It is looked up only among the games of the studio
+  // the repository publishes for, so a repository assigned to one studio can't reach a same-named game of its
+  // organization's studio, or the other way round.
   function gameFor(studio: Studio, id: GitHubIdentity, slug: unknown, opts: { create: boolean }): Game {
     if (!isSlug(slug)) fail(400, 'game must be a lowercase slug like "aqualab"');
     let game = db.game(studio.id, slug);
@@ -384,7 +395,10 @@ export function createApp(deps: AppDeps) {
 
   app.post('/v1/previews/:uploadId/finalize', async (c) => {
     const id = await github(c);
-    return c.json(await finishUpload(c.req.param('uploadId'), (g) => g.repository_id === id.repositoryId, `github:${id.actor}`, { repository: id.repository }));
+    // The repository that started the upload, still publishing for the game's studio (it may have been assigned to
+    // another studio since).
+    const studio = studioFor(id);
+    return c.json(await finishUpload(c.req.param('uploadId'), (g) => g.repository_id === id.repositoryId && g.studio_id === studio.id, `github:${id.actor}`, { repository: id.repository }));
   });
 
   // Vault uploads a build for any studio's game: games that aren't built by the studio's own CI yet (e.g. copied from

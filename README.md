@@ -31,6 +31,7 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | `src/portal/routes.ts` | Portal HTML pages + `/portal/api/*` routes |
 | `src/portal/{listings,people,featured,listing-preview,image-migration,availability}.ts` | Portal features by domain |
 | `src/{releases,storage,paths,config,forms,catalog,game-checks}.ts` | Domain logic |
+| `src/studios-file.ts` | `studios.json` at startup: studios and the repositories assigned to them |
 
 ### API
 
@@ -54,7 +55,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `POST /portal/api/s/:studio/g/:game/…` | `release`, `promote`, `withdraw`, `delete`, `freeze`, `request` |
 | | `POST /portal/api/requests/:id/…` | Release requests: `approve`, `reject`, `withdraw` |
 | | `POST /portal/api/s/:studio/members[?]` | Studio members add/remove, website URL |
-| | `POST /portal/api/vault/…` | Vault-admin: studios CRUD, users/roles, listings import, featured |
+| | `POST /portal/api/vault/…` | Vault-admin: studios CRUD, a studio's `repositories` (add/remove), users/roles, listings import, featured |
 | | `GET /v1/listing-previews/:token` | Unsaved listing previews |
 
 **Admin-lane** routes (`/v1/admin/*`) additionally require the token's repository to be the admin repo running in the protected environment; **portal mutations** require a signed-in Vault-admin session.
@@ -64,7 +65,9 @@ Vault also runs a separate staging copy of all of this (site, portal, test build
 
 ## Set up a game
 
-1. Ask Vault to register your GitHub organization as a studio.
+1. Ask Vault to register your GitHub organization as a studio. (A game whose repository lives in someone else's
+   organization, such as the `hosted-*` repositories in VaultLearningGames, is registered by repository instead: Vault
+   assigns that one repository to your studio.)
 2. Make `VAULT_PUBLISHER_URL` = `https://portal.vaultlearninggames.org` available to the repo (organization or
    repository variable).
 3. Add one workflow. Unity:
@@ -95,6 +98,14 @@ jobs:
 Build committed to the repo: one job, `publish-preview.yml@v1` with `{ game: my-game, path: WebGL }`.
 Any other build: after it, `uses: VaultLearningGames/vault-publisher/action@v1` with `game`, `path` and
 `publisher-url: ${{ vars.VAULT_PUBLISHER_URL }}`.
+
+**Which studio a build goes to.** The publisher reads the GitHub Actions OIDC token: a repository that Vault has
+assigned to a studio (matched by GitHub's numeric repository id) publishes for that studio; any other repository
+publishes for the studio registered for its owner (the organization's numeric id). So one organization can hold
+several studios' games: VaultLearningGames' own repositories publish as `vault`, while
+`VaultLearningGames/hosted-shadowspect` publishes as `mit-education-arcade`. Games are looked up only inside that
+studio, so an assigned repository and its organization's studio can't touch each other's games, even with the same
+game name.
 
 The first repository to publish a game name owns it. Branch names with `/` become `_`. Deleting a branch removes its
 preview; previews idle for 90 days are removed.

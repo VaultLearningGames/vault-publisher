@@ -294,11 +294,32 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
   wherever the studio is named as a game's maker, via `/v1/catalog`), applied at startup only to studios whose website
   has never been set. After that the website is changed in the portal (the studio's **Members** page, for studio
   admins and Vault admins, or **Vault → Studios**), and portal edits, including clearing it, always win over the file.
+- **One organization hosting several studios** (VaultLearningGames holds `hosted-*` repositories that belong to other
+  studios): a GitHub organization can be registered to one studio only (`studios.github_owner_id` is unique; never
+  give a second studio the same id, the service won't start). Assign the single repository to its studio instead.
+  A repository assigned to a studio publishes for that studio whatever organization it is in; every other repository
+  still goes by its organization. Two ways, both keyed by GitHub's numeric repository id
+  (`gh api repos/OWNER/NAME --jq .id`), which survives renames:
+  - **In the portal:** **Vault → Studios → the studio → Repositories that publish for this studio** (Vault admins).
+    Type `OWNER/NAME`; the portal looks the id up on GitHub. It can't see a private repository, so type its id as
+    well. *Remove* stops the repository publishing for the studio (it falls back to its organization's studio, if
+    any); games it already published stay with the studio. Changes are in **Activity**
+    (`studio.repository.add` / `studio.repository.remove`).
+  - **In `studios.json`:** `"repositories": [{ "name": "VaultLearningGames/hosted-shadowspect", "id": "412239602" }]`
+    on the studio's entry, synced at every startup. The file is authoritative for the repositories it lists (they
+    are read-only in the portal, and one it stops listing is unassigned at the next startup), it never deletes an
+    assignment made in the portal, and it never moves a repository the portal assigned to another studio. Any entry
+    it can't apply (a bad name or id, a repository listed twice, that conflict) is skipped with an error in the log:
+    startup carries on.
+
+  The repository's workflow is the usual one (README, *Set up a game*) with `VAULT_PUBLISHER_URL` set as a
+  **repository** variable when it should differ from the organization's. A game Vault uploaded for the studio
+  earlier (`vault:STUDIO/GAME`) is taken over by the assigned repository on its first publish, like any studio's.
 - **Removing a studio:** a Vault admin opens **Vault → Studios → the studio** and confirms *Delete studio*, or runs
   `node scripts/remove-studio.ts STUDIO-ID-OR-SLUG` against a copy of the database (it is a dry run without `--yes`,
   and prints every row that would be removed). Only an empty studio can go: any CDN game or site listing, in any
-  state, refuses the removal with the counts (its members are removed with it; the removal is written to the audit
-  log). The delete is scoped to the studio's own primary key and changes nothing by the studio's GitHub owner id, so
+  state, refuses the removal with the counts (its members and repository assignments are removed with it; the
+  removal is written to the audit log). The delete is scoped to the studio's own primary key and changes nothing by the studio's GitHub owner id, so
   a studio that shares an owner id with the publisher's organization removes without touching that organization's
   publishing setup. A studio listed in `studios.json` comes back at the next startup unless its entry is removed from
   the file, which is why the empty *Vault Learning Games* studio (the publisher's own organization) goes by removing

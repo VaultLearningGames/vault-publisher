@@ -15,12 +15,18 @@
     "slug": "mit-education-arcade",
     "name": "MIT Education Arcade",
     "github_owner": "",
-    "github_owner_id": "vault:mit-education-arcade"
+    "github_owner_id": "vault:mit-education-arcade",
+    "repositories": [
+      { "name": "VaultLearningGames/hosted-shadowspect", "id": "412239602" }
+    ]
   },
   {
     "slug": "ucalgary",
     "name": "University of Calgary",
     "github_owner": "",
-    "github_owner_id": "vault:ucalgary"
+    "github_owner_id": "vault:ucalgary",
+    "repositories": [
+      { "name": "VaultLearningGames/hosted-transformation-quest", "id": "679805874" }
+    ]
   }
 ]

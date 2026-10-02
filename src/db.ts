@@ -215,6 +215,22 @@ const MIGRATIONS = [
   UPDATE studios SET github_owner_id = 'vault:mit-education-arcade', github_owner = ''
   WHERE slug = 'mit-education-arcade' AND github_owner_id = '214136763';
   `,
+  // v14: a single repository assigned to a studio, for an organization whose repositories belong to several studios
+  // (VaultLearningGames hosts other studios' games). A repository listed here publishes for that studio whatever
+  // its owner; every other repository still goes by its owner (studios.github_owner_id). repository_id is GitHub's
+  // numeric repository id (it survives renames); repository is "owner/name", for display only.
+  // source: 'file' (studios.json, which stays authoritative for the repositories it lists) or 'portal' (a Vault admin).
+  `
+  CREATE TABLE studio_repositories (
+    repository_id TEXT PRIMARY KEY,
+    repository    TEXT NOT NULL,
+    studio_id     INTEGER NOT NULL REFERENCES studios(id),
+    created_at    TEXT NOT NULL,
+    created_by    TEXT NOT NULL,
+    source        TEXT NOT NULL CHECK (source IN ('file', 'portal'))
+  );
+  CREATE INDEX studio_repositories_studio ON studio_repositories (studio_id);
+  `,
 ];
 
 export interface Listing {
@@ -246,6 +262,22 @@ export interface Studio {
 
 export type StudioSource = 'file' | 'import' | 'portal';
 
+// A repository assigned to a studio: it publishes for that studio whatever organization owns it.
+export interface StudioRepository {
+  repository_id: string;
+  repository: string;
+  studio_id: number;
+  created_at: string;
+  created_by: string;
+  source: 'file' | 'portal';
+}
+// studios.json: one studio's "repositories" entries.
+export interface StudioRepositoriesFile { slug: string; repositories?: unknown }
+export interface RepositorySyncResult { bound: string[]; removed: string[]; skipped: string[] }
+// "owner/name" as GitHub writes it, and GitHub's numeric repository id as text.
+export const REPOSITORY_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/;
+export const REPOSITORY_ID = /^[1-9][0-9]{0,18}$/;
+
 // What keeps a studio from being removed: its CDN games (with their builds, releases and requests) and its site
 // listings, in any state. Members are not a blocker: they go with the studio.
 export interface StudioRemovalBlockers { games: number; listings: number }
@@ -268,6 +300,8 @@ export interface RemoveStudioResult {
   studio: Studio;
   // Every membership row removed (dry run: that would be removed).
   memberships: Membership[];
+  // Every repository assignment removed with it (dry run: that would be removed).
+  repositories: StudioRepository[];
   // Other studios carrying the same GitHub owner id. Their rows are never touched by a removal: the delete is
   // scoped to the studio's own id, and this system keeps no other org-scoped records to revoke.
   sharedWith: Studio[];
@@ -489,19 +523,23 @@ export class Db {
       const listings = Number((this.sqlite.prepare('SELECT COUNT(*) AS n FROM listings WHERE studio_id = ?').get(id) as { n: number }).n);
       if (games || listings) throw new StudioNotEmptyError({ games, listings });
       const memberships = this.memberships(id);
+      const repositories = this.studioRepositories(id);
+      if (repositories.some((r) => r.source === 'file'))
+        warnings.push('studios.json assigns repositories to this studio; they stop publishing for it until the studio is created again.');
       if (opts.dryRun) {
         this.sqlite.exec('ROLLBACK');
-        return { dryRun: true, studio, memberships, sharedWith, warnings };
+        return { dryRun: true, studio, memberships, repositories, sharedWith, warnings };
       }
       // Builds, uploads, releases and release requests all hang off games, which the guard above ruled out.
       for (const m of memberships) this.removeMembership(m.studio_id, m.github_login);
+      this.sqlite.prepare('DELETE FROM studio_repositories WHERE studio_id = ?').run(id);
       this.sqlite.prepare('DELETE FROM studios WHERE id = ?').run(id);
       this.audit(opts.actor, 'studio.delete', studio.slug, {
         name: studio.name, github: studio.github_owner || null, github_owner_id: studio.github_owner_id,
-        members_removed: memberships.length, shared_owner_id_with: sharedWith.map((s) => s.slug), warnings,
+        members_removed: memberships.length, repositories_removed: repositories.map((r) => r.repository), shared_owner_id_with: sharedWith.map((s) => s.slug), warnings,
       });
       this.sqlite.exec('COMMIT');
-      return { dryRun: false, studio, memberships, sharedWith, warnings };
+      return { dryRun: false, studio, memberships, repositories, sharedWith, warnings };
     } catch (err) {
       this.sqlite.exec('ROLLBACK');
       throw err;
@@ -546,6 +584,94 @@ export class Db {
       .all(ownerId) as unknown as Studio[];
     if (rows.length > 1) console.error(`studios: ${rows.length} studios share GitHub owner id ${ownerId}; resolving to ${rows[0].slug}`);
     return rows[0];
+  }
+
+  // ----- repositories assigned to a studio -----
+  repositoryBinding(repositoryId: string): StudioRepository | undefined {
+    return this.sqlite.prepare('SELECT * FROM studio_repositories WHERE repository_id = ?').get(repositoryId) as StudioRepository | undefined;
+  }
+
+  // The studio a repository is assigned to, if any. Publishing checks this before the repository's owner.
+  studioByRepositoryId(repositoryId: string): Studio | undefined {
+    return this.sqlite
+      .prepare('SELECT s.* FROM studios s JOIN studio_repositories r ON r.studio_id = s.id WHERE r.repository_id = ?')
+      .get(repositoryId) as Studio | undefined;
+  }
+
+  studioRepositories(studioId: number): StudioRepository[] {
+    return this.sqlite
+      .prepare('SELECT * FROM studio_repositories WHERE studio_id = ? ORDER BY repository COLLATE NOCASE')
+      .all(studioId) as unknown as StudioRepository[];
+  }
+
+  // Assign a repository to a studio (or move it, or rename it). The caller decides whether that's allowed.
+  bindRepository(b: Omit<StudioRepository, 'created_at'>) {
+    this.sqlite
+      .prepare(`INSERT INTO studio_repositories (repository_id, repository, studio_id, created_at, created_by, source) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (repository_id) DO UPDATE SET repository = excluded.repository, studio_id = excluded.studio_id,
+                  created_by = excluded.created_by, source = excluded.source`)
+      .run(b.repository_id, b.repository, b.studio_id, now(), b.created_by, b.source);
+  }
+
+  // GitHub's own name for the repository (from its publishing token), which follows renames and transfers.
+  renameBoundRepository(repositoryId: string, repository: string) {
+    this.sqlite.prepare('UPDATE studio_repositories SET repository = ? WHERE repository_id = ?').run(repository, repositoryId);
+  }
+
+  unbindRepository(repositoryId: string) {
+    this.sqlite.prepare('DELETE FROM studio_repositories WHERE repository_id = ?').run(repositoryId);
+  }
+
+  // studios.json's "repositories" ([{ "name": "owner/name", "id": "123" }] per studio), synced at startup. The file is
+  // authoritative for the repositories it lists: each is assigned to its studio, and an assignment the file made
+  // earlier and no longer lists is removed. Assignments made in the portal are never deleted, and a repository the
+  // portal assigned to another studio stays there (the file's entry is skipped). Nothing here throws: every entry
+  // that can't be applied is returned in `skipped` with the reason, so a bad entry can never stop the service starting.
+  syncStudioRepositories(studios: StudioRepositoriesFile[]): RepositorySyncResult {
+    const out: RepositorySyncResult = { bound: [], removed: [], skipped: [] };
+    const listed = new Map<string, string>(); // repository id → the studio slug that listed it first
+    for (const s of studios) {
+      if (s.repositories === undefined) continue;
+      if (!Array.isArray(s.repositories)) { out.skipped.push(`${s.slug}: "repositories" must be a list`); continue; }
+      for (const entry of s.repositories) {
+        const { name, id: rawId } = (entry ?? {}) as { name?: unknown; id?: unknown };
+        const id = typeof rawId === 'number' ? String(rawId) : rawId;
+        const label = `${s.slug}: ${typeof name === 'string' ? name : JSON.stringify(entry)}`;
+        try {
+          if (typeof name !== 'string' || !REPOSITORY_NAME.test(name)) { out.skipped.push(`${label}: "name" must be OWNER/NAME`); continue; }
+          if (typeof id !== 'string' || !REPOSITORY_ID.test(id)) { out.skipped.push(`${label}: "id" must be GitHub's numeric repository id`); continue; }
+          const first = listed.get(id);
+          if (first !== undefined) { out.skipped.push(`${label}: repository id ${id} is already listed under ${first}`); continue; }
+          listed.set(id, s.slug);
+          const studio = this.studioBySlug(s.slug);
+          if (!studio) { out.skipped.push(`${label}: there is no studio ${s.slug}`); continue; }
+          const existing = this.repositoryBinding(id);
+          if (existing && existing.source === 'portal' && existing.studio_id !== studio.id) {
+            out.skipped.push(`${label}: repository id ${id} was assigned to ${this.studioById(existing.studio_id)?.slug ?? `studio ${existing.studio_id}`} in the portal; remove it there first`);
+            continue;
+          }
+          if (existing && existing.source === 'file' && existing.studio_id === studio.id && existing.repository === name) continue;
+          this.bindRepository({ repository_id: id, repository: name, studio_id: studio.id, created_by: 'studios.json', source: 'file' });
+          this.audit('studios.json', 'studio.repository.add', `${studio.slug}:${name}`, { repository_id: id, from: existing ? this.studioById(existing.studio_id)?.slug ?? null : null });
+          out.bound.push(`${studio.slug}: ${name}`);
+        } catch (err) {
+          out.skipped.push(`${label}: ${(err as Error).message}`);
+        }
+      }
+    }
+    try {
+      const fromFile = this.sqlite.prepare(`SELECT r.*, s.slug AS studio_slug FROM studio_repositories r JOIN studios s ON s.id = r.studio_id WHERE r.source = 'file'`)
+        .all() as unknown as (StudioRepository & { studio_slug: string })[];
+      for (const r of fromFile) {
+        if (listed.has(r.repository_id)) continue;
+        this.unbindRepository(r.repository_id);
+        this.audit('studios.json', 'studio.repository.remove', `${r.studio_slug}:${r.repository}`, { repository_id: r.repository_id });
+        out.removed.push(`${r.studio_slug}: ${r.repository}`);
+      }
+    } catch (err) {
+      out.skipped.push(`removing repositories studios.json no longer lists: ${(err as Error).message}`);
+    }
+    return out;
   }
 
   studioBySlug(slug: string): Studio | undefined {

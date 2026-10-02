@@ -16,7 +16,7 @@ import { registerFeaturedApi } from './featured.ts';
 import { registerListingAssetsApi } from './listing-assets.ts';
 import { registerListingPreview } from './listing-preview.ts';
 import { registerImageMigration } from './image-migration.ts';
-import { githubAccount, registerPeople, type GitHubAccountLookup } from './people.ts';
+import { githubAccount, githubRepository, registerPeople, type GitHubAccountLookup, type GitHubRepositoryLookup } from './people.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -36,6 +36,7 @@ export interface PortalConfig {
   vaultAdmins: string[];
   oauth?: OAuthClient; // injected in tests
   githubAccount?: GitHubAccountLookup; // injected in tests
+  githubRepository?: GitHubRepositoryLookup; // injected in tests
 }
 
 type ReleaseResult = { release: Release; url: string };
@@ -823,5 +824,5 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   registerListingAssetsApi(app, listingHelpers);
   registerListingPreview(app, listingHelpers);
   registerImageMigration(app, listingHelpers);
-  registerPeople(app, { ...listingHelpers, canManageMembers, vaultAdmins: cfg.vaultAdmins, githubAccount: cfg.githubAccount ?? githubAccount });
+  registerPeople(app, { ...listingHelpers, canManageMembers, vaultAdmins: cfg.vaultAdmins, githubAccount: cfg.githubAccount ?? githubAccount, githubRepository: cfg.githubRepository ?? githubRepository });
 }

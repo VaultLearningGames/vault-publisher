@@ -4,7 +4,7 @@
 // "invited", and the membership takes effect the first time they sign in with GitHub.
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
-import { studioWebsite, StudioNotEmptyError, type Db, type Studio, type StudioRole, type StudioSource, type User, type VaultRole } from '../db.ts';
+import { REPOSITORY_ID, REPOSITORY_NAME, studioWebsite, StudioNotEmptyError, type Db, type Studio, type StudioRole, type StudioSource, type User, type VaultRole } from '../db.ts';
 import { isSlug } from '../paths.ts';
 import { html, type Html } from './html.ts';
 import { ago, head, pill, ROLE_LABEL, VAULT_LABEL, who } from './routes.ts';
@@ -28,6 +28,22 @@ export const githubAccount: GitHubAccountLookup = async (login) => {
   return null;
 };
 
+export interface GitHubRepository { id: string; name: string }
+// Resolves "owner/name" to GitHub's numeric repository id; null if GitHub shows no such repository (which is also
+// what it answers for a private one).
+export type GitHubRepositoryLookup = (name: string) => Promise<GitHubRepository | null>;
+
+// Unauthenticated, like githubAccount, so it only sees public repositories.
+export const githubRepository: GitHubRepositoryLookup = async (name) => {
+  const r = await fetch(`https://api.github.com/repos/${name.split('/').map(encodeURIComponent).join('/')}`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'vault-portal' },
+  });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`GitHub answered HTTP ${r.status}`);
+  const j = (await r.json()) as { id?: number; full_name?: string };
+  return j.id && j.full_name ? { id: String(j.id), name: j.full_name } : null;
+};
+
 interface Helpers {
   db: Db;
   page(c: Context, title: string, body: Html, opts?: { studio?: Studio; active?: string; status?: number }): Response | Promise<Response>;
@@ -41,6 +57,7 @@ interface Helpers {
   canManageMembers(u: User, s: Studio): boolean;
   vaultAdmins: string[];
   githubAccount: GitHubAccountLookup;
+  githubRepository: GitHubRepositoryLookup;
 }
 
 const ROLES: StudioRole[] = ['viewer', 'maintainer', 'admin'];
@@ -71,6 +88,18 @@ function websiteOf(v: unknown): string | null {
 function githubOwnerOf(v: unknown): string {
   const s = typeof v === 'string' ? v.trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/^@/, '').replace(/\/+$/, '') : '';
   if (s && !GITHUB_LOGIN.test(s)) fail(400, 'That isn’t a valid GitHub organization name.');
+  return s;
+}
+// "owner/name", "https://github.com/owner/name" or "…/name.git" → "owner/name".
+function repositoryNameOf(v: unknown): string {
+  const s = typeof v === 'string' ? v.trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '') : '';
+  if (!REPOSITORY_NAME.test(s)) fail(400, 'Type the repository as OWNER/NAME, for example VaultLearningGames/hosted-shadowspect.');
+  return s;
+}
+// GitHub's numeric repository id, typed by hand for a private repository; '' for none.
+function repositoryIdOf(v: unknown): string {
+  const s = typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : '';
+  if (s && !REPOSITORY_ID.test(s)) fail(400, 'The repository id is a number (gh api repos/OWNER/NAME --jq .id).');
   return s;
 }
 
@@ -288,6 +317,71 @@ export function registerPeople(app: Hono, h: Helpers) {
     return h.page(c, 'Studios', body, { active: 'vault-studios' });
   });
 
+  // Single repositories assigned to a studio: they publish for it whatever organization owns them, so one
+  // organization (VaultLearningGames) can hold several studios' games. Vault admins add and remove them; the ones
+  // studios.json lists are read-only here.
+  const repositoriesCard = (s: Studio, admin: boolean) => {
+    const api = `/portal/api/vault/studios/${s.slug}/repositories`;
+    const rows = db.studioRepositories(s.id).map((r) => html`<tr>
+      <td class="proj"><a href="https://github.com/${r.repository}" target="_blank" rel="noopener"><b>${r.repository}</b></a><span class="mono">repository id ${r.repository_id}</span></td>
+      <td class="small">${r.source === 'file' ? pill('brass', 'studios.json') : html`${who(r.created_by)} · ${r.created_at.slice(0, 10)}`}</td>
+      <td class="r">${admin && r.source === 'portal' ? html`<form data-api="${api}/remove" data-then="reload" data-confirm="Stop ${r.repository} publishing for ${s.name}? The games it already published stay with ${s.name}."><input type="hidden" name="id" value="${r.repository_id}"><button class="btn sm">Remove</button>${errSlot}</form>` : ''}</td></tr>`);
+    return html`<div class="card" id="repositories"><h2>Repositories that publish for this studio</h2>
+      <p class="small">A repository listed here publishes its test versions to ${s.name}, whatever GitHub organization it is in. ${s.github_owner ? html`Every other repository in <b>${s.github_owner}</b> publishes to ${s.name} too.` : html`${s.name} has no GitHub organization of its own, so only these repositories can publish to it.`}</p>
+      <div class="tbl-wrap"><table><thead><tr><th>Repository</th><th>Added</th><th></th></tr></thead><tbody>${rows.length ? rows : html`<tr><td colspan="3" class="muted">None.</td></tr>`}</tbody></table></div>
+      ${admin ? html`<form data-api="${api}" data-then="reload" class="inline-form" style="margin-top:14px">
+          <label class="field"><span class="lab">Repository</span><input name="repository" required maxlength="150" autocomplete="off" placeholder="VaultLearningGames/hosted-game"></label>
+          <label class="field"><span class="lab">Repository id (private repositories)</span><input name="id" inputmode="numeric" pattern="[0-9]*" maxlength="19" autocomplete="off" placeholder="looked up on GitHub"></label>
+          <button class="btn pri">Add</button>${errSlot}</form>
+        <p class="small muted">The portal looks up a public repository’s id on GitHub. It can’t see a private one, so type its id too: <span class="mono">gh api repos/OWNER/NAME --jq .id</span>. Repositories listed in <span class="mono">studios.json</span> are changed there.</p>` : ''}</div>`;
+  };
+
+  // Body: { repository: "owner/name", id?: "123" }. The id is GitHub's when GitHub shows the repository; a typed id
+  // is used only when it doesn't (a private repository), and must agree with GitHub's when it does.
+  app.post('/portal/api/vault/studios/:slug/repositories', async (c) => {
+    const u = h.apiUser(c);
+    if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can change which repositories publish for a studio.');
+    const s = db.studioBySlug(c.req.param('slug'));
+    if (!s) fail(404, 'unknown studio');
+    const b = await jsonBody(c);
+    let name = repositoryNameOf(b.repository);
+    const typedId = repositoryIdOf(b.id);
+    let found: GitHubRepository | null = null;
+    let lookupError = '';
+    try { found = await h.githubRepository(name); } catch (err) { lookupError = (err as Error).message; }
+    if (!found && !typedId) {
+      if (lookupError) fail(503, `Couldn’t check ${name} with GitHub (${lookupError}). Try again, or type the repository id.`);
+      fail(400, `GitHub shows no public repository called ${name}. If it is private, type its repository id too (gh api repos/${name} --jq .id).`);
+    }
+    if (found && typedId && found.id !== typedId) fail(400, `GitHub says ${found.name}’s id is ${found.id}, not ${typedId}.`);
+    const id = found?.id ?? typedId;
+    if (found) name = found.name;
+    const existing = db.repositoryBinding(id);
+    if (existing) {
+      const other = db.studioById(existing.studio_id);
+      if (existing.studio_id === s.id) fail(409, `${existing.repository} already publishes for ${s.name}.`);
+      fail(409, `${existing.repository} already publishes for ${other?.name ?? 'another studio'}${existing.source === 'file' ? ' (set in studios.json)' : ''}; remove it there first.`);
+    }
+    db.bindRepository({ repository_id: id, repository: name, studio_id: s.id, created_by: h.actor(u), source: 'portal' });
+    db.audit(h.actor(u), 'studio.repository.add', `${s.slug}:${name}`, { repository_id: id, checked_with_github: !!found });
+    return c.json({ ok: true, repository: name, repository_id: id });
+  });
+
+  // Body: { id }. Games the repository already published stay with the studio.
+  app.post('/portal/api/vault/studios/:slug/repositories/remove', async (c) => {
+    const u = h.apiUser(c);
+    if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can change which repositories publish for a studio.');
+    const s = db.studioBySlug(c.req.param('slug'));
+    if (!s) fail(404, 'unknown studio');
+    const id = repositoryIdOf((await jsonBody(c)).id);
+    const r = id ? db.repositoryBinding(id) : undefined;
+    if (!r || r.studio_id !== s.id) fail(404, `That repository doesn’t publish for ${s.name}.`);
+    if (r.source === 'file') fail(409, `${r.repository} is assigned to ${s.name} in studios.json; remove it there.`);
+    db.unbindRepository(r.repository_id);
+    db.audit(h.actor(u), 'studio.repository.remove', `${s.slug}:${r.repository}`, { repository_id: r.repository_id });
+    return c.json({ ok: true });
+  });
+
   app.get('/vault/studios/:slug', (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isStaff(u)) return h.denied(c, 'Only Vault staff can see this page.');
@@ -303,11 +397,13 @@ export function registerPeople(app: Hono, h: Helpers) {
           <form data-api="/portal/api/vault/studios/${s.slug}" data-then="reload">
             ${studioFields(s, false, fromFile)}
             <p style="margin-top:14px"><button class="btn pri">Save</button> ${errSlot}</p></form></div>
+          ${repositoriesCard(s, true)}
           ${admin ? html`<div class="card"><h2>Delete</h2>
             <p class="small">Only an empty studio can be deleted: its CDN games and site listings must be gone first. Its members go with it. Only the studio's own rows are removed, so nothing other studios or the publisher's repositories rely on changes.</p>
             ${fromFile ? html`<p class="small">${pill('brass', 'studios.json')} This studio is listed in <span class="mono">studios.json</span>; remove that entry from the repository or it comes back at the next deploy.</p>` : ''}
-            <form data-api="/portal/api/vault/studios/${s.slug}/delete" data-then="/vault/studios" data-confirm="${s.members + s.invited ? `Delete ${s.name} and remove its ${s.members + s.invited} member(s)?` : `Delete ${s.name}?`}"><button class="btn">Delete studio</button> ${errSlot}</form></div>` : ''}</div>`
-        : html`<div class="card"><table class="kv"><tbody><tr><th>Name</th><td>${s.name}</td></tr><tr><th>Website</th><td>${s.website || '—'}</td></tr><tr><th>GitHub</th><td>${githubCell(s)}</td></tr></tbody></table></div>`}
+            <form data-api="/portal/api/vault/studios/${s.slug}/delete" data-then="/vault/studios" data-confirm="${s.members + s.invited ? `Delete ${s.name} and remove its ${s.members + s.invited} member(s)?` : `Delete ${s.name}?`}"><button class="btn">Delete studio</button> ${errSlot}</form></div>` : ''}`
+        : html`<div class="card"><table class="kv"><tbody><tr><th>Name</th><td>${s.name}</td></tr><tr><th>Website</th><td>${s.website || '—'}</td></tr><tr><th>GitHub</th><td>${githubCell(s)}</td></tr></tbody></table></div>
+          ${repositoriesCard(s, false)}`}
       </div><div class="grid" style="align-content:start">
         <div class="card small"><h2>About</h2><table class="kv"><tbody>
           <tr><th>Created by</th><td>${sourceCell(s)}</td></tr>

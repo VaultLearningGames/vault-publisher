@@ -7,12 +7,13 @@ import { Db } from './db.ts';
 import { relayoutReleases } from './releases.ts';
 import { createR2Storage } from './storage.ts';
 import { googleSheets } from './forms.ts';
+import { syncStudiosFile } from './studios-file.ts';
 
 const config = loadConfig();
 const db = new Db(config.dbPath);
-// studios.json is authoritative for the studios it lists; studios created in the portal are left alone.
-const synced = db.syncStudios(JSON.parse(readFileSync(config.studiosFile, 'utf8')));
-if (synced.skipped.length) console.error(`studios.json: skipped ${synced.skipped.join(', ')}: the slug belongs to another studio (different GitHub owner id)`);
+// studios.json is authoritative for the studios it lists and the repositories it assigns to them; studios created
+// and repositories assigned in the portal are left alone. Conflicts are logged and skipped.
+syncStudiosFile(db, JSON.parse(readFileSync(config.studiosFile, 'utf8')));
 // Websites for studios that have never had one; the portal is where they're changed after that.
 if (existsSync(config.studioWebsitesFile)) {
   const seeded = db.seedStudioWebsites(JSON.parse(readFileSync(config.studioWebsitesFile, 'utf8')));

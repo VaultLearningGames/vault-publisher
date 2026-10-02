@@ -14,6 +14,7 @@ import { headersFor, isSafeFilePath, isVersionName, sanitizeRefName } from '../p
 import { escape, html, raw, type Html } from './html.ts';
 import { listingPieces, registerListingPages, type ListingRow } from './listings.ts';
 import { registerFeaturedApi } from './featured.ts';
+import { registerSiteChecks } from './site-checks.ts';
 import { registerListingAssetsApi } from './listing-assets.ts';
 import { registerListingPreview } from './listing-preview.ts';
 import { registerListingMakers } from './listing-makers.ts';
@@ -128,6 +129,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
           <div class="nav-sep">Vault</div>
           <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
           <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Game Catalog</a>
+          <a href="/vault/site-checks" class="${active === 'site-checks' ? 'on' : ''}">Site checks</a>
           <a href="/vault/studios" class="${active === 'vault-studios' ? 'on' : ''}">Studios</a>
           <a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>
           <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>` : ''}
@@ -760,6 +762,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
 
   registerListingPages(app, listingHelpers);
   registerFeaturedApi(app, listingHelpers);
+  registerSiteChecks(app, listingHelpers);
   registerListingAssetsApi(app, listingHelpers);
   registerListingPreview(app, listingHelpers);
   registerListingMakers(app, listingHelpers);

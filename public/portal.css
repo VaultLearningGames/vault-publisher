@@ -489,3 +489,15 @@ tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
   }
   .search-results a, .search-results p, .search-results span { overflow-wrap: anywhere; }
 }
+
+/* Vault → Site checks */
+table.site-checks td { vertical-align: top; }
+table.site-checks td.what { min-width: 220px; }
+table.site-checks td.where { min-width: 150px; }
+.n-bad { color: var(--bad); }
+.n-wait { color: var(--wait); }
+/* An address or a word: wraps anywhere rather than being cut, since the end of an address is what tells two apart. */
+.cut { display: inline-block; max-width: min(52ch, 60vw); overflow-wrap: anywhere; font-size: 12px; line-height: 1.45; }
+details.more { margin-top: 4px; }
+details.more summary { cursor: pointer; color: var(--ink-3); }
+details.more ul { margin: 6px 0 0; padding-left: 16px; }

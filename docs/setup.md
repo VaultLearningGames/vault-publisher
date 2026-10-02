@@ -708,3 +708,13 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
   against; default: `PORTAL_URL` without `portal.`) from the environment. Run it locally with
   `node scripts/check-games.ts --portal https://portal.vaultlearninggames-staging.org` (add `--out run.json` for the
   JSON, `--only slug,slug` for a few games); it only reads, and never posts.
+- **Site checks:** `check-site.yml` runs daily at 11:47 UTC for both systems (or by hand, *Run workflow*, with
+  `checks`, `limit` and `fail_on`). The runner does the looking: it installs the dev dependencies and Chromium
+  (`npm ci`, `npx playwright install --with-deps chromium-headless-shell`), runs `scripts/check-site.ts` against the
+  site (`SITE_URL`, default: `PORTAL_URL` without `portal.`), then posts the finished run to the portal
+  (`POST /v1/admin/site-checks`, OIDC like `check-games`, a fresh token) and writes the job summary, annotations and the
+  artifact `site-checks-ENV`. It keeps one issue per system, *Site checks (staging)* / *(production)*, labelled
+  `site-checks`, and **fails the job** when something fails (`fail_on`). A portal without the route answers 404, which
+  is a notice, not a failure. The portal needs no new settings, no browser and no change to the service: it only stores
+  and shows runs (**Vault → Site checks**). It runs about seven to fifteen minutes per system. All of it, with the
+  checks and the limits: [site-checks.md](site-checks.md).

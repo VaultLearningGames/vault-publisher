@@ -24,7 +24,7 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | Database | `node:sqlite`, plain SQL + numbered migrations (`src/db.ts`); no ORM (Postgres-portable) |
 | Storage | Cloudflare R2 via AWS SDK v3 (`src/storage.ts`); build uploads are presigned PUTs (from CI and from the browser) — the API never proxies them. URL monitors stream each file from the studio's site into R2 |
 | Auth | `jose`: GitHub Actions OIDC tokens (CI), Google ID tokens (scheduled tasks); portal login is interactive GitHub OAuth → HMAC-signed `vault_session` cookie (`src/portal/session.ts`) |
-| Deps | `hono`, `@hono/node-server`, `@aws-sdk/client-s3` + `s3-request-presigner`, `jose` — nothing else |
+| Deps | `hono`, `@hono/node-server`, `@aws-sdk/client-s3` + `s3-request-presigner`, `jose`; nothing else at run time. `playwright`, `nspell` and `dictionary-en` are dev dependencies, used only by the [site checks](#site-checks) on a GitHub runner or a developer's machine; the image has no browser |
 
 ### Code layout
 
@@ -48,6 +48,8 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | `site/` | The website: `hugo.toml`, `content/`, `data/`, `themes/vault-squarespace/`, `static/` ([site/README.md](site/README.md)) |
 | `scripts/cloudflare-site-hosts.sh` | Admin, once per hostname: attach it to the site's Worker, detach it, remove its R2-era setup |
 | `scripts/cloudflare-site-rules.sh` | R2-era: the five zone rules a bucket's hostname needed. Kept to remove them (and for a rollback) |
+| `src/site-checks.ts`, `src/site-checks/` | [Site checks](#site-checks): what the measurements mean and the reports (`site-checks.ts`), and the engine that drives Chromium and probes links (`run.ts`; `words.txt`: spellings to accept), which only the command line and the workflow load |
+| `scripts/check-site.ts`, `.github/workflows/check-site.yml` | Site checks from the command line, and daily on a GitHub runner, which posts each run to the portal |
 
 ### API
 
@@ -62,6 +64,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `POST /v1/admin/previews` + `/finalize` | Same, for Vault uploads into any studio's game |
 | | `POST /v1/admin/releases/approve` · `promote` | Approve staging build as release; make current / roll back |
 | | `POST /v1/admin/game-checks` | Post availability-check results |
+| | `POST /v1/admin/site-checks` | A finished [site checks](#site-checks) run from the check-site workflow (`scripts/check-site.ts --out`): validated, counts recomputed, kept (latest 60) → `{ id, counts, url }` |
 | | `GET /v1/admin/listings` · `POST /v1/admin/listings/{import,migrate-images,move,update}` | [Admin tasks](#admin-tasks): the Vault-admin listing operations, for workflows |
 | | `GET /v1/releases/:studio/:game[/check]` | Read-only: a game's releases, or pre-flight check of a release run |
 | | `GET /v1/catalog` | Public: site listings, studios, featured games |
@@ -416,6 +419,16 @@ longer where the site is edited or deployed from. Details of the theme: [site/RE
 The new design (theme `vault-theme`) is not here: it stays in `vault-hugo-rebuild` (`main`), deployed by that
 repository's workflow to Cloud Run `vault-site-staging` (`new-design.vaultlearninggames-staging.org`), and renders its
 own previews from this portal's JSON.
+
+## Site checks
+
+The live website is tested in a headless Chromium: every game opens, no missing images or scripts, no broken links,
+spelling, large files and slow pages, and the layout at phone, tablet, laptop and wide widths.
+`.github/workflows/check-site.yml` does the looking on a GitHub runner, daily for both systems, and posts each finished
+run to that system's portal; **Vault → Site checks** shows them. A failure fails the job, annotates the run and opens or
+updates the issue *Site checks (staging)* / *(production)*. By hand: `gh workflow run check-site.yml -f environment=staging -f checks=links,spelling`,
+or against a local site `npm run site:audit -- --site http://localhost:1313`. The checks, their thresholds, accepting a
+spelling, the limits of the measurements and what it costs (nothing on the portal): [docs/site-checks.md](docs/site-checks.md).
 
 ## Develop
 

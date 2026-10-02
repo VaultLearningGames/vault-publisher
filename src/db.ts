@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import type { RefType } from './paths.ts';
 import type { ListingFields } from './listings.ts';
 import type { GameCheck, GameCheckRun } from './game-checks.ts';
+import type { CheckName, SiteCheckRun } from './site-checks.ts';
 
 // Plain SQL with no SQLite-only features, so a later move to Postgres is a driver swap.
 // Each entry is applied once, in order; PRAGMA user_version tracks progress.
@@ -252,6 +253,28 @@ const MIGRATIONS = [
     created_at      TEXT NOT NULL
   );
   `,
+  // v16: site checks (site-checks.ts): finished runs of the battery of tests against the Vault website, posted by the
+  // check-site workflow. pages/games/warn_count/fail_count are copied out of run_json for the list; run_json holds the
+  // whole SiteCheckRun (summaries and findings).
+  `
+  CREATE TABLE site_checks (
+    id          INTEGER PRIMARY KEY,
+    site        TEXT NOT NULL,
+    status      TEXT NOT NULL CHECK (status IN ('done', 'error')),
+    checks_json TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    source      TEXT,
+    started_by  TEXT NOT NULL,
+    pages       INTEGER NOT NULL,
+    games       INTEGER NOT NULL,
+    warn_count  INTEGER NOT NULL,
+    fail_count  INTEGER NOT NULL,
+    run_json    TEXT NOT NULL,
+    error       TEXT,
+    created_at  TEXT NOT NULL
+  );
+  `,
 ];
 
 export interface Listing {
@@ -456,6 +479,24 @@ export interface GameCheckRow {
   created_at: string;
 }
 
+// A site check run as the list shows it (no findings).
+export interface SiteCheckRow {
+  id: number;
+  site: string;
+  status: SiteCheckRun['status'];
+  checks: CheckName[];
+  started_at: string;
+  finished_at: string;
+  source: string | null;
+  started_by: string;
+  pages: number;
+  games: number;
+  warn_count: number;
+  fail_count: number;
+  error: string | null;
+  created_at: string;
+}
+
 export interface StaleBuild {
   build_id: number;
   studio_slug: string;
@@ -465,6 +506,7 @@ export interface StaleBuild {
 
 const now = () => new Date().toISOString();
 const GAME_CHECKS_KEPT = 120;
+const SITE_CHECKS_KEPT = 60;
 
 export class Db {
   readonly sqlite: DatabaseSync;
@@ -1105,6 +1147,39 @@ export class Db {
     if (!row) return undefined;
     const { results_json, ...rest } = row;
     return { ...rest, games: JSON.parse(results_json) as GameCheck[] };
+  }
+
+  // ---------- site checks ----------
+  // Stores a finished run, as posted by the workflow (already through parseRun). Keeps the most recent SITE_CHECKS_KEPT
+  // runs (a run with a few hundred findings is ~200 KB).
+  addSiteCheck(run: SiteCheckRun, by: string): number {
+    const res = this.sqlite
+      .prepare(`INSERT INTO site_checks (site, status, checks_json, started_at, finished_at, source, started_by, pages, games, warn_count, fail_count, run_json, error, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(run.site, run.status, JSON.stringify(run.checks), run.started_at, run.finished_at, run.source, by, run.pages, run.games, run.counts.warn, run.counts.fail,
+        JSON.stringify({ ...run, started_by: by }), run.error, now());
+    this.sqlite.prepare('DELETE FROM site_checks WHERE id NOT IN (SELECT id FROM site_checks ORDER BY id DESC LIMIT ?)').run(SITE_CHECKS_KEPT);
+    return Number(res.lastInsertRowid);
+  }
+
+  private siteCheckRow(r: Record<string, unknown>): SiteCheckRow {
+    const { checks_json, run_json: _run, ...rest } = r;
+    return { ...rest, checks: JSON.parse(checks_json as string) } as unknown as SiteCheckRow;
+  }
+
+  // Recent runs, newest first, without their findings.
+  siteChecks(limit = 30): SiteCheckRow[] {
+    return this.sqlite.prepare(`SELECT id, site, status, checks_json, started_at, finished_at, source, started_by, pages, games, warn_count, fail_count, error, created_at
+      FROM site_checks ORDER BY id DESC LIMIT ?`).all(limit).map((r) => this.siteCheckRow(r));
+  }
+
+  // One run with everything; the latest when id is omitted.
+  siteCheck(id?: number): (SiteCheckRow & { run: SiteCheckRun }) | undefined {
+    const r = (id === undefined
+      ? this.sqlite.prepare('SELECT * FROM site_checks ORDER BY id DESC LIMIT 1').get()
+      : this.sqlite.prepare('SELECT * FROM site_checks WHERE id = ?').get(id)) as Record<string, unknown> | undefined;
+    if (!r) return undefined;
+    return { ...this.siteCheckRow(r), run: JSON.parse(r.run_json as string) as SiteCheckRun };
   }
 
   audit(actor: string, action: string, target: string, detail?: unknown) {

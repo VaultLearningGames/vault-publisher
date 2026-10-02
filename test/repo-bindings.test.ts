@@ -292,7 +292,7 @@ describe('studios.json repositories at startup', () => {
       old.syncStudios(FILE);
       old.createStudio({ slug: 'phet', name: 'PhET', github_owner: '', github_owner_id: 'vault:phet' });
       const vaultGame = old.createGame(old.studioBySlug('vault')!.id, 'test-game', 'VaultLearningGames/vault-publisher-test', '700');
-      old.sqlite.exec('DROP TABLE url_monitors; DROP TABLE studio_repositories; PRAGMA user_version = 11;'); // (v15, v14)
+      old.sqlite.exec('DROP TABLE site_checks; DROP TABLE url_monitors; DROP TABLE studio_repositories; PRAGMA user_version = 11;'); // (v16, v15, v14)
       old.sqlite.close();
 
       const shipped = JSON.parse(readFileSync(new URL('../studios.json', import.meta.url), 'utf8')) as StudiosFileEntry[];
@@ -301,7 +301,7 @@ describe('studios.json repositories at startup', () => {
       for (let boot = 0; boot < 2; boot++) {       // the migration start, then an ordinary restart
         const started = new Db(path);
         syncStudiosFile(started, shipped, log);
-        assert.equal((started.sqlite.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 15); // v14 studio_repositories, v15 url_monitors
+        assert.equal((started.sqlite.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 16); // v14 studio_repositories, v15 url_monitors, v16 site_checks
         assert.equal(started.studioByOwnerId(ORG)!.slug, 'vault');
         assert.equal(started.studioBySlug('mit-education-arcade')!.github_owner_id, 'vault:mit-education-arcade');
         assert.equal(started.studioBySlug('ucalgary')!.github_owner_id, 'vault:ucalgary');
@@ -324,7 +324,7 @@ describe('studios.json repositories at startup', () => {
       const old = new Db(path);
       old.syncStudios(FILE.filter((s) => s.slug !== 'vault'));
       old.sqlite.exec(`UPDATE studios SET github_owner_id = '${ORG}', github_owner = 'VaultLearningGames' WHERE slug = 'mit-education-arcade';
-        DROP TABLE url_monitors; DROP TABLE studio_repositories; PRAGMA user_version = 12;`);
+        DROP TABLE site_checks; DROP TABLE url_monitors; DROP TABLE studio_repositories; PRAGMA user_version = 12;`);
       old.sqlite.close();
       const started = new Db(path);
       const errors: string[] = [];

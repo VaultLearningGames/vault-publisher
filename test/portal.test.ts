@@ -2,6 +2,7 @@ import { beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Readable } from 'node:stream';
 import { createApp } from '../src/app.ts';
+import { parseSupportUrl } from '../src/config.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db, studioWebsite } from '../src/db.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
@@ -101,6 +102,44 @@ describe('sign-in', () => {
   test('a tampered session cookie is ignored', async () => {
     const r = await app.request('/s/fieldday', { headers: { Cookie: 'vault_session=eyJ1aWQiOjF9.forged' } });
     assert.equal(r.status, 302);
+  });
+});
+
+describe('“Need support?”', () => {
+  const SLACK = 'https://join.slack.com/t/opengamedata/shared_invite/zt-21befx5si-cTwbmJgEAJzKUg_23uQi2w';
+  const link = (url: string) => new RegExp(`<a href="${url.replace(/[.?/]/g, '\\$&')}" target="_blank" rel="noopener"[^>]*>`);
+
+  test('the Slack invitation and its channel, on the sign-in page and in every signed-in page’s sidebar', async () => {
+    const login = await (await app.request('/login')).text();
+    assert.match(login, link(SLACK));
+    assert.match(login, /Need support\?[^]*#vault-game-publishing-support/);
+    // Everyone signed in, whatever they can see: a viewer, Vault staff, someone with no studio yet, and a refusal.
+    for (const [who, path] of [[as('vera', 'none', 'viewer'), '/s/fieldday'], [as('boss', 'admin'), '/vault/people'], [as('nobody'), '/'], [as('vera', 'none', 'viewer'), '/vault']] as const) {
+      const page = await (await who.get(path)).text();
+      const foot = page.slice(page.indexOf('class="side-foot"'), page.indexOf('</aside>'));
+      assert.match(foot, link(SLACK), path);
+      assert.match(foot, />Need support\? ↗<\/a>[^]*<b>#vault-game-publishing-support<\/b> channel/, path);
+    }
+  });
+
+  test('SUPPORT_URL replaces the link; unset or empty is the default; anything that isn’t a link hides it', async () => {
+    assert.equal(parseSupportUrl(undefined), SLACK);
+    assert.equal(parseSupportUrl(' '), SLACK, 'the deploy passes a variable that isn’t set as empty');
+    assert.equal(parseSupportUrl(' https://help.example.org/vault '), 'https://help.example.org/vault');
+    for (const off of ['none', 'off', 'javascript:alert(1)']) assert.equal(parseSupportUrl(off), '', off);
+
+    const portal = { baseUrl: 'https://portal.test', sessionSecret: SECRET, vaultAdmins: ['boss'] };
+    const base = { db, staging, production: prod, verifier, stagingPublicUrl: 'https://stg.test', prodPublicUrl: 'https://prod.test',
+      adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production', previewRetentionDays: 90, taskInvokerEmail: 'x@y' };
+    app = createApp({ ...base, portal: { ...portal, supportUrl: 'https://help.example.org/vault' } });
+    for (const page of [await (await app.request('/login')).text(), await (await as('vera', 'none', 'viewer').get('/s/fieldday')).text()]) {
+      assert.match(page, link('https://help.example.org/vault'));
+      assert.ok(!page.includes(SLACK));
+    }
+    app = createApp({ ...base, portal: { ...portal, supportUrl: '' } });
+    for (const page of [await (await app.request('/login')).text(), await (await as('vera', 'none', 'viewer').get('/s/fieldday')).text()]) {
+      assert.doesNotMatch(page, /Need support|slack\.com|class="support"/);
+    }
   });
 });
 

@@ -267,4 +267,6 @@ Locally: `node scripts/admin-task.ts --portal URL --task TASK --args 'JSON' [--d
 ## Develop
 
 Node 24, no build step: `npm install && npm test`. Preview the portal with example data: `node scripts/dev-portal.ts`.
+The portal's "Need support?" link (sidebar foot and sign-in page) is `SUPPORT_URL`: by default the invitation to the
+Slack workspace, where people join `#vault-game-publishing-support`; `none` hides it.
 Deployment and cloud setup: [docs/setup.md](docs/setup.md).

@@ -327,6 +327,9 @@ details.data-table td, details.data-table th { padding: 5px 8px; }
 .me { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; color: var(--ink-2); }
 .me img { border-radius: 50%; }
 .side-foot form { margin: 0; }
+/* "Need support?" above the signed-in user: the Slack invitation and the channel to join */
+.support { margin: 0 0 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); line-height: 1.45; overflow-wrap: anywhere; }
+.support a { display: block; font-weight: 600; }
 .kpis.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .refs { display: flex; flex-wrap: wrap; gap: 5px; }
 .ref-chip { font: 12px var(--mono); padding: 2px 8px; border-radius: 6px; background: var(--slate-soft); color: var(--slate); }
@@ -384,6 +387,8 @@ button[aria-busy=true] { opacity: .6; cursor: progress; }
   .shell .side .nav-sep { display: none; }
   .shell .side .side-foot { margin: 0 0 0 auto; padding: 0; display: flex; gap: 8px; align-items: center; order: 1; }
   .shell .side .me { margin: 0; }
+  .shell .side .support { margin: 0; padding: 0; border: 0; }
+  .shell .side .support span { display: none; }
   .shell .side .me .muted, .shell .side .me br { display: none; }
   .g-main { grid-template-columns: minmax(0, 1fr); }
   .req-actions input[name=note] { min-width: 0; width: 100%; }

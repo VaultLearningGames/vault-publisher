@@ -51,6 +51,7 @@ const app = createApp({
     sessionSecret: config.sessionSecret,
     baseUrl: config.portalUrl,
     vaultAdmins: config.vaultAdmins,
+    supportUrl: config.supportUrl,
   },
   previewRetentionDays: config.previewRetentionDays,
   siteUrl: config.siteUrl,

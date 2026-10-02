@@ -41,6 +41,20 @@ export interface Config {
   // Sites that can show an unsaved listing preview at SITE/_preview/TOKEN/ (listing-preview.ts). The first is the
   // editor's main Preview button.
   previewSites: PreviewSite[];
+  // The portal's "Need support?" link: the invitation to the Slack workspace. '' hides the link.
+  supportUrl: string;
+}
+
+// Where "Need support?" sends people, and the channel they're told to join there.
+export const DEFAULT_SUPPORT_URL = 'https://join.slack.com/t/opengamedata/shared_invite/zt-21befx5si-cTwbmJgEAJzKUg_23uQi2w';
+export const SUPPORT_CHANNEL = '#vault-game-publishing-support';
+
+// SUPPORT_URL: unset or empty is the default (the deploy passes a variable that isn't set as empty); a link replaces
+// it; anything else (e.g. "none") is '', which hides the link.
+export function parseSupportUrl(v: string | undefined): string {
+  const s = (v ?? '').trim();
+  if (!s) return DEFAULT_SUPPORT_URL;
+  return /^https?:\/\/[^\s]+$/i.test(s) ? s : '';
 }
 
 export interface PreviewSite {
@@ -101,5 +115,6 @@ export function loadConfig(): Config {
     formsSubmitGameSheet: process.env.FORMS_SUBMIT_GAME_SHEET?.trim() || undefined,
     siteUrl: (process.env.SITE_URL?.trim() || 'https://vaultlearninggames.org').replace(/\/+$/, ''),
     previewSites: parsePreviewSites(process.env.PREVIEW_SITES),
+    supportUrl: parseSupportUrl(process.env.SUPPORT_URL),
   };
 }

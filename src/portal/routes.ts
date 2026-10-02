@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { AppDeps } from '../app.ts';
 import { fail, jsonBody } from '../app.ts';
+import { DEFAULT_SUPPORT_URL, SUPPORT_CHANNEL } from '../config.ts';
 import { studioWebsite, type Build, type Game, type Membership, type Release, type StudioRole, type Studio, type User, type VaultRole } from '../db.ts';
 import { headersFor, isSafeFilePath, isVersionName, sanitizeRefName } from '../paths.ts';
 import { escape, html, raw, type Html } from './html.ts';
@@ -34,6 +35,8 @@ export interface PortalConfig {
   baseUrl: string;
   // GitHub logins that become Vault admins when they sign in (bootstrap).
   vaultAdmins: string[];
+  // The "Need support?" link (the Slack invitation). Left out: the default; '': no link.
+  supportUrl?: string;
   oauth?: OAuthClient; // injected in tests
   githubAccount?: GitHubAccountLookup; // injected in tests
   githubRepository?: GitHubRepositoryLookup; // injected in tests
@@ -88,6 +91,10 @@ export const pill = (kind: 'ok' | 'run' | 'bad' | 'wait' | 'off' | 'brass', text
 let assetVersion = 'dev';
 // The Vault Game Library wordmark (white and teal), shown on a dark badge so it reads in both themes.
 const logo = () => html`<img class="logo" src="/assets/vault-logo.png?v=${assetVersion}" alt="Vault Game Library" width="454" height="75">`;
+// "Need support?": the invitation to the Slack workspace and the channel to join there, in the sidebar's foot (every
+// signed-in page) and on the sign-in page. Set by registerPortal, like assetVersion; '' shows nothing.
+let supportUrl = DEFAULT_SUPPORT_URL;
+const supportLink = (text: string) => html`<a href="${supportUrl}" target="_blank" rel="noopener" title="Opens the Slack invitation in a new tab; join the ${SUPPORT_CHANNEL} channel">${text} ↗</a>`;
 interface Nav { user: User; studio?: Studio; memberships: (Membership & { studio_slug: string; studio_name: string })[]; allStudios: Studio[] }
 function layout(title: string, nav: Nav | null, body: Html | string, active = ''): string {
   const u = nav?.user;
@@ -117,6 +124,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
           <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>` : ''}
       </nav>
       <div class="side-foot">
+        ${supportUrl ? html`<p class="support">${supportLink('Need support?')} <span>Join our Slack, then the <b>${SUPPORT_CHANNEL}</b> channel.</span></p>` : ''}
         <div class="me">${u!.avatar_url ? html`<img src="${u!.avatar_url}&s=48" alt="" width="24" height="24">` : ''}<span><b>${u!.login}</b>${staff ? html`<br><span class="muted">${VAULT_LABEL[u!.vault_role]}</span>` : ''}</span></div>
         <form method="post" action="/logout"><button class="btn sm" type="submit">Sign out</button></form>
       </div>
@@ -186,6 +194,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const callbackUrl = `${cfg.baseUrl.replace(/\/+$/, '')}/auth/callback`;
   const secure = cfg.baseUrl.startsWith('https://');
   const admins = new Set(cfg.vaultAdmins.map((l) => l.toLowerCase()));
+  supportUrl = cfg.supportUrl ?? DEFAULT_SUPPORT_URL;
 
   // Browsers that reach the portal on the service's default *.run.app address are sent to the portal's
   // real address (GitHub sign-in only returns there). The API and health check keep answering on both.
@@ -282,6 +291,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
                <p class="small muted">We only read your GitHub name and picture.</p>`
         : html`<p class="fix">Sign-in isn’t set up yet: the GitHub OAuth app and session secret are missing.</p>`}
       ${c.req.query('error') ? html`<p class="err">${c.req.query('error')}</p>` : ''}
+      ${supportUrl ? html`<p class="small muted">Need support? ${supportLink('Join our Slack')} and ask in the <b>${SUPPORT_CHANNEL}</b> channel.</p>` : ''}
     </div>`;
     return c.html(layout('Sign in', null, body));
   });

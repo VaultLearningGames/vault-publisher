@@ -279,6 +279,10 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
   production previews and releases are records only; their files aren't in staging's buckets.
 - **Deploys** briefly run the old and new instance together. Writes are rare (one per push), but avoid
   deploying while a large batch of game builds is publishing.
+- **The portal's "Need support?" link** (the sidebar's foot and the sign-in page) invites people to the Slack workspace
+  and tells them to join `#vault-game-publishing-support`. To point it elsewhere, set the environment's `SUPPORT_URL`
+  variable to another link and redeploy (`gh variable set SUPPORT_URL --env production --body https://…`); `none`
+  hides the link. Not set, it is the invitation in `src/config.ts`.
 - **Adding a studio:** a Vault admin creates it in the portal under **Vault → Studios** (name, short name, website
   and, optionally, the GitHub organization whose repositories publish its test versions; the portal looks up the org's
   numeric id on GitHub). Leave the organization empty for a studio whose games Vault uploads (it gets the placeholder

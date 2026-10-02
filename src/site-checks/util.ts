@@ -1,7 +1,9 @@
 // Small pure helpers for the site-checks engine: addresses, concurrency, timeouts, pixel sampling.
 
-export const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 VaultSiteCheck/1 (+https://vaultlearninggames.org)';
-export const UA_MOBILE = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 VaultSiteCheck/1 (+https://vaultlearninggames.org)';
+// A current browser's name with the checker's own after it. The name is deliberately bland: one publisher's firewall
+// (ssec.si.edu) resets any connection whose User-Agent contains "SiteCheck", which made its four games look broken.
+export const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 VaultCheck/1 (+https://vaultlearninggames.org)';
+export const UA_MOBILE = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 VaultCheck/1 (+https://vaultlearninggames.org)';
 
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 

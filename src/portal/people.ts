@@ -142,6 +142,9 @@ export function registerPeople(app: Hono, h: Helpers) {
   const usersByLogin = () => new Map(db.users().map((x) => [x.login.toLowerCase(), x]));
   const roleSelect = (name: string, selected: StudioRole | null, label: string) => html`<select name="${name}" aria-label="${label}">${ROLES.map((r) => html`<option value="${r}" ${r === selected ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`)}</select>`;
 
+  const VAULT_ROLES: VaultRole[] = ['none', 'release_manager', 'admin'];
+  const vaultOptions = (selected: VaultRole) => VAULT_ROLES.map((r) => html`<option value="${r}" ${r === selected ? 'selected' : ''}>${r === 'none' ? 'No Vault role' : VAULT_LABEL[r]}</option>`);
+
   // ---------- a studio's members ----------
   app.get('/s/:studio/members', (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
@@ -226,13 +229,19 @@ export function registerPeople(app: Hono, h: Helpers) {
     };
     const rows = [
       ...users.map((x) => html`<tr><td class="proj"><b>${x.login}</b><span>${x.name ?? ''}</span></td><td>${studiosCell(x.login)}</td>
-        <td>${admin && x.id !== u.id ? html`<form data-api="/portal/api/vault/users/${x.id}/role" data-autosubmit><select name="role" aria-label="Vault role for ${x.login}">${(['none', 'release_manager', 'admin'] as VaultRole[]).map((r) => html`<option value="${r}" ${r === x.vault_role ? 'selected' : ''}>${r === 'none' ? 'No Vault role' : VAULT_LABEL[r]}</option>`)}</select>${errSlot}</form>` : VAULT_LABEL[x.vault_role]}</td>
+        <td>${admin && x.id !== u.id ? html`<form data-api="/portal/api/vault/users/${x.id}/role" data-autosubmit><select name="role" aria-label="Vault role for ${x.login}">${vaultOptions(x.vault_role)}</select>${errSlot}</form>` : VAULT_LABEL[x.vault_role]}</td>
         <td class="small">${ago(x.last_login_at)}</td></tr>`),
-      ...invitedLogins.map((login) => html`<tr><td class="proj"><b>${login}</b><span>${pill('wait', 'Invited')}</span></td><td>${studiosCell(login)}</td>
-        <td class="small">${vaultInvites.get(login.toLowerCase()) ? html`${VAULT_LABEL[vaultInvites.get(login.toLowerCase())!.vault_role]} <span class="muted">(at first sign-in)</span>` : html`<span class="muted">—</span>`}</td><td class="small muted">Never</td></tr>`),
+      // Invited people: the Vault role waiting for their first sign-in, changed and removed like anyone else's.
+      ...invitedLogins.map((login) => {
+        const waiting = vaultInvites.get(login.toLowerCase())?.vault_role ?? 'none';
+        const note = waiting === 'none' ? '' : html` <span class="muted">(at first sign-in)</span>`;
+        return html`<tr><td class="proj"><b>${login}</b><span>${pill('wait', 'Invited')}</span></td><td>${studiosCell(login)}</td>
+        <td class="small">${admin ? html`<form data-api="/portal/api/vault/invites" data-autosubmit data-then="reload"><input type="hidden" name="login" value="${login}"><select name="role" aria-label="Vault role for ${login}, from their first sign-in">${vaultOptions(waiting)}</select>${errSlot}</form>${note}`
+          : waiting === 'none' ? html`<span class="muted">—</span>` : html`${VAULT_LABEL[waiting]}${note}`}</td><td class="small muted">Never</td></tr>`;
+      }),
     ];
     const studios = db.studios();
-    const body = html`${head('People', 'Everyone who has signed in, and everyone invited to a studio who hasn’t yet. Vault roles are for Vault staff; studio roles can also be managed by each studio’s admins on its Members page.')}
+    const body = html`${head('People', 'Everyone who has signed in, and everyone invited to a studio or given a Vault role who hasn’t yet. Vault roles are for Vault staff; studio roles can also be managed by each studio’s admins on its Members page.')}
       ${admin ? html`<div class="card" style="margin-bottom:16px"><h2>Add someone</h2><form data-api="/portal/api/vault/members" data-then="reload" class="inline-form">
           <label class="field"><span class="lab">GitHub username</span><input name="login" required autocomplete="off" placeholder="octocat"></label>
           <label class="field"><span class="lab">Studio</span><select name="studio"><option value="">No studio</option>${studios.map((s) => html`<option value="${s.slug}">${s.name}</option>`)}</select></label>
@@ -284,6 +293,32 @@ export function registerPeople(app: Hono, h: Helpers) {
     db.setVaultRole(target.id, role as VaultRole);
     db.audit(h.actor(u), 'vault.role', target.login, { role, from: target.vault_role });
     return c.json({ ok: true });
+  });
+
+  // Vault admins: the Vault role waiting for someone who hasn't signed in yet (the People table's invited rows).
+  // Body: { login, role }; "none" removes it. If they have signed in since the page was drawn, their role changes now.
+  app.post('/portal/api/vault/invites', async (c) => {
+    const u = h.apiUser(c);
+    if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can change Vault roles.');
+    const b = await jsonBody(c);
+    const login = loginOf(b.login);
+    const role = b.role as VaultRole;
+    if (!VAULT_ROLES.includes(role)) fail(400, 'Choose a role.');
+    const target = db.userByLogin(login);
+    if (target) {
+      if (target.id === u.id) fail(400, 'You can’t change your own Vault role.');
+      if (target.vault_role !== role) {
+        db.setVaultRole(target.id, role);
+        db.audit(h.actor(u), 'vault.role', target.login, { role, from: target.vault_role });
+      }
+      return c.json({ ok: true, pending: false });
+    }
+    const from = db.vaultInvites().find((v) => v.github_login.toLowerCase() === login.toLowerCase())?.vault_role ?? 'none';
+    if (from !== role) {
+      db.setVaultInvite(login, role, h.actor(u));
+      db.audit(h.actor(u), 'vault.invite', login, { role, from });
+    }
+    return c.json({ ok: true, pending: true });
   });
 
   // ---------- Vault: studios ----------

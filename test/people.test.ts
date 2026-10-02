@@ -199,11 +199,60 @@ describe('Vault People page', () => {
     assert.equal((await add({ login: 'boss', vaultRole: 'release_manager' })).status, 400, 'not your own Vault role');
     // Not signed in yet: a Vault-only invitation shows on People and applies at first sign-in.
     assert.equal((await add({ login: 'Newbie', vaultRole: 'admin' })).status, 200);
-    assert.match(await (await p.vaultAdmin.get('/vault/people')).text(), /Newbie<\/b><span><span class="pill p-wait">Invited[\s\S]*Vault admin <span class="muted">\(at first sign-in\)/);
+    assert.match(await (await p.vaultAdmin.get('/vault/people')).text(), /Newbie<\/b><span><span class="pill p-wait">Invited[\s\S]*<option value="admin" selected>Vault admin<\/option>[\s\S]*<span class="muted">\(at first sign-in\)/);
     assert.equal((await signInWithGitHub('newbie')).status, 302);
     assert.equal(db.userByLogin('newbie')!.vault_role, 'admin');
     assert.equal(db.vaultInvites().length, 0);
     assert.equal((await p.releaseManager.post('/portal/api/vault/members', { login: 'x', vaultRole: 'admin' })).status, 403);
+  });
+
+  test('someone who hasn’t signed in: their Vault role is shown, changed and removed in the table like anyone’s', async () => {
+    const p = everyone();
+    const set = (body: unknown, who = p.vaultAdmin) => who.post('/portal/api/vault/invites', body);
+    const row = (page: string, login: string) => page.slice(page.indexOf(`<b>${login}</b>`), page.indexOf('</tr>', page.indexOf(`<b>${login}</b>`)));
+    const people = async (who = p.vaultAdmin) => (await who.get('/vault/people')).text();
+    const waiting = () => Object.fromEntries(db.vaultInvites().map((v) => [v.github_login, v.vault_role]));
+    // Invited to a studio only: a Vault role can be given from their row, before they ever sign in.
+    db.setMembership(fd().id, 'invitee', 'maintainer', 'user:ada');
+    assert.match(row(await people(), 'invitee'), /data-api="\/portal\/api\/vault\/invites"[^]*name="login" value="invitee"[^]*<option value="none" selected>No Vault role/);
+    assert.doesNotMatch(row(await people(), 'invitee'), /at first sign-in/);
+    assert.equal((await set({ login: 'invitee', role: 'release_manager' })).status, 200);
+    assert.deepEqual(waiting(), { invitee: 'release_manager' });
+    assert.match(row(await people(), 'invitee'), /<option value="release_manager" selected>Release manager<\/option>[^]*\(at first sign-in\)/);
+    // Changed, then removed; the login's capitalization doesn't matter.
+    assert.equal((await set({ login: 'Invitee', role: 'admin' })).status, 200);
+    assert.deepEqual(waiting(), { invitee: 'admin' });
+    assert.match(row(await people(p.releaseManager), 'invitee'), /Vault admin <span class="muted">\(at first sign-in\)/, 'other Vault staff see it, without the form');
+    assert.doesNotMatch(await people(p.releaseManager), /data-api/);
+    assert.equal((await set({ login: 'invitee', role: 'none' })).status, 200);
+    assert.deepEqual(waiting(), {});
+    assert.match(row(await people(), 'invitee'), /<option value="none" selected>/, 'still invited to the studio');
+    assert.deepEqual(db.auditFor(['vault.invite'], 10).map((a) => JSON.parse(a.detail_json!)).reverse(),
+      [{ role: 'release_manager', from: 'none' }, { role: 'admin', from: 'release_manager' }, { role: 'none', from: 'admin' }]);
+    // A Vault-only invitation that is removed leaves nothing: the person is off the page.
+    assert.equal((await p.vaultAdmin.post('/portal/api/vault/members', { login: 'Newbie', vaultRole: 'admin' })).status, 200);
+    assert.match(row(await people(), 'Newbie'), /name="login" value="Newbie"[^]*<option value="admin" selected>/);
+    assert.equal((await set({ login: 'newbie', role: 'none' })).status, 200);
+    assert.doesNotMatch(await people(), /Newbie/);
+    assert.equal((await signInWithGitHub('newbie')).status, 302);
+    assert.equal(db.userByLogin('newbie')!.vault_role, 'none', 'a removed role isn’t applied at sign-in');
+    // The role that is waiting when they sign in is the one they get.
+    assert.equal((await set({ login: 'invitee', role: 'release_manager' })).status, 200);
+    assert.equal((await signInWithGitHub('invitee')).status, 302);
+    assert.equal(db.userByLogin('invitee')!.vault_role, 'release_manager');
+    assert.deepEqual(waiting(), {});
+    assert.match(row(await people(), 'invitee'), /data-api="\/portal\/api\/vault\/users\/\d+\/role"[^]*<option value="release_manager" selected>/);
+    // A page drawn before they signed in still works: the role changes now, and nothing is left waiting.
+    assert.deepEqual(await (await set({ login: 'invitee', role: 'admin' })).json(), { ok: true, pending: false });
+    assert.equal(db.userByLogin('invitee')!.vault_role, 'admin');
+    assert.deepEqual(waiting(), {});
+    // Vault admins only; a real role and username; never your own.
+    assert.equal((await set({ login: 'x', role: 'admin' }, p.releaseManager)).status, 403);
+    assert.equal((await set({ login: 'x', role: 'admin' }, p.studioAdmin)).status, 403);
+    assert.equal((await set({ login: 'x', role: 'king' })).status, 400);
+    assert.equal((await set({ login: 'not a login!', role: 'admin' })).status, 400);
+    assert.equal((await set({ login: 'boss', role: 'none' })).status, 400);
+    assert.deepEqual(waiting(), {});
   });
 
   test('Vault admins add anyone to any studio there, and change or remove any membership', async () => {

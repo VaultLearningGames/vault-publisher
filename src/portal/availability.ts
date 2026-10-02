@@ -1,5 +1,5 @@
 // Game availability: whether every game on the site still loads, from the daily check-games workflow
-// (scripts/check-games.ts, posted to POST /v1/admin/game-checks). Vault → Site games shows the latest run's
+// (scripts/check-games.ts, posted to POST /v1/admin/game-checks). Vault → Game Catalog shows the latest run's
 // Testing Status per game in a few columns; a game's page shows it as one line (availabilityLine). Older runs
 // stay in the database.
 import type { Db, GameCheckRow } from '../db.ts';
@@ -23,7 +23,7 @@ export function availabilityLine(db: Db, slug: string, staff: boolean): Html | s
   return html`<p class="small">${levelPill(g.level)} ${why(g)} · checked ${ago(run.checked_at)}${staff ? html` · <a href="/vault/listings#game-${g.slug}">all games</a>` : ''}</p>`;
 }
 
-// The Site games table's testing-status columns (status with its reason on hover, response time, when),
+// The Game Catalog table's testing-status columns (status with its reason on hover, response time, when),
 // from the latest run. Games no check has seen yet are Needs Review, with dashes for the rest.
 export const AVAILABILITY_HEADS = html`<th>Testing Status</th><th class="r">Response</th><th>Checked</th>`;
 export function availabilityCells(run: (GameCheckRow & { games: GameCheck[] }) | undefined, slug: string): Html {

@@ -1,5 +1,5 @@
 // Featured games: the games in the "Featured Games" section of vaultlearninggames.org's home page. Vault release
-// managers tick them on Vault → Site games. They're stored as one JSON value in the settings table and published with
+// managers tick them on Vault → Game Catalog. They're stored as one JSON value in the settings table and published with
 // the catalog (GET /v1/catalog → "featured"), so the site build picks them up with everything else.
 //
 // Each entry is a site listing (by its page slug), a sequence number (the home page shows them in ascending sequence,

@@ -292,7 +292,7 @@ describe('import from the Hugo prototype', () => {
   });
 });
 
-describe('Vault → Site games: one table with featured games and availability', () => {
+describe('Vault → Game Catalog: one table with featured games and availability', () => {
   const F = '/portal/api/vault/featured';
   type Entry = { slug: string; blurb: string; image: string; sequence: number };
   const full = async () => (await (await app.request('/v1/catalog')).json()) as { featured: Entry[] };
@@ -333,6 +333,9 @@ describe('Vault → Site games: one table with featured games and availability',
     assert.match(row('bloom'), /title="HTTP 404 Not Found"[^]*Failure/);
     assert.match(row('draft-only'), /<td class="muted">—<\/td>/, 'no result: dashes');
     assert.match(page, /Waiting for Vault|No site changes are waiting/);
+    assert.match(page, /<h1>Game Catalog<\/h1>/);
+    assert.match(page, /<a href="\/vault\/listings" class="on">Game Catalog<\/a>/, 'the Vault nav entry, at the same address');
+    assert.doesNotMatch(page, /Site games/);
     assert.match(page, /Import from the Hugo site prototype/);
     for (const gone of ['On the CDN (', 'CDN release ready', 'Unpublished changes', 'Not on the site</a>', 'show=']) assert.ok(!page.includes(gone), gone);
     assert.doesNotMatch(page, /href="\/vault\/(featured|availability)"/, 'no separate nav entries');

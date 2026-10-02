@@ -138,7 +138,7 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   draft, so it reaches the site through the same review. The site must handle both site paths and absolute https URLs
   for `hero_image`, `thumb_image` and `screenshots`. `_vault-assets/` belongs to Vault: switching releases and rollback
   leave it alone, and a build containing a top-level `_vault-assets/` folder can't be released.
-* Vault publishes them from **Vault → Site games**, sends them back with a note, or takes the game off the site.
+* Vault publishes them from **Vault → Game Catalog**, sends them back with a note, or takes the game off the site.
 * Vault staff's editor has one **Save and Publish Changes** button (saves the draft and publishes it); studio members
   have **Save and Submit for Review**: every studio save goes to Vault for review.
 * **Preview** shows the editor's unsaved edits on the website: the form is cleaned up as a save would (nothing is
@@ -147,7 +147,7 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   `{ "version": 1, "game": <a catalog game>, "studios": <as in the catalog> }` (`Cache-Control: no-store`; 404 once
   expired). Sites come from `PREVIEW_SITES`, space-separated `label=url` pairs; the first is the main Preview button,
   the others "Preview (Label)". Empty hides the buttons.
-* **Copy site images to the Vault CDN** (Vault admins, on Site games) downloads every listing image and featured image
+* **Copy site images to the Vault CDN** (Vault admins, on the Game Catalog) downloads every listing image and featured image
   that is still a site path (published and draft) from the site (`SITE_URL` by default), stores it like an upload in
   `STUDIO/GAME/_vault-assets/` and relinks it. Published listings change only those links, so nothing needs review
   again; external links are left alone and listed; re-running changes nothing. The last run's summary is on the page.
@@ -156,7 +156,7 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   The site ([vault-rebuild](https://github.com/fielddaylab/vault-rebuild)) is built from it. Each game's `studio`
   carries the studio's website as `url`, and `studios` lists every studio with a game on the site (`slug`, `name`,
   `url`) so the site can link maker names. Studio admins set the website on their **Members** page.
-* **Vault → Site games** is one table of every site listing: its site status, where it plays from, whether it's
+* **Vault → Game Catalog** is one table of every site listing: its site status, where it plays from, whether it's
   featured, and whether it still loads.
   * **Availability** columns show the latest daily check by `check-games.yml` (see
     [docs/setup.md](docs/setup.md#operating-notes)): result (hover for why), response time, and when (linking the

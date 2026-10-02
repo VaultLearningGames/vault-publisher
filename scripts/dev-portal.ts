@@ -86,7 +86,7 @@ if (existsSync(`${rebuild}/migration/games-export.json`)) {
   ], 'user:boss');
 }
 
-// Game availability (the Testing Status columns of Vault → Site games): a run saved by
+// Game availability (the Testing Status columns of Vault → Game Catalog): a run saved by
 // `node scripts/check-games.ts --out FILE` when $GAME_CHECKS points at one, otherwise a made-up run over the listings.
 if (process.env.GAME_CHECKS) {
   const run = parseRun(JSON.parse(readFileSync(process.env.GAME_CHECKS, 'utf8')));

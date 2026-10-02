@@ -1,4 +1,4 @@
-// The "Hosted by" column of the portal's game lists (Vault → Site games, each studio's Games page): how a game
+// The "Hosted by" column of the portal's game lists (Vault → Game Catalog, each studio's Games page): how a game
 // is hosted today. 'Vault CDN' rows show the game's current release version; 'External server' rows show the
 // address players play the game from. getHosting() is pure — a record in, a classification out — so every list
 // and the tests share one rule; the lists feed it the record from the game's listing fields and current release.

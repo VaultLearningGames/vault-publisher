@@ -1,4 +1,4 @@
-// The featured games API behind Vault → Site games (listings.ts): the Featured checkbox, each featured game's
+// The featured games API behind Vault → Game Catalog (listings.ts): the Featured checkbox, each featured game's
 // sequence number and home-page blurb, and its uploaded image. Vault release managers only. The site gets the list
 // from GET /v1/catalog ("featured") on its next build.
 import type { Context, Hono } from 'hono';

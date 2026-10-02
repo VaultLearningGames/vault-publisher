@@ -1,4 +1,4 @@
-// The "Testing Status" of a site game (Vault → Site games): the three states the column that used to be
+// The "Testing Status" of a site game (Vault → Game Catalog): the three states the column that used to be
 // called "Loads" reports. It is derived from the latest check-games run's level for the game; nothing is
 // persisted, so reverting this file restores the old column with no migration.
 //
@@ -9,7 +9,7 @@ import type { Level } from '../game-checks.ts';
 
 export type TestingStatus = 'Failure' | 'Needs Review' | 'Passing';
 
-// Severity order the Site games table sorts by: failures first, then what needs a look, then the good.
+// Severity order the Game Catalog table sorts by: failures first, then what needs a look, then the good.
 export const TESTING_STATUS_RANK: Record<TestingStatus, number> = { Failure: 0, 'Needs Review': 1, Passing: 2 };
 
 // A game's check level (or no result at all) as its testing status. 'warn' loads but with problems, so it

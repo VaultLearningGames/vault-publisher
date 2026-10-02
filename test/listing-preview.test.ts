@@ -131,7 +131,7 @@ describe('save and publish', () => {
   });
 });
 
-describe('Site games: featured settings as an accordion', () => {
+describe('Game Catalog: featured settings as an accordion', () => {
   test('each featured row’s editor is collapsed, with a toggle next to its sequence; ticking opens it', async () => {
     const boss = t.as('boss', 'release_manager');
     await boss.post('/portal/api/vault/featured', { op: 'feature', slug: 'wake', featured: true });

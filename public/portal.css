@@ -391,7 +391,7 @@ button[aria-busy=true] { opacity: .6; cursor: progress; }
 
 .row-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 
-/* Vault → Site games: featured games and availability columns */
+/* Vault → Game Catalog: featured games and availability columns */
 td.nowrap, .nowrap { white-space: nowrap; }
 table.site-games td.r { white-space: nowrap; }
 table.site-games .avail { cursor: help; }

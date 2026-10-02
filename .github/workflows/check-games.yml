@@ -2,7 +2,7 @@ name: Check games
 
 # Checks that every game on a Vault site still loads (scripts/check-games.ts): each catalog game's play address
 # answers, and games shown in the site's player allow being framed by the site. Each run:
-#   - posts its results to that system's portal (Vault → Site games),
+#   - posts its results to that system's portal (Vault → Game Catalog),
 #   - writes a job summary,
 #   - keeps one open issue per environment ("Game availability (staging)", label game-availability) listing what
 #     fails, and closes it when everything passes.

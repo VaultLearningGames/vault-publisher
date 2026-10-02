@@ -111,7 +111,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
         ${staff ? html`
           <div class="nav-sep">Vault</div>
           <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
-          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Site games</a>
+          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Game Catalog</a>
           <a href="/vault/studios" class="${active === 'vault-studios' ? 'on' : ''}">Studios</a>
           <a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>
           <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>` : ''}

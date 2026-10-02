@@ -1,4 +1,4 @@
-// Vault → Site games: "Copy site images to the Vault CDN" (Vault admins). See ../image-migration.ts. The latest
+// Vault → Game Catalog: "Copy site images to the Vault CDN" (Vault admins). See ../image-migration.ts. The latest
 // result is kept in settings and shown on the page.
 import type { Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
@@ -24,7 +24,7 @@ export function lastMigration(h: ListingHelpers): MigrationResult | null {
   try { return JSON.parse(h.db.setting(LAST_KEY) ?? 'null'); } catch { return null; }
 }
 
-// The card on Vault → Site games (Vault admins only).
+// The card on Vault → Game Catalog (Vault admins only).
 export function migrationCard(h: ListingHelpers): Html {
   const last = lastMigration(h);
   const where = (i: MigrationItem) => html`<span class="mono small">${i.listing}</span> <span class="small muted">${i.where} ${i.field}</span>`;

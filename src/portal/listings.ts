@@ -186,11 +186,11 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
   // Listings live on each game's page now.
   app.get('/s/:studio/listings', (c) => c.redirect(`/s/${c.req.param('studio')}`));
   app.get('/s/:studio/listings/:slug', (c) => c.redirect(`/s/${c.req.param('studio')}/g/${c.req.param('slug')}`));
-  // Featured games and game availability are columns of Site games now.
+  // Featured games and game availability are columns of the Game Catalog now.
   app.get('/vault/featured', (c) => c.redirect('/vault/listings'));
   app.get('/vault/availability', (c) => c.redirect('/vault/listings'));
 
-  // ---------- Vault → Site games: review queue, every game on the site (featured, availability), import ----------
+  // ---------- Vault → Game Catalog: review queue, every game on the site (featured, availability), import ----------
   app.get('/vault/listings', (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isStaff(u)) return h.denied(c, 'Only Vault staff can see this page.');
@@ -267,7 +267,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const checked = run ? html` Availability from the latest daily check, ${ago(run.checked_at)}: ${run.fail_count} failing, ${run.warn_count} worth a look (hover a result for why).` : ' No availability checks yet.';
     const sub = html`${count((l) => !!l.published)} of ${all.length} games are on the site; ${count(onCdn)} play from the Vault CDN. ${feat.games.length} of at most ${MAX_FEATURED} are featured on the home page, in ascending sequence (ties by title). Rows are in Testing Status order — Failure first, then Needs Review, then Passing — and within each group, featured games keep that order, then the rest by page address.${checked} The site is built from /v1/catalog.`;
     const actions = html`<a class="btn" href="https://github.com/${h.deps.adminRepository}/actions/workflows/check-games.yml" target="_blank" rel="noopener">Run a check ↗</a><a class="btn" href="/v1/catalog" target="_blank">Catalog JSON ↗</a>`;
-    const body = html`${head('Site games', sub, actions)}
+    const body = html`${head('Game Catalog', sub, actions)}
       ${queue.length ? html`<h2>Waiting for Vault (${queue.length})</h2><div class="grid">${queue}</div>` : html`<div class="card"><p class="muted">No site changes are waiting for review.</p></div>`}
       <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th>Game</th><th>Studio</th><th>Site</th><th>Featured</th><th>Hosted by</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
         <tbody>${rows.length ? rows : html`<tr><td colspan="${COLS}" class="muted">No games yet.</td></tr>`}</tbody></table></div>
@@ -279,7 +279,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
           <label class="field full"><span class="lab">import-overrides.json (optional)</span><textarea name="overrides" rows="3"></textarea></label>
           <div class="form-foot"><button class="btn pri">Import</button>${err}</div></form></div>` : ''}
       ${h.isVaultAdmin(u) ? migrationCard(h) : ''}`;
-    return h.page(c, 'Site games', body, { active: 'vault-listings' });
+    return h.page(c, 'Game Catalog', body, { active: 'vault-listings' });
   });
 
   // ---------- API ----------

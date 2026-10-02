@@ -104,7 +104,8 @@ describe('the static hosting files of the site', () => {
     const r = redirectsFile(SITE, CARDS);
     const lines = r.text.split('\n').filter((l) => l && !l.startsWith('#'));
     assert.equal(lines[0], '/s/keys-to-the-vault.pdf /files/keys-to-the-vault.pdf 301');
-    assert.deepEqual(lines.slice(1, 3), ['/game-cards/blog-post-title-one-kma9a /wake 301', '/game-cards/pearl-diver /pearl 301']);
+    assert.deepEqual(lines.slice(1, 3), ['/cart / 301', '/search / 301'], 'Squarespace’s own pages go to the home page');
+    assert.deepEqual(lines.slice(3, 5), ['/game-cards/blog-post-title-one-kma9a /wake 301', '/game-cards/pearl-diver /pearl 301']);
     assert.deepEqual(lines.filter((l) => l.endsWith(' 200')), [
       '/game-cards/category/Dev%3A+Field+Day+Lab /game-cards/category/Dev%3A%2BField%2BDay%2BLab 200',
       '/game-cards/category/Grades+9-12 /game-cards/category/Grades%2B9-12 200',
@@ -140,7 +141,7 @@ describe('the static hosting files of the site', () => {
     const pages = Array.from({ length: MAX_STATIC_REDIRECTS }, (_, i) => `g${i}/index.html`);
     const r = redirectsFile([...SITE, ...pages], CARDS);
     assert.deepEqual([r.cards, r.rewrites, r.slashes, r.skippedSlashes], [2, 3, 0, true]);
-    assert.equal(r.text.split('\n').filter((l) => l.startsWith('/')).length, 6);
+    assert.equal(r.text.split('\n').filter((l) => l.startsWith('/')).length, 8);
   });
 
   test('robots.txt: everything may be crawled; only the build that is indexed names its sitemap', () => {

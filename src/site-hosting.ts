@@ -115,6 +115,8 @@ export function headersFile(files: string[], opts: HostingOptions = {}): string 
 }
 
 export const PDF_REDIRECT = '/s/keys-to-the-vault.pdf /files/keys-to-the-vault.pdf 301';
+// Squarespace's own pages, which old links and its header still point at: nothing to show for them, so the home page.
+export const LEGACY_REDIRECTS = ['/cart / 301', '/search / 301'];
 
 // A Squarespace address that is now another page's: "/game-cards/addition-blocks" → "/addition-blocks".
 export interface CardRedirect { from: string; to: string }
@@ -141,12 +143,13 @@ export function redirectsFile(files: string[], cards: CardRedirect[] = []): Redi
   // "/wake/" → "/wake", permanent (the hosting's own answer is a 307); the same for a card's address.
   const slashes = [...pages.filter((p) => plain(linkedPath(p))).map((p) => `/${linkedPath(p)}/ /${linkedPath(p)} 301`),
     ...cardLines.map((l) => l.replace(' ', '/ '))];
-  const must = 1 + cardLines.length + rewrites.length;
+  const must = 1 + LEGACY_REDIRECTS.length + cardLines.length + rewrites.length;
   if (must > MAX_STATIC_REDIRECTS) throw new Error(`_redirects would need ${must} lines; Cloudflare allows ${MAX_STATIC_REDIRECTS}`);
   const fits = must + slashes.length <= MAX_STATIC_REDIRECTS;
   const out = [
     '# Written by scripts/site-hosting.ts (src/site-hosting.ts) at every build: not edited by hand.',
     PDF_REDIRECT,
+    ...LEGACY_REDIRECTS,
     ...cardLines,
     ...rewrites,
     ...(fits ? slashes : []),

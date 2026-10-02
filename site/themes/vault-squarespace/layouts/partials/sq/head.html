@@ -40,6 +40,7 @@
 <script type="application/ld+json">{{ dict "@context" "https://schema.org" "@graph" $graph | jsonify | safeJS }}</script>
 <link rel="icon" type="image/x-icon" media="(prefers-color-scheme: light)" href="{{ "favicon.ico" | relURL }}">
 <link rel="icon" type="image/x-icon" media="(prefers-color-scheme: dark)" href="{{ "favicon-dark.ico" | relURL }}">
+<link rel="apple-touch-icon" href="{{ "apple-touch-icon.png" | relURL }}">
 {{- /* Base 9 Sans, the heading font, is an Adobe Fonts typeface: it loads from Field Day's own Adobe Fonts web project
        (params.fonts.adobe_kit). Until that's set, Share Tech Mono (self-hosted) stands in; html.no-base9 selects it. */}}
 {{- with site.Params.fonts.adobe_kit }}<link rel="stylesheet" href="https://use.typekit.net/{{ . }}.css">{{ end }}

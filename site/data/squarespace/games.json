@@ -5585,7 +5585,6 @@
        "role": "shot1",
        "fit": "cover",
        "radius": "4px 4px 4px 4px",
-       "href": "/contact",
        "ratio": "1272/717",
        "catalog": "games/tamis-tower/img/screenshot_1.png"
       },
@@ -6828,7 +6827,6 @@
        "role": "shot1",
        "fit": "cover",
        "radius": "4px 4px 4px 4px",
-       "href": "/contact",
        "ratio": "1918/928",
        "catalog": "games/flap-to-the-future/img/screenshot_1.png"
       },
@@ -13889,7 +13887,6 @@
        "role": "shot1",
        "fit": "cover",
        "radius": "4px 4px 4px 4px",
-       "href": "/contact",
        "ratio": "3840/2160",
        "catalog": "games/cast-your-vote/img/screenshot_2.png"
       },
@@ -14648,7 +14645,6 @@
        "role": "shot1",
        "fit": "cover",
        "radius": "4px 4px 4px 4px",
-       "href": "/contact",
        "ratio": "3826/1820",
        "catalog": "games/blockly-games/img/screenshot_2.png"
       },

@@ -1,0 +1,59 @@
+name: Admin task
+
+# Runs one Vault-admin operation on a system's site listings (src/admin-tasks.ts), so it doesn't need someone
+# signed in to the portal: import listings, copy site images to the Vault CDN, move a game to another studio, edit
+# and publish listings in bulk, or list listings to check the result. The job runs in the chosen system's GitHub
+# environment, and its OIDC token is what that system's portal accepts (like check-games and releases); there are no
+# secrets. It is a dry run unless dry_run is unticked: the result (what changed, or would) is in the job summary.
+#
+#   gh workflow run admin-task.yml -f environment=staging -f task=move -f args='{"slug":"shady-sam","studio":"ngpf"}' -f dry_run=false
+#
+# See "Admin tasks" in README.md for each task's args.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which system to change
+        type: choice
+        options: [staging, production]
+        default: staging
+      task:
+        description: What to do
+        type: choice
+        options: [list, import, migrate-images, move, update]
+        required: true
+      args:
+        description: The task's arguments, as a JSON object
+        type: string
+        default: '{}'
+      dry_run:
+        description: Only report what would change
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  run:
+    # Runs in the system's environment: its variables, and an OIDC token that system's portal accepts.
+    environment: ${{ inputs.environment }}
+    # One task per system at a time.
+    concurrency: admin-task-${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PORTAL: ${{ vars.PORTAL_URL }}
+      TASK: ${{ inputs.task }}
+      ARGS: ${{ inputs.args }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+
+    # The script asks GitHub for the OIDC token (audience vault-publisher) itself, so each call gets a fresh one.
+    - name: Run the task
+      run: node scripts/admin-task.ts --portal "$PORTAL" --task "$TASK" --args "$ARGS" --dry-run="$DRY_RUN" --summary "$GITHUB_STEP_SUMMARY"

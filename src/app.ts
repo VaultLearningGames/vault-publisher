@@ -11,6 +11,7 @@ import { catalogFeatured, readFeatured } from './featured.ts';
 import { parseRun } from './game-checks.ts';
 import { registerPortal, type PortalConfig } from './portal/routes.ts';
 import { registerForms, type FormsConfig } from './forms.ts';
+import { registerAdminTasks } from './admin-tasks.ts';
 import {
   headersFor,
   isSafeFilePath,
@@ -476,6 +477,7 @@ export function createApp(deps: AppDeps) {
     return c.json({ removed, expired_uploads: expiredUploads });
   });
 
+  registerAdminTasks(app, deps, admin);
   registerForms(app, db, deps.forms);
   registerPortal(app, { ...deps, approveRelease, promoteRelease, previewUrl: (studio: Studio, game: Game, ref: string) => `${deps.stagingPublicUrl}/${previewPrefix(studio, game, ref)}` });
   return app;

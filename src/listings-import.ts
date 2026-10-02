@@ -42,7 +42,10 @@ export function fieldsFromPage(p: ExportedPage, o: Override = {}): ListingFields
 }
 
 // `studioSlugs` gives short names for studios the import creates (e.g. "PhET Interactive Simulations: CU Boulder" → "phet").
-export function importListings(db: Db, pages: ExportedPage[], overrides: Record<string, Override>, actor: string, studioSlugs: Record<string, string> = {}): ImportResult {
+// `opts.only` imports just those pages (the others aren't reported); `opts.dryRun` reports what an import would do
+// and writes nothing.
+export function importListings(db: Db, pages: ExportedPage[], overrides: Record<string, Override>, actor: string, studioSlugs: Record<string, string> = {},
+  opts: { only?: string[]; dryRun?: boolean } = {}): ImportResult {
   const result: ImportResult = { created: [], drafts: [], skipped: [], studiosCreated: [] };
   const byName = new Map(db.studios().map((s) => [s.name.toLowerCase(), s]));
   const studioNamed = (name: string): Studio => {
@@ -50,7 +53,13 @@ export function importListings(db: Db, pages: ExportedPage[], overrides: Record<
     if (found) return found;
     // A studio Vault manages until it joins with its own GitHub organization (like mit-education-arcade).
     let slug = (isSlug(studioSlugs[name]) ? studioSlugs[name] : slugify(name)) || 'studio';
-    while (db.studioBySlug(slug)) slug += '-2';
+    while (db.studioBySlug(slug) || result.studiosCreated.includes(slug)) slug += '-2';
+    if (opts.dryRun) {
+      const planned: Studio = { id: -1, slug, name, github_owner: '', github_owner_id: `vault:${slug}` };
+      byName.set(name.toLowerCase(), planned);
+      result.studiosCreated.push(slug);
+      return planned;
+    }
     db.syncStudios([{ slug, name, github_owner: '', github_owner_id: `vault:${slug}` }], 'import');
     const s = db.studioBySlug(slug)!;
     byName.set(name.toLowerCase(), s);
@@ -59,6 +68,7 @@ export function importListings(db: Db, pages: ExportedPage[], overrides: Record<
     return s;
   };
   for (const p of pages) {
+    if (opts.only && !opts.only.includes(p.slug)) continue;
     if (!isSlug(p.slug)) { result.skipped.push({ slug: p.slug, why: 'not a valid slug' }); continue; }
     if (db.listing(p.slug)) { result.skipped.push({ slug: p.slug, why: 'already has a listing' }); continue; }
     const o = overrides[p.slug] ?? {};
@@ -67,12 +77,16 @@ export function importListings(db: Db, pages: ExportedPage[], overrides: Record<
     if (!makerName) { result.skipped.push({ slug: p.slug, why: 'no studio (makers is empty and no override)' }); continue; }
     if (!fields.makers.length) fields.makers = [makerName];
     const studio = studioNamed(makerName);
-    const l = db.createListing(studio.id, p.slug, fields, actor);
+    const l = opts.dryRun ? null : db.createListing(studio.id, p.slug, fields, actor);
     const why = problems(fields, { forPublish: true, cdnReady: false });
     if (why.length) { result.drafts.push({ slug: p.slug, why }); continue; }
-    db.publishListing(l.id, actor);
+    if (l) db.publishListing(l.id, actor);
     result.created.push(p.slug);
   }
-  db.audit(actor, 'listings.import', 'vault-rebuild', { created: result.created.length, drafts: result.drafts.length, skipped: result.skipped.length, studios: result.studiosCreated });
+  if (opts.dryRun) return result;
+  db.audit(actor, 'listings.import', 'vault-rebuild', {
+    created: result.created.length, drafts: result.drafts.length, skipped: result.skipped.length, studios: result.studiosCreated,
+    ...(opts.only ? { listings: [...result.created, ...result.drafts.map((d) => d.slug)] } : {}),
+  });
   return result;
 }

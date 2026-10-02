@@ -1,0 +1,213 @@
+// Admin tasks: the Vault-admin operations on site listings, callable by a machine. Each is the same operation the
+// portal offers a signed-in Vault admin (src/listing-ops.ts), authorized like releases: a GitHub OIDC token from the
+// admin repository's workflow running in this system's GitHub environment (.github/workflows/admin-task.yml, which
+// runs scripts/admin-task.ts). The audit log records the workflow's GitHub actor ("github:LOGIN").
+//
+//   GET  /v1/admin/listings[?slug=a&slug=b]     drafts, published listings and review state, to verify a task
+//   POST /v1/admin/listings/import              { source, slugs?, pages?, overrides? }
+//   POST /v1/admin/listings/migrate-images      { base, budget_seconds? }
+//   POST /v1/admin/listings/move                { slug, studio }
+//   POST /v1/admin/listings/update              { updates: [{ slug, fields }], publish, publish_pending? }
+//
+// Every POST takes dry_run: true, which answers with what would change and writes nothing.
+import type { Context, Hono } from 'hono';
+import { fail, jsonBody, type AppDeps } from './app.ts';
+import type { GitHubIdentity } from './auth.ts';
+import { isSlug } from './paths.ts';
+import { changedFields, EMPTY_LISTING, normalize, type ListingFields } from './listings.ts';
+import { baseUrl, copySiteImages, draftProblems, importFromExport, moveListingToStudio, saveListing, type ListingRow } from './listing-ops.ts';
+
+// Cloud Run ends a request after its timeout (300 s unless the service sets --timeout), so the image migration
+// starts no new download after this long and reports what is `remaining`; running it again continues.
+const DEFAULT_BUDGET_SECONDS = 240;
+const MAX_BUDGET_SECONDS = 3300;
+const EXPORT_TIMEOUT_MS = 30_000;
+const MAX_UPDATES = 500;
+
+type Field = keyof ListingFields;
+const FIELDS = Object.keys(EMPTY_LISTING) as Field[];
+const LIST_FIELDS: Field[] = ['makers', 'grades', 'subjects', 'topics', 'standards', 'screenshots'];
+
+function dryRun(body: Record<string, unknown>): boolean {
+  if (body.dry_run !== undefined && typeof body.dry_run !== 'boolean') fail(400, 'dry_run must be true or false');
+  return body.dry_run === true;
+}
+
+function slugList(v: unknown, what: string): string[] | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v) || !v.length || !v.every(isSlug)) fail(400, `${what} must be a non-empty list of page slugs like "wake"`);
+  return [...new Set(v as string[])];
+}
+
+// What's wrong with the fields of one update, in the request's own terms; then the same checks as a save.
+function fieldProblems(fields: Record<string, unknown>, draft: ListingFields): string[] {
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(fields)) {
+    const f = k as Field;
+    if (!FIELDS.includes(f)) { out.push(`Unknown field “${k}” (fields: ${FIELDS.join(', ')}).`); continue; }
+    if (f === 'embed') { if (typeof v !== 'boolean') out.push('embed must be true or false.'); continue; }
+    if (f === 'play_source') { if (v !== 'url' && v !== 'cdn') out.push('play_source must be "url" or "cdn".'); continue; }
+    if (LIST_FIELDS.includes(f)) {
+      if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) { out.push(`${k} must be a list of strings.`); continue; }
+      if (JSON.stringify(draft[f]) !== JSON.stringify(v.map((x) => x.trim()))) out.push(`${k} has empty, repeated or over-long items, or too many of them.`);
+      continue;
+    }
+    if (typeof v !== 'string') { out.push(`${k} must be a string.`); continue; }
+    if (f === 'fit') continue;                                   // checked by the save's own rules
+    if (f === 'cdn_path') { if (v.trim() && !draft.cdn_path) out.push('cdn_path must be plain folder names like "earthquake/".'); continue; }
+    if (draft[f] !== v.trim()) out.push(`${k} is too long (${v.trim().length} characters; ${(draft[f] as string).length} would be kept).`);
+  }
+  return out;
+}
+
+export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context) => Promise<GitHubIdentity>) {
+  const { db } = deps;
+  const actorOf = (id: GitHubIdentity) => `github:${id.actor}`;
+  const view = (l: ListingRow) => ({
+    slug: l.slug, studio: l.studio_slug, studio_name: l.studio_name,
+    cdn_game: l.game_id ? db.gameById(l.game_id)?.slug ?? null : null,
+    on_site: !!l.published, review: l.review, review_note: l.review_note,
+    unpublished_changes: l.published ? changedFields(l.published, l.draft) : [],
+    submitted_by: l.submitted_by, submitted_at: l.submitted_at, published_by: l.published_by, published_at: l.published_at,
+    updated_by: l.updated_by, updated_at: l.updated_at,
+    draft: l.draft, published: l.published,
+  });
+
+  // Query: ?slug=a&slug=b (or ?slug=a,b); none lists every listing.
+  app.get('/v1/admin/listings', async (c) => {
+    await admin(c);
+    const wanted = [...new Set((c.req.queries('slug') ?? []).flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean))];
+    const all = db.listings();
+    const listings = wanted.length ? all.filter((l) => wanted.includes(l.slug)) : all;
+    return c.json({ count: listings.length, missing: wanted.filter((s) => !listings.some((l) => l.slug === s)), listings: listings.map(view) });
+  });
+
+  // "Import from the Hugo site prototype": vault-rebuild's migration/games-export.json and import-overrides.json,
+  // read from SOURCE/migration/ unless the request carries them (`pages`, `overrides`). `slugs` limits it to those pages.
+  app.post('/v1/admin/listings/import', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const dry = dryRun(body);
+    const source = baseUrl(body.source, 'source must be the site’s address, starting with https://');
+    const only = slugList(body.slugs, 'slugs');
+    let pages = body.pages, overrides = body.overrides;
+    if (pages === undefined) {
+      const doFetch = deps.fetch ?? fetch;
+      const read = async (name: string, optional: boolean): Promise<unknown> => {
+        const url = `${source}/migration/${name}`;
+        let res: Response;
+        try { res = await doFetch(url, { signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS), redirect: 'follow' }); }
+        catch (err) { fail(400, `couldn’t read ${url}: ${(err as Error).message}`); }
+        if (res.status === 404 && optional) return undefined;
+        if (!res.ok) fail(400, `couldn’t read ${url}: HTTP ${res.status}. Send the export in the request instead (pages, overrides).`);
+        return res.json().catch(() => fail(400, `${url} isn’t valid JSON.`));
+      };
+      pages = await read('games-export.json', false);
+      overrides ??= await read('import-overrides.json', true);
+    }
+    const r = importFromExport(db, pages, overrides, actorOf(id), { only, dryRun: dry });
+    const taken = (s: { why: string }) => s.why === 'already has a listing';
+    const found = new Set([...r.created, ...r.drafts.map((d) => d.slug), ...r.skipped.map((s) => s.slug)]);
+    return c.json({
+      dry_run: dry, source,
+      created: r.created,                       // created and published
+      drafts: r.drafts,                         // created, but not publishable yet (why)
+      skipped: r.skipped.filter(taken),
+      failed: [...r.skipped.filter((s) => !taken(s)), ...(only ?? []).filter((s) => !found.has(s)).map((slug) => ({ slug, why: 'not in the export' }))],
+      studios_created: r.studiosCreated,
+    });
+  });
+
+  // "Copy site images to the Vault CDN". Safe to repeat: a run that hit its time budget (or was cut off) is
+  // continued by running it again, until `remaining` is 0.
+  app.post('/v1/admin/listings/migrate-images', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const dry = dryRun(body);
+    const base = baseUrl(body.base, 'base must be the site’s address, starting with https://');
+    const budget = body.budget_seconds ?? DEFAULT_BUDGET_SECONDS;
+    if (typeof budget !== 'number' || !(budget >= 1 && budget <= MAX_BUDGET_SECONDS)) fail(400, `budget_seconds must be a number from 1 to ${MAX_BUDGET_SECONDS}`);
+    const r = await copySiteImages(deps, base, actorOf(id), { dryRun: dry, budgetMs: budget * 1000 });
+    return c.json({
+      dry_run: dry,
+      counts: { migrated: r.migrated.length, already: r.already, failed: r.failed.length, external: r.external.length, objects_written: r.objects_written, remaining: r.remaining },
+      ...r,
+    });
+  });
+
+  // "Move a game to another studio".
+  app.post('/v1/admin/listings/move', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const dry = dryRun(body);
+    if (!isSlug(body.slug)) fail(400, 'slug must be the listing’s page slug');
+    if (!isSlug(body.studio)) fail(400, 'studio must be a studio slug');
+    const l = db.listing(body.slug);
+    if (!l) fail(404, `unknown listing ${body.slug}`);
+    const to = db.studioBySlug(body.studio);
+    if (!to) fail(404, `unknown studio ${body.studio}`);
+    return c.json({ dry_run: dry, moved: moveListingToStudio(db, l, db.studioById(l.studio_id)!, to, actorOf(id), { dryRun: dry }) });
+  });
+
+  // Edit listings in bulk: each update's fields replace those fields of the draft, checked as a save is; with
+  // publish: true each changed listing is then published. Nothing is written unless every update is acceptable.
+  // Publishing puts the whole draft on the site, so a listing with other unpublished draft changes (e.g. a studio's
+  // edits waiting for review) is refused unless publish_pending: true.
+  app.post('/v1/admin/listings/update', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const dry = dryRun(body);
+    if (typeof body.publish !== 'boolean') fail(400, 'publish must be true or false');
+    const publish = body.publish;
+    if (!Array.isArray(body.updates) || !body.updates.length) fail(400, 'updates must be a non-empty list of { slug, fields }');
+    if (body.updates.length > MAX_UPDATES) fail(400, `at most ${MAX_UPDATES} updates at a time`);
+
+    const plans: { l: ListingRow; draft: ListingFields; changed: Field[]; publishes: Field[] }[] = [];
+    const bad: { slug: string; problems: string[] }[] = [];
+    const seen = new Set<string>();
+    body.updates.forEach((u: unknown, i: number) => {
+      const { slug, fields } = (u && typeof u === 'object' ? u : {}) as { slug?: unknown; fields?: unknown };
+      const name = typeof slug === 'string' && slug ? slug : `updates[${i}]`;
+      const no = (...problems: string[]) => { bad.push({ slug: name, problems }); };
+      if (!isSlug(slug)) return no('slug must be the listing’s page slug.');
+      if (seen.has(slug)) return no('Listed more than once.');
+      seen.add(slug);
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields) || !Object.keys(fields).length) return no('fields must be an object with at least one listing field.');
+      const l = db.listing(slug);
+      if (!l) return no('No such listing.');
+      const draft = normalize(fields as Record<string, unknown>, l.draft);
+      const problems = fieldProblems(fields as Record<string, unknown>, draft);
+      if (!problems.length) problems.push(...draftProblems(db, l, draft, publish));
+      const pending = changedFields(l.published, l.draft).filter((k) => !(k in (fields as object)));
+      if (publish && body.publish_pending !== true && (!l.published || pending.length || l.review === 'submitted')) {
+        problems.push(l.published
+          ? `Publishing would also put its other unpublished draft changes on the site (${pending.join(', ') || 'submitted for review'}); pass publish_pending: true to publish them too.`
+          : 'It isn’t on the site yet, so publishing would add it; pass publish_pending: true to do that.');
+      }
+      if (problems.length) return no(...problems);
+      plans.push({ l, draft, changed: changedFields(l.draft, draft), publishes: publish ? changedFields(l.published, draft) : [] });
+    });
+    if (bad.length) fail(400, `${bad.length} of ${body.updates.length} updates can’t be applied; nothing was changed`, bad);
+
+    const todo = plans.filter((p) => p.changed.length || p.publishes.length);
+    if (!dry && todo.length) {
+      db.sqlite.exec('BEGIN');
+      try {
+        for (const p of todo) saveListing(db, p.l, p.draft, actorOf(id), publish ? 'publish' : 'save');
+        db.sqlite.exec('COMMIT');
+      } catch (err) {
+        db.sqlite.exec('ROLLBACK');
+        throw err;
+      }
+    }
+    const pick = (f: ListingFields, keys: Field[]) => Object.fromEntries(keys.map((k) => [k, f[k]]));
+    return c.json({
+      dry_run: dry, publish,
+      updated: todo.map((p) => ({
+        slug: p.l.slug, studio: p.l.studio_slug, changed: p.changed, published: p.publishes,
+        before: pick(p.l.draft, p.changed), after: pick(p.draft, p.changed),
+      })),
+      unchanged: plans.filter((p) => !todo.includes(p)).map((p) => p.l.slug),
+    });
+  });
+}

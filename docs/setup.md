@@ -303,6 +303,14 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
   publishing setup. A studio listed in `studios.json` comes back at the next startup unless its entry is removed from
   the file, which is why the empty *Vault Learning Games* studio (the publisher's own organization) goes by removing
   its `studios.json` entry and then deleting the row.
+- **Admin tasks:** `admin-task.yml` (*Run workflow* → environment, task, args) runs a Vault-admin listing operation
+  on that system's portal without a signed-in person: `list`, `import`, `migrate-images`, `move`, `update` (see
+  [Admin tasks](../README.md#admin-tasks)). It needs only the environment's `PORTAL_URL` and the job's OIDC token,
+  which the portal accepts because the job runs in that system's environment (`ADMIN_ENVIRONMENT`), as for
+  `check-games`. It is a dry run unless `dry_run` is unticked. Requests are subject to the Cloud Run request timeout
+  (300 s by default; the deploy sets none): `migrate-images` therefore stops starting downloads after 240 s and
+  reports `remaining`, and the workflow calls it again until it is done. If the service's timeout is ever lowered
+  below about 270 s, pass a smaller `budget_seconds` in the task's args.
 - **Game availability:** `check-games.yml` runs daily at 11:23 UTC for both systems (or by hand for one, *Run
   workflow* → environment). It fetches every game in the portal's `/v1/catalog`, checks that its play address loads
   and, for games shown in the site's player, that it allows being framed by the site. It posts the run to that

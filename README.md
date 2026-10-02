@@ -25,6 +25,7 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | --- | --- |
 | `src/server.ts` | Entrypoint: config, DB + R2 init, one-time release relayout, clean SIGTERM close |
 | `src/app.ts` | `createApp()` — all `/v1/*` routes and shared auth/ownership checks |
+| `src/admin-tasks.ts`, `src/listing-ops.ts` | `/v1/admin/listings*` (admin tasks), and the listing operations they share with the portal |
 | `src/auth.ts` | OIDC/Google token verification (`jose`) |
 | `src/db.ts` | Schema, migrations, all SQL access |
 | `src/portal/routes.ts` | Portal HTML pages + `/portal/api/*` routes |
@@ -43,6 +44,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `POST /v1/admin/previews` + `/finalize` | Same, for Vault uploads into any studio's game |
 | | `POST /v1/admin/releases/approve` · `promote` | Approve staging build as release; make current / roll back |
 | | `POST /v1/admin/game-checks` | Post availability-check results |
+| | `GET /v1/admin/listings` · `POST /v1/admin/listings/{import,migrate-images,move,update}` | [Admin tasks](#admin-tasks): the Vault-admin listing operations, for workflows |
 | | `GET /v1/releases/:studio/:game[/check]` | Read-only: a game's releases, or pre-flight check of a release run |
 | | `GET /v1/catalog` | Public: site listings, studios, featured games |
 | Google ID token | `POST /v1/tasks/cleanup` | Nightly: expire stale previews (Cloud Scheduler) |
@@ -169,6 +171,85 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
 Vault admins can import the Hugo prototype's game pages once, from that repo's `migration/` folder. The import creates
 missing studios as Vault-managed studios. `node scripts/dev-portal.ts` does it automatically when `vault-rebuild` is
 checked out next to this repo; sign in as `lee` to edit NMSU's games.
+
+## Admin tasks
+
+The Vault-admin operations on site listings can also be run by a workflow, so they don't need someone signed in to
+the portal: **Actions → Admin task** (`.github/workflows/admin-task.yml`), or `gh workflow run`. Each task is the
+same code the portal's button runs (`src/listing-ops.ts`), behind `/v1/admin/listings…` (`src/admin-tasks.ts`).
+
+* **Who can run one:** only this repository's workflow, running in the system's GitHub environment (`staging` or
+  `production`); the job's OIDC token is the credential, as for releases and `check-games`, and there are no secrets.
+  So anyone who can run workflows in this repository can run them. The audit log records the person who started the
+  run as `github:LOGIN`.
+* **Inputs:** `environment` (which system), `task`, `args` (a JSON object) and `dry_run`. **`dry_run` defaults to
+  true**: the portal answers with what would change and writes nothing. Pass `-f dry_run=false` to do it.
+* **Result:** the portal's JSON answer is the job summary (`gh run view --log` has it too). A refused task fails the run.
+
+| Task | `args` | What it does |
+| --- | --- | --- |
+| `list` | `{ "slugs"?: [...] }` | Each listing's draft, published version, studio, review state and unpublished fields. Reads only; use it to check a task's result. |
+| `import` | `{ "source", "slugs"?, "pages"?, "overrides"? }` | The *Import from the Hugo site prototype* import: reads `SOURCE/migration/games-export.json` and `import-overrides.json`, creates a listing for each page that has none (and its studio if new) and publishes those that can be. `slugs` limits it to those pages. Answers `created`, `drafts`, `skipped` (already has a listing), `failed`, `studios_created`. |
+| `migrate-images` | `{ "base", "budget_seconds"? }` | *Copy site images to the Vault CDN* from the site at `base`. Answers the full run (`counts`, and every image `migrated`, `failed` and `external`). |
+| `move` | `{ "slug", "studio" }` | Moves a game to another studio (not while it is hosted on its studio's CDN game). |
+| `update` | `{ "updates": [{ "slug", "fields": {…} }], "publish": true \| false, "publish_pending"? }` | Sets the given listing fields on each draft and, with `publish`, publishes each as Vault. |
+
+```sh
+# Add Transformations Quest from the site's export (see the note on `import` below)
+gh workflow run admin-task.yml -f environment=staging -f task=import -f dry_run=false \
+  -f args='{"source":"https://new-design.vaultlearninggames-staging.org","slugs":["transformations-quest"]}'
+
+# Move Shady Sam to Next Gen Personal Finance
+gh workflow run admin-task.yml -f environment=staging -f task=move -f dry_run=false \
+  -f args='{"slug":"shady-sam","studio":"ngpf"}'
+
+# Copy every listing image that is still a site path to the Vault CDN
+gh workflow run admin-task.yml -f environment=staging -f task=migrate-images -f dry_run=false \
+  -f args='{"base":"https://new-design.vaultlearninggames-staging.org"}'
+
+# Fill in "About this game" for several games and publish
+gh workflow run admin-task.yml -f environment=staging -f task=update -f dry_run=false \
+  -f args='{"publish":true,"updates":[{"slug":"shady-sam","fields":{"about":"Play a loan shark and learn how predatory lending works."}},{"slug":"transformations-quest","fields":{"about":"Arrange blocks to translate, rotate and reflect shapes."}}]}'
+
+# Check the result
+gh workflow run admin-task.yml -f environment=staging -f task=list -f args='{"slugs":["shady-sam","transformations-quest"]}'
+gh run watch && gh run view --log        # or open the run: the result is its summary
+```
+
+Notes on each task:
+
+* **`import`** reads the export from the address in `source`. A site that doesn't serve
+  `migration/games-export.json` is refused with that address in the error; send the pages in the request instead
+  (`pages`, and `overrides` in the shape of `import-overrides.json`), e.g. from a `vault-rebuild` checkout:
+
+  ```sh
+  gh workflow run admin-task.yml -f environment=staging -f task=import -f dry_run=false -f args="$(jq -c \
+    --arg s transformations-quest --slurpfile ov migration/import-overrides.json \
+    '{source: "https://new-design.vaultlearninggames-staging.org", slugs: [$s], pages: map(select(.slug == $s)),
+      overrides: {overrides: {($s): $ov[0].overrides[$s]}, studios: $ov[0].studios}}' migration/games-export.json)"
+  ```
+
+  (A workflow input holds about 65,000 characters: a few pages, not the whole export.) A page whose slug already has
+  a listing is `skipped`, so running it again changes nothing.
+* **`migrate-images`** can take minutes (one download per image). Cloud Run ends a request at its timeout, 300 s
+  unless the service is deployed with `--timeout`, so the task starts no new download after `budget_seconds`
+  (default 240), stores and relinks what it downloaded, and answers with `remaining`: the number of image values it
+  didn't get to. The workflow calls again until nothing remains. Every run is a resume: images already on the CDN are
+  counted as `already` and not downloaded again, and images that failed are tried again. Only one copy runs at a time
+  (a second gets HTTP 409). A dry run downloads nothing: it lists the images a run would try.
+* **`update`** takes any listing fields (`title`, `short_description`, `about`, `makers`, `grades`, `subjects`,
+  `topics`, `standards`, `related_curriculum`, `gameplay_video`, `hero_image`, `thumb_image`, `screenshots`,
+  `play_source`, `play_url`, `cdn_path`, `embed`, `fit`); lists are JSON arrays, and fields left out keep their
+  value. It is **all or nothing**: every update is checked first, with the rules of a save in the portal (plus
+  unknown fields, wrong types and over-long text), and if any is refused nothing is written and the answer (HTTP
+  400) lists every problem per listing. Publishing puts the whole draft on the site, so with `publish: true` a
+  listing that has other unpublished draft changes (e.g. a studio's edits waiting for review), or isn't on the site
+  yet, is refused unless `publish_pending: true`. With `publish: false` only drafts change. Listings the update
+  wouldn't change are answered as `unchanged` and not written.
+
+Locally: `node scripts/admin-task.ts --portal URL --task TASK --args 'JSON' [--dry-run=false]` (a dry run unless
+`--dry-run=false`; `--pages FILE --overrides FILE` send an export from disk for `import`). Against
+`node scripts/dev-portal.ts` use `--portal http://localhost:4181 --token dev`.
 
 ## Develop
 

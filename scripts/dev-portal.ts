@@ -110,7 +110,14 @@ if (process.env.GAME_CHECKS) {
 
 const app = createApp({
   db, staging, production,
-  verifier: { async github() { throw new Error('no CI in dev'); }, async google() { throw new Error('no'); } },
+  // No CI in dev, except admin tasks: `node scripts/admin-task.ts --portal http://localhost:4181 --token dev …`.
+  verifier: {
+    async github(token) {
+      if (token !== 'dev') throw new Error('no CI in dev (admin tasks use the token "dev")');
+      return { owner: 'VaultLearningGames', ownerId: '0', repository: 'VaultLearningGames/vault-publisher', repositoryId: '0', ref: 'refs/heads/main', sha: 'dev', actor: 'dev', eventName: 'workflow_dispatch', environment: 'production' };
+    },
+    async google() { throw new Error('no'); },
+  },
   stagingPublicUrl: 'https://builds.vaultlearninggames.org', prodPublicUrl: 'https://cdn.vaultlearninggames.org',
   adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production',
   previewRetentionDays: 90, taskInvokerEmail: 'dev@example.org',

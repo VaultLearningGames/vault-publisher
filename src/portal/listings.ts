@@ -6,8 +6,8 @@
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
 import type { Db, Game, Listing, Studio, StudioRole, User } from '../db.ts';
-import { importListings, type ExportedPage, type Override } from '../listings-import.ts';
-import { changedFields, FIELD_LABEL, GRADES, isListingSlug, normalize, problems, type ListingFields } from '../listings.ts';
+import { draftProblems, importFromExport, moveListingToStudio, publishListing, saveListing } from '../listing-ops.ts';
+import { changedFields, FIELD_LABEL, GRADES, isListingSlug, normalize, type ListingFields } from '../listings.ts';
 import { getHosting, hostingCell } from './hosting.ts';
 import { html, type Html } from './html.ts';
 import { ago, head, pill, who } from './routes.ts';
@@ -290,8 +290,6 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     if (!l || l.studio_id !== s.id) fail(404, 'unknown listing');
     return { s, l };
   }
-  const cdnReady = (l: { game_id: number | null }) => !!(l.game_id && db.currentRelease(l.game_id));
-
   app.post('/portal/api/s/:studio/listings', async (c) => {
     const u = h.apiUser(c);
     const s = db.studioBySlug(c.req.param('studio'));
@@ -325,12 +323,9 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const wantsPublish = flag(b.publish) && P.canPublish(u);
     // Studio saves always go to Vault for review; Vault staff save and publish in one step.
     const wantsSubmit = !wantsPublish && !P.canPublish(u);
-    const bad = problems(draft, { forPublish: wantsPublish || wantsSubmit, cdnReady: cdnReady(l) });
+    const bad = draftProblems(db, l, draft, wantsPublish || wantsSubmit);
     if (bad.length) fail(400, bad.join(' '));
-    db.saveListingDraft(l.id, draft, h.actor(u));
-    db.audit(h.actor(u), 'listing.save', `${s.slug}:${l.slug}`, { fields: changedFields(l.draft, draft) });
-    if (wantsPublish) { db.publishListing(l.id, h.actor(u)); db.audit(h.actor(u), 'listing.publish', `${s.slug}:${l.slug}`); }
-    else if (wantsSubmit) { db.setListingReview(l.id, 'submitted', h.actor(u), null); db.audit(h.actor(u), 'listing.submit', `${s.slug}:${l.slug}`); }
+    saveListing(db, l, draft, h.actor(u), wantsPublish ? 'publish' : wantsSubmit ? 'submit' : 'save');
     return c.json({ ok: true });
   });
 
@@ -355,11 +350,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
   app.post('/portal/api/s/:studio/listings/:slug/publish', async (c) => {
     const u = h.apiUser(c);
     if (!P.canPublish(u)) fail(403, 'Only Vault release managers can publish to the site.');
-    const { s, l } = apiListing(c, u);
-    const bad = problems(l.draft, { forPublish: true, cdnReady: cdnReady(l) });
-    if (bad.length) fail(400, bad.join(' '));
-    db.publishListing(l.id, h.actor(u));
-    db.audit(h.actor(u), 'listing.publish', `${s.slug}:${l.slug}`, { fields: changedFields(l.published, l.draft) });
+    publishListing(db, apiListing(c, u).l, h.actor(u));
     return c.json({ ok: true });
   });
 
@@ -390,13 +381,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const { s, l } = apiListing(c, u);
     const to = db.studioBySlug(String((await jsonBody(c)).studio ?? ''));
     if (!to) fail(404, 'Choose a studio.');
-    if (to.id === s.id) fail(400, `${l.draft.title || l.slug} already belongs to ${s.name}.`);
-    if (l.game_id && (l.draft.play_source === 'cdn' || l.published?.play_source === 'cdn'))
-      fail(400, `It is hosted on ${s.name}’s Vault CDN game. Switch it back to its web address first.`);
-    // "Made by" that just named the old studio follows the game; anything else (co-makers, a person) is kept.
-    const rename = (f: ListingFields): ListingFields => (f.makers.length === 1 && f.makers[0] === s.name ? { ...f, makers: [to.name] } : f);
-    db.moveListing(l.id, to.id, rename(l.draft), l.published ? rename(l.published) : null, h.actor(u));
-    db.audit(h.actor(u), 'listing.move', l.slug, { from: s.slug, to: to.slug, ...(l.game_id ? { unlinked_game: l.game_id } : {}) });
+    moveListingToStudio(db, l, s, to, h.actor(u));
     return c.json({ ok: true, url: `/s/${to.slug}/g/${l.slug}` });
   });
 
@@ -404,12 +389,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const u = h.apiUser(c);
     if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can import listings.');
     const b = await jsonBody(c);
-    const parse = (v: unknown, what: string) => { try { return typeof v === 'string' ? JSON.parse(v) : v; } catch { fail(400, `${what} isn’t valid JSON.`); } };
-    const pages = parse(b.pages, 'games-export.json') as ExportedPage[];
-    const ov = b.overrides ? parse(b.overrides, 'import-overrides.json') as { overrides?: Record<string, Override>; studios?: Record<string, string> } : {};
-    if (!Array.isArray(pages)) fail(400, 'games-export.json should be a list of pages.');
-    const result = importListings(db, pages, ov.overrides ?? {}, h.actor(u), ov.studios ?? {});
-    return c.json({ ok: true, ...result });
+    return c.json({ ok: true, ...importFromExport(db, b.pages, b.overrides, h.actor(u)) });
   });
 }
 

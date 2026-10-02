@@ -10,7 +10,10 @@
 // - Rewriting the published listing changes only those image fields and nothing else (not its publish date, not its
 //   review state): it's the same image, so it needs no new review. Drafts are rewritten the same way, so a listing
 //   whose draft matched what's published still matches.
-// - Running it again changes nothing.
+// - Running it again changes nothing, so a run that was cut short is finished by running it again: with a time budget
+//   (`budgetMs`) no new download starts after it, what was downloaded is stored and relinked, and `remaining` counts
+//   the image values left for the next run.
+// - A dry run (`dryRun`) downloads and writes nothing: `migrated` lists the site-path values a run would try to move.
 import type { Db } from './db.ts';
 import { ASSETS_DIR, assetKey, IMAGE_CACHE, sniffImage, type AssetKind } from './assets.ts';
 import { FEATURED_KEY, readFeatured, type FeaturedEntry } from './featured.ts';
@@ -38,6 +41,8 @@ export interface MigrationResult {
   failed: MigrationItem[];
   external: MigrationItem[];
   objects_written: number;
+  remaining: number;        // site-path values not tried because the time budget ran out; run it again for these
+  dry_run?: boolean;
 }
 
 export const isSitePath = (v: string) => v !== '' && !/^[a-z][a-z0-9+.-]*:/i.test(v) && !v.startsWith('//');
@@ -49,11 +54,14 @@ export async function migrateListingImages(opts: {
   base: string;
   actor: string;
   fetch?: typeof fetch;
+  dryRun?: boolean;
+  budgetMs?: number;
 }): Promise<MigrationResult> {
   const { db, production, prodPublicUrl, actor } = opts;
   const base = opts.base.replace(/\/+$/, '');
   const doFetch = opts.fetch ?? fetch;
-  const result: MigrationResult = { base, ran_at: new Date().toISOString(), by: actor, migrated: [], already: 0, failed: [], external: [], objects_written: 0 };
+  const result: MigrationResult = { base, ran_at: new Date().toISOString(), by: actor, migrated: [], already: 0, failed: [], external: [], objects_written: 0, remaining: 0 };
+  const deadline = opts.budgetMs === undefined ? Infinity : Date.now() + opts.budgetMs;
   const isOurs = (v: string) => v.startsWith(`${prodPublicUrl}/`) && v.includes(`/${ASSETS_DIR}`);
 
   // Every image value, with where it is and how to put the new URL back.
@@ -85,11 +93,19 @@ export async function migrateListingImages(opts: {
 
   // Download each distinct site path once.
   const todo = refs.filter((r) => r.item.from !== '');
+  if (opts.dryRun) {
+    for (const r of todo) {
+      if (isOurs(r.item.from)) result.already++;
+      else if (isSitePath(r.item.from)) result.migrated.push(r.item);
+      else result.external.push(r.item);
+    }
+    return { ...result, dry_run: true };
+  }
   const paths = [...new Set(todo.filter((r) => isSitePath(r.item.from)).map((r) => r.item.from))];
   const got = new Map<string, { bytes: Uint8Array; ext: string; contentType: string } | { error: string }>();
   const queue = [...paths];
   await Promise.all(Array.from({ length: CONCURRENCY }, async () => {
-    for (let p = queue.shift(); p !== undefined; p = queue.shift()) got.set(p, await download(doFetch, base, p));
+    while (queue.length && Date.now() < deadline) { const p = queue.shift()!; got.set(p, await download(doFetch, base, p)); }
   }));
 
   // Sort the values, then store each distinct object once (skipping objects that exist), then point the refs at them.
@@ -99,7 +115,8 @@ export async function migrateListingImages(opts: {
     const v = r.item.from;
     if (isOurs(v)) { result.already++; continue; }
     if (!isSitePath(v)) { result.external.push(r.item); continue; }
-    const file = got.get(v)!;
+    const file = got.get(v);
+    if (!file) { result.remaining++; continue; }
     if ('error' in file) { result.failed.push({ ...r.item, reason: file.error }); continue; }
     const key = assetKey(r.studio, r.game, r.kind, file.bytes, file.ext);
     toStore.set(key, file);
@@ -142,6 +159,7 @@ export async function migrateListingImages(opts: {
   if (result.migrated.length || result.failed.length) {
     db.audit(actor, 'listing.images.migrate', base, {
       migrated: result.migrated.length, already: result.already, failed: result.failed.length, external: result.external.length, objects_written: result.objects_written,
+      ...(result.remaining ? { remaining: result.remaining } : {}),
     });
   }
   return result;

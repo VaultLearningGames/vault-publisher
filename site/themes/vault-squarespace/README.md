@@ -28,6 +28,10 @@ fonts or third-party Squarespace plugins are used, and nothing is loaded from Sq
 * Fonts: Montserrat and Archivo are self-hosted (OFL). Headings are Base 9 Sans (Adobe Fonts): set
   `params.fonts.adobe_kit` to an Adobe Fonts web project containing Base 9 Sans Regular and Bold (and italics);
   until then Share Tech Mono (self-hosted, OFL) stands in.
+* The "page not found" page (`layouts/404.html`): the television from Get Involved with static drawn on its screen
+  by a small canvas script (a still frame with "reduce motion" or without JavaScript; a pause button). Its styles
+  and script are in that file. It is shown at any address, so it may only use root-relative or absolute addresses
+  (the deploy checks). What serves it for a missing address: docs/setup.md, "The 404 page".
 * Play opens the game in the in-page player (`partials/vault-player.html`, a copy of main's).
 * The scripts that took the snapshot (`migration/squarespace/*.py`; they need the Squarespace site up) stayed in
   `VaultLearningGames/vault-hugo-rebuild`, branch `original-squarespace-design`.

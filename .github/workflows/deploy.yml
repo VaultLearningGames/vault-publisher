@@ -118,6 +118,11 @@ jobs:
         else
           ! grep -rq "googletagmanager" site/public
         fi
+        # The 404 page is shown at any address, so nothing in it may be a relative address; and it is never indexed.
+        grep -q '<meta name="robots" content="noindex">' site/public/404.html
+        grep -q 'src="/sq/img/site/vault-tv-wide-48947b.jpg"' site/public/404.html
+        test -f site/public/sq/img/site/vault-tv-wide-48947b.jpg
+        ! grep -oE '(href|src|action)="[^"]*"' site/public/404.html | grep -vE '="(/|https://|#)'
         echo "$(find site/public -type f | wc -l) files, $(du -sh site/public | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
     - name: Authenticate to Google Cloud

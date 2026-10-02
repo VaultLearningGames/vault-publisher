@@ -1,0 +1,19 @@
+# Copied into site/public before `wrangler deploy` (check.sh does it for a local run). What src/site-sync.ts sets
+# per object and the zone rules set per hostname, for the Workers Static Assets route. ROBOTS is replaced by
+# noindex (staging) or all (production).
+/*
+  X-Robots-Tag: ROBOTS
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=60
+/sq/*
+  ! Cache-Control
+  Cache-Control: public, max-age=3600
+/files/*
+  ! Cache-Control
+  Cache-Control: public, max-age=3600
+/sq/fonts/*
+  ! Cache-Control
+  Cache-Control: public, max-age=2592000
+/sq/img/*
+  ! Cache-Control
+  Cache-Control: public, max-age=2592000

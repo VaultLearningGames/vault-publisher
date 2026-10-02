@@ -316,7 +316,7 @@ Cloud Run site. Left to do, in order: A (key), B (rules on the test address, che
 | `X-Robots-Tag: noindex` (staging) / `all` (production) on every response | Response header rule |
 | gzip | Cloudflare compresses (Brotli or gzip) |
 | `/_preview/TOKEN/` proxied to the site's preview service | The portal: `PORTAL/_preview/TOKEN/` |
-| The site's 404 page (`404.html`), status 404 | **Status 404, but Cloudflare's plain "Not Found" page, not ours.** Showing `404.html` for a missing object needs a Custom Error Rule (Cloudflare Pro plan and up; the zones are Free) or a Worker. Not done: decide between the Pro plan for the zone, a Worker (or Workers static assets) in front of the bucket, and living with the plain page |
+| The site's 404 page (`404.html`), status 404 | **Status 404, but Cloudflare's plain "Object not found" page, not ours**, until one of the routes in [The 404 page](#the-404-page) is applied. The page itself (`site/themes/vault-squarespace/layouts/404.html`) is built and published as `/404.html` by every deploy |
 
 Fonts and scripts are fetched by preview pages on the portal's address, so the bucket has a CORS policy that allows
 `GET` and `HEAD` from any origin. The Adobe Fonts kit (`zxo3yez`) must list the portal's domain as well as the
@@ -429,6 +429,69 @@ points at the old Cloud Run site; redirect it to the apex or remove it. `new-des
    (as cutover steps 2 and 3), keeping the old records' values for the rollback.
 6. `FORMS_ALLOWED_ORIGINS` already lists the site's addresses; the forms post to the production portal through the
    `HUGOxPARAMSxFORMSx…` overrides the deploy sets from `PORTAL_URL`.
+
+### The 404 page
+
+`/404.html` (the television with static, `site/themes/vault-squarespace/layouts/404.html`) is in every build:
+`site-sync` refuses a build without it, and the deploy checks it has no relative address (it is shown at any depth)
+and is `noindex`. What is missing is something that answers a missing address with it. An R2 custom domain can't
+(no error document), and nothing on the Free plan's rules can. What was looked at on 2026-10-02 (Cloudflare's
+documentation that day; both zones are Free):
+
+| Route | Plan and cost | Limits | What it changes here | Tried |
+| --- | --- | --- | --- | --- |
+| **a. Custom Error Rule** (`http_custom_errors`: `http.response.code eq 404` → `serve_error` with a custom error asset fetched from `/404.html`) | Pro, per zone: about $20 a month paid yearly, $25 monthly (third-party price lists; check the dashboard). Free: 0 rules | The asset is a copy Cloudflare takes once, with images, CSS and scripts inlined, 1.5 MB at most: it must be fetched again after any deploy that changes the page or the stylesheet | One rule and one asset per zone; a re-fetch call in the deploy; a token with *Custom Error Rules: Edit* | No (needs the plan; the setup token is refused on that phase) |
+| **b. A Worker on the site's hostnames** (`cloudflare/site-404/`): passes every request to the bucket, and answers a 404 for a page address with `/404.html`, status 404 | Workers Free: 100,000 requests a day for the account, then the route "fails open" (the bucket answers, plain 404s) if set so. Paid: $5 a month, 10 million requests a month included, $0.30 per million after | Every request on a routed hostname counts, cached or not. Measured: 10 to 16 requests to the site's hostname per page view, all but one under `/sq/`. So about 6,000 to 10,000 page views a day free; with `/sq/*` routed past the Worker, 50,000 or more | Nothing in the build, sync, rules, previews or cutover. One `wrangler deploy` per hostname, once; deleting the route puts back today's behaviour | Unit tests (`test/site-404-worker.test.ts`) and the real Workers runtime on this machine (`wrangler dev`) against a stand-in bucket: 404 + the page at `/nope/`, `/a/b/c`, HEAD; files and existing pages untouched. **Not deployed**: that a route Worker's `fetch` reaches the bucket behind an R2 custom domain is as documented for routes, and unproven here until step 1 below |
+| **c. Workers Static Assets** (`cloudflare/site-assets/`) or Pages: upload the build itself; a root `404.html` is served with status 404 natively | Free: requests for static assets are not counted or billed. 20,000 files and 25 MiB a file (the site: 483 files, 28 MB, largest 6.6 MB) | Redirects to the trailing slash are 307, not 301. A `+` in a folder name is redirected to `%2B` first (the 68 `/game-cards/category|tag/...` addresses). At most 100 `_headers` rules | Replaces `site-sync`, the bucket, its key and CORS, the directory-index and cache rules, and both cutover runbooks (the hostname is detached from the bucket and attached to the Worker); the deploy needs a Cloudflare token with *Workers Scripts: Edit*; `_headers` and `_redirects` carry the cache lifetimes, `X-Robots-Tag`, CORS and the PDF redirect | Locally with `wrangler dev` on a real build (`cloudflare/site-assets/check.sh`): 404 + the page at any depth, index, redirects, headers. Not deployed |
+| **d. Rules only** (rewrite or redirect unknown paths to `/404.html`) | Free | A rule can't know whether an object exists, so it needs the list of every page address, rewritten at each deploy; and the answer is **200** (or a redirect and then 200), never 404 | A rules token in the deploy | On `r2-site.vaultlearninggames-staging.org`: a rewrite of one path to `/404.html` returned 200 with the page. Removed |
+| Snippets; the older "custom pages" | Pro and up; 5xx and 1xxx errors only | | | No |
+
+**Recommended: b**, if a Worker on the site's hostnames (not on `cdn.` or `builds.`: game files never pass through
+it) is acceptable. It costs nothing at the site's traffic, leaves everything built for R2 as it is, touches only
+answers that were already 404, and is undone by deleting one route. Pro (a) is the route with no code, at $240 to
+$300 a year for production alone, with a copy of the page to keep fresh. c is the cleanest serving model and free
+without a cap, but it replaces the publishing pipeline and adds a redirect to the 68 filter addresses; worth it only if the
+site is being moved anyway.
+
+**Applying b.** Needs: the branch with the new page deployed (so the bucket has the new `/404.html`), and a
+Cloudflare API token with *Account → Workers Scripts: Edit* and *Zone → Workers Routes: Edit* on the two Vault zones
+(the setup token has neither). Each hostname gets its own Worker (`vault-site-404-<env>`), tried on the test
+address first.
+
+```bash
+export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID=53908534e6b25253c988befce2f9ad21
+W="npx wrangler@4 -c cloudflare/site-404/wrangler.jsonc"
+
+# 1. The staging bucket's test address (no visitors).
+$W deploy --env staging-test
+T=https://r2-site.vaultlearninggames-staging.org
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' $T/nope/            # 404 text/html; charset=utf-8
+curl -s $T/a/b/c/ | grep -c 'Nothing on this channel'                       # 1
+curl -sI $T/nope/ | grep -i x-robots-tag                                    # noindex
+curl -sI $T/lakeland/ | grep -iE '^(HTTP|x-robots|cache-control|etag)'      # 200, noindex, max-age=60, an etag: as before
+curl -sI $T/lakeland | grep -iE '^(HTTP|location)'                          # 301 …/lakeland/
+curl -sI -H 'Range: bytes=0-99' $T/files/keys-to-the-vault.pdf | head -1    # 206
+curl -s -o /dev/null -w '%{http_code}\n' $T/sq/img/nope.jpg                 # 404 (the bucket's short answer)
+# If an existing page does not come back as before, the Worker's fetch is not reaching the bucket:
+#   $W delete --env staging-test        and use c, or give the Worker the bucket as a binding.
+
+# 2. Staging, then the same checks with T=https://vaultlearninggames-staging.org
+$W deploy --env staging
+
+# 3. Production: its test address today (wrangler.jsonc; add "vaultlearninggames.org/*" there at launch).
+$W deploy --env production
+
+# Undo, per hostname:
+$W delete --env staging
+```
+
+Then, per route, in the dashboard (Workers & Pages → the Worker → Settings → Domains & Routes): set the route to
+**fail open**, so a day over the free limit means plain 404s and never an error page. To keep stylesheet, font and
+image requests from counting, add a route with no Worker for them (it takes precedence, being more specific; `cf`, `API` and `Z` as in the cutover above, with a token that may edit routes):
+
+```bash
+cf -X POST "$API/zones/$Z/workers/routes" -d '{"pattern":"vaultlearninggames-staging.org/sq/*"}'
+```
 
 ### Rebuilding the site when listings change
 

@@ -11,7 +11,7 @@
 #                 Cloudflare raises browser lifetimes below 4 hours to 4 hours and never caches pages at the edge
 #
 # Not covered, because no rule on the Free plan can do it: the site's own 404 page for a missing address (R2 answers
-# 404 with Cloudflare's plain page). See docs/setup.md.
+# 404 with Cloudflare's plain page). See docs/setup.md, "The 404 page".
 #
 #   CLOUDFLARE_API_TOKEN=... scripts/cloudflare-site-rules.sh HOST ROBOTS            # prints what it would send
 #   CLOUDFLARE_API_TOKEN=... scripts/cloudflare-site-rules.sh HOST ROBOTS --apply    # creates or updates the five rules

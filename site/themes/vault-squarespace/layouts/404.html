@@ -1,1 +1,144 @@
-{{- define "main" }}{{ partial "sq/section.html" (dict "s" (dict "theme" "white" "height" "medium" "blocks" slice) "page" . "key" "s0" "class" "is-first" "inner" "<div class=\"sq-prose sq-text\" style=\"text-align:center\"><h1>Page not found</h1><p>We couldn't find the page you were looking for. It may have moved.</p><p><a href=\"/\">Back to the Vault</a></p></div>" ) }}{{ end }}
+{{- /*
+  The "page not found" page: the Vault television (the photo from Get Involved) with static on its screen, a short
+  message and the way back. Hugo writes it to /404.html; whatever serves the site answers a missing address with this
+  file and status 404 (docs/setup.md, "The 404 page").
+
+  It is shown at any address (/a/b/c/), so every address in it is root-relative or absolute, never relative. Its
+  styles and script live in this file, so the page needs only the site stylesheet and the one photo.
+
+  The static: a 192 x 144 canvas of grey noise redrawn about 14 times a second, lying over the photo's screen. Each
+  dot changes on its own and the picture's overall brightness stays the same from frame to frame, so nothing flashes;
+  the one large shape, a faint band, takes 7 seconds to roll down the screen. With "reduce motion" set, or without
+  JavaScript, the screen shows one still frame (an SVG noise pattern). The button on the photo pauses it.
+*/ -}}
+{{- define "head" }}
+<meta name="robots" content="noindex">
+<style>
+  /* ---------- 404 page (layouts/404.html) ---------- */
+  .nf { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; }
+  .nf-copy { padding: 44px var(--gutter) 56px; }
+  .nf-copy .nf-code { margin: 0 0 14px; font: 500 var(--small)/1.2 var(--meta); letter-spacing: .12em; text-transform: uppercase; }
+  .nf-copy .nf-lead { margin: 16px 0 0; max-width: 30em; }
+  .nf-copy .nf-more { margin: 12px 0 0; max-width: 30em; }
+  .nf-links { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 30px; }
+  .nf-links .btn { height: 56px; padding: 0 30px; color: var(--btn-fg); text-decoration: none; }
+  .nf-links .btn--secondary { padding: 0 26px; color: var(--btn2); }
+  .nf-links .btn:focus-visible, .nf-pause:focus-visible { outline: 3px solid var(--dark-accent); outline-offset: 3px; }
+
+  /* The photo is 1500 x 1277; the glass of its screen is the rectangle below, in fractions of the photo. */
+  .nf-tv { position: relative; overflow: hidden; width: 100%; max-width: 640px; margin: 0 auto; background: #d9b996; }
+  .nf-tv-in { position: relative; aspect-ratio: 1500 / 1277; }
+  .nf-tv-in > img { display: block; width: 100%; height: 100%; }
+  .nf-screen { position: absolute; left: 27.35%; top: 34.05%; width: 39.5%; height: 33.75%; overflow: hidden;
+    border-radius: 9.5% / 11.5%; background-color: #777; container-type: inline-size;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='192' height='144'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='4'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 2.6 0 0 0 -.75'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' fill='%23222'/%3E%3Crect width='100%25' height='100%25' fill='%23eee' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: cover; }
+  .nf-screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+  .nf-screen.is-live canvas { display: block; }
+  /* The tube: scan lines, darker towards the corners, and the window's reflection the photo has on its left. */
+  .nf-screen::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background:
+      linear-gradient(100deg, rgba(190, 215, 235, .2) 0%, rgba(190, 215, 235, .06) 11%, transparent 20%),
+      repeating-linear-gradient(to bottom, rgba(0, 0, 0, .2) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at 50% 46%, transparent 52%, rgba(0, 0, 0, .58) 100%);
+    box-shadow: inset 0 0 14px 5px rgba(0, 0, 0, .7); }
+  .nf-osd { position: absolute; top: 9%; right: 9%; z-index: 1; font: 700 clamp(10px, 6.6cqw, 26px)/1 var(--heading);
+    letter-spacing: .06em; color: var(--accent); text-shadow: 0 0 2px #000, 0 0 7px rgba(0, 0, 0, .9), 0 0 12px rgba(103, 255, 207, .55); }
+  .nf-pause { position: absolute; right: 12px; bottom: 12px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%;
+    background: rgba(0, 0, 0, .55); cursor: pointer; display: none; }
+  .nf-tv.can-pause .nf-pause { display: block; }
+  .nf-pause::before, .nf-pause::after { content: ""; position: absolute; top: 9.5px; width: 2.5px; height: 9px; background: #fff; }
+  .nf-pause::before { left: 10.5px; } .nf-pause::after { right: 10.5px; }
+  .nf-pause[aria-pressed="true"]::before { left: 10px; width: 0; height: 0; background: none; border: solid transparent; border-width: 5px 0 5px 8px; border-left-color: #fff; }
+  .nf-pause[aria-pressed="true"]::after { display: none; }
+
+  @media (min-width: 640px) {
+    .nf { padding-top: 40px; }
+    .nf-copy { width: 100%; max-width: 640px; margin: 0 auto; padding-left: 0; padding-right: 0; }
+  }
+  /* Side by side: the photo fills its half of the section, edge to edge, and is cropped at the sides (never the
+     television) when the text is taller than the photo. */
+  @media (min-width: 1000px) {
+    .nf { grid-template-columns: minmax(0, 1fr) minmax(0, min(50vw, 820px)); padding-top: 0; }
+    .nf-copy { max-width: none; margin: 0; padding: 48px 5vw 48px var(--gutter); }
+    .nf-tv { order: 2; align-self: stretch; max-width: none; margin: 0; container-type: size;
+      min-height: calc(min(50vw, 820px) * 1277 / 1500); }
+    .nf-tv-in { --w: max(100cqw, calc(100cqh * 1500 / 1277)); position: absolute; width: var(--w);
+      left: calc((100cqw - var(--w)) * .55); top: 50%; transform: translateY(-50%); }
+  }
+</style>
+{{- end }}
+
+{{- define "main" }}
+<section class="sq-sec theme-white is-first" data-section-theme="white" style="--h:0">
+  <div class="nf">
+    <div class="nf-tv">
+      <div class="nf-tv-in">
+      <img src="{{ "sq/img/site/vault-tv-wide-48947b.jpg" | relURL }}" alt="An old television set showing nothing but static." width="1500" height="1277" decoding="async">
+      <div class="nf-screen" aria-hidden="true"><canvas width="192" height="144"></canvas><span class="nf-osd">CH 404</span></div>
+      </div>
+      <button type="button" class="nf-pause" aria-label="Pause the television static" aria-pressed="false"></button>
+    </div>
+    <div class="nf-copy sq-text">
+      <p class="nf-code">Error 404: page not found</p>
+      <h1>Nothing on this channel</h1>
+      <p class="sqsrte-large nf-lead">We couldn't find the page you were looking for. It may have moved, or the address might have a typo in it.</p>
+      <p class="nf-more">The games haven't gone anywhere, though. They are all still free and ready to play.</p>
+      <div class="nf-links">
+        <a class="btn" href="/">Back to the Vault</a>
+        <a class="btn btn--secondary" href="/game-cards/">Browse all games</a>
+      </div>
+    </div>
+  </div>
+</section>
+{{- end }}
+
+{{- define "scripts" }}
+<script>
+(function () {
+  var tv = document.querySelector('.nf-tv');
+  var screen = tv && tv.querySelector('.nf-screen');
+  var canvas = screen && screen.querySelector('canvas');
+  var ctx = canvas && canvas.getContext && canvas.getContext('2d');
+  var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  if (!ctx || (still && still.matches)) return;          // the still frame (CSS) stays
+
+  var W = canvas.width, H = canvas.height;
+  var image = ctx.createImageData(W, H);
+  var px = new Uint32Array(image.data.buffer);
+  var FRAME = 70;                                          // ms between frames: about 14 a second
+  var ROLL = 7000;                                         // ms for the faint band to roll down the screen once
+  var paused = false, timer = 0;
+
+  function draw() {
+    var band = (Date.now() % ROLL) / ROLL * (H + 40) - 20; // top of the band, in canvas rows
+    for (var y = 0, i = 0; y < H; y++) {
+      var d = y - band, dim = d > 0 && d < 20 ? 0.82 : 1;  // the band: 20 rows, a little darker
+      for (var x = 0; x < W; x++, i++) {
+        var v = (40 + Math.random() * 200) * dim | 0;
+        px[i] = 0xff000000 | v << 16 | v << 8 | v;
+      }
+    }
+    ctx.putImageData(image, 0, 0);
+  }
+  function run() {
+    clearInterval(timer);
+    if (!paused && !document.hidden) timer = setInterval(draw, FRAME);
+  }
+
+  draw();
+  screen.classList.add('is-live');
+  tv.classList.add('can-pause');
+  var button = tv.querySelector('.nf-pause');
+  button.addEventListener('click', function () {
+    paused = !paused;
+    button.setAttribute('aria-pressed', String(paused));
+    button.setAttribute('aria-label', paused ? 'Play the television static' : 'Pause the television static');
+    run();
+  });
+  document.addEventListener('visibilitychange', run);
+  if (still && still.addEventListener) still.addEventListener('change', function () { if (still.matches) { paused = true; run(); } });
+  run();
+})();
+</script>
+{{- end }}

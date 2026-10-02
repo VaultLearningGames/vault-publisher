@@ -1,11 +1,13 @@
 # One-time setup
 
 Vault runs two complete, separate systems. They share code and nothing else: each has its own site, portal and
-deployer, database, R2 buckets, keys and GitHub OAuth app.
+deployer, database, R2 buckets, keys and GitHub OAuth app. Both the portal and the website are in this repository
+and deploy together (`.github/workflows/deploy.yml`): the portal to Cloud Run, the website (`site/`, static files)
+to an R2 bucket that Cloudflare serves.
 
 | | Production | Staging |
 |---|---|---|
-| Public site (fielddaylab/vault-rebuild) | `vaultlearninggames.org` → Cloud Run `vault-site` | `vaultlearninggames-staging.org` → `vault-site-staging` |
+| Public site (`site/`) | `vaultlearninggames.org` → R2 `site-vaultlearninggames` (still Squarespace until launch) | `vaultlearninggames-staging.org` → R2 `site-vaultlearninggames-staging` (see [The website on R2](#the-website-on-r2) for the state of the move from Cloud Run) |
 | Portal and deployer (this repo) | `portal.vaultlearninggames.org` → `vault-publisher` | `portal.vaultlearninggames-staging.org` → `vault-publisher-staging` |
 | Studios' test builds | `builds.vaultlearninggames.org` → R2 `builds-vaultlearninggames` | `builds.vaultlearninggames-staging.org` → `builds-vaultlearninggames-staging` |
 | Releases | `cdn.vaultlearninggames.org` → R2 `cdn-vaultlearninggames` | `cdn.vaultlearninggames-staging.org` → `cdn-vaultlearninggames-staging` |
@@ -33,6 +35,8 @@ gcloud config set project $PROJECT
 | `builds-vaultlearninggames` | `builds.vaultlearninggames.org` | new |
 | `cdn-vaultlearninggames-staging` | `cdn.vaultlearninggames-staging.org` | exists, but holds production's test builds until step 5 |
 | `builds-vaultlearninggames-staging` | `builds.vaultlearninggames-staging.org` | new |
+| `site-vaultlearninggames-staging` | `r2-site.vaultlearninggames-staging.org` (test), then `vaultlearninggames-staging.org` | exists (2026-10-02); see [The website on R2](#the-website-on-r2) |
+| `site-vaultlearninggames` | `vaultlearninggames.org` | to create at launch |
 
 **Rules** (on each zone, per hostname):
 - every host: *URL rewrite*: when the path ends with `/`, rewrite it to the path + `index.html`;
@@ -111,26 +115,25 @@ for s in r2-builds-access-key-id r2-builds-secret-access-key r2-cdn-access-key-i
 done
 ```
 
-### 2.3 Site service accounts (no roles: nginx serving files)
+### 2.3 Site service accounts (the old Cloud Run sites)
 
-```bash
-gcloud iam service-accounts create vault-site --display-name "vault-site (Cloud Run)"
-gcloud iam service-accounts create vault-site-staging --display-name "vault-site-staging (Cloud Run)"
-```
+The website is static files on R2 now and needs no service account. `vault-site-staging` still runs the two old
+Cloud Run sites (`vault-site-original-staging`, `vault-site-staging`) until they are retired; `vault-site` was never
+used.
 
 ### 2.4 Let the GitHub deploy account deploy as the new service accounts
 
 ```bash
 DEPLOY_SA=...   # the GCP_DEPLOY_SERVICE_ACCOUNT variable
-for a in vault-publisher-staging vault-site vault-site-staging; do
+for a in vault-publisher-staging; do
   gcloud iam service-accounts add-iam-policy-binding $a@$PROJECT.iam.gserviceaccount.com \
     --member=serviceAccount:$DEPLOY_SA --role=roles/iam.serviceAccountUser
 done
 ```
 
-**Workload Identity Federation:** the provider's attribute condition must allow `fielddaylab/vault-rebuild` as well as
-`VaultLearningGames/vault-publisher`. Check it with `gcloud iam workload-identity-pools providers describe ...`, and
-grant `roles/iam.workloadIdentityUser` on the deploy service account to the new repository's principal if needed.
+**Workload Identity Federation:** the provider's attribute condition must allow `VaultLearningGames/vault-publisher`
+(and the old site repository for as long as it still deploys the new design to Cloud Run). Check it with
+`gcloud iam workload-identity-pools providers describe ...`.
 
 ## 3. GitHub OAuth app for the staging portal
 
@@ -157,7 +160,7 @@ setenv production SERVICE=vault-publisher \
   BUILDS_BUCKET=builds-vaultlearninggames BUILDS_PUBLIC_URL=https://builds.vaultlearninggames.org \
   CDN_BUCKET=cdn-vaultlearninggames CDN_PUBLIC_URL=https://cdn.vaultlearninggames.org \
   PORTAL_URL=https://portal.vaultlearninggames.org SITE_URL=https://vaultlearninggames.org ADMIN_ENVIRONMENT=production \
-  PREVIEW_SITES=Site=https://vaultlearninggames.org \
+  PREVIEW_SITES=Site=https://portal.vaultlearninggames.org SITE_BUCKET=site-vaultlearninggames \
   LITESTREAM_BUCKET=$PROJECT-vault-publisher-db \
   TASK_INVOKER_EMAIL=vault-publisher-scheduler@$PROJECT.iam.gserviceaccount.com \
   PORTAL_GITHUB_CLIENT_ID=$(gh variable get PORTAL_GITHUB_CLIENT_ID -R $R) \
@@ -168,7 +171,8 @@ setenv staging SERVICE=vault-publisher-staging \
   BUILDS_BUCKET=builds-vaultlearninggames-staging BUILDS_PUBLIC_URL=https://builds.vaultlearninggames-staging.org \
   CDN_BUCKET=cdn-vaultlearninggames-staging CDN_PUBLIC_URL=https://cdn.vaultlearninggames-staging.org \
   PORTAL_URL=https://portal.vaultlearninggames-staging.org SITE_URL=https://vaultlearninggames-staging.org ADMIN_ENVIRONMENT=staging \
-  "PREVIEW_SITES=Squarespace=https://squarespace-design.vaultlearninggames-staging.org New=https://new-design.vaultlearninggames-staging.org" \
+  "PREVIEW_SITES=Site=https://portal.vaultlearninggames-staging.org New=https://new-design.vaultlearninggames-staging.org" \
+  SITE_BUCKET=site-vaultlearninggames-staging \
   LITESTREAM_BUCKET=$PROJECT-vault-publisher-staging-db LITESTREAM_SEED_BUCKET=$PROJECT-vault-publisher-db \
   TASK_INVOKER_EMAIL=vault-publisher-scheduler@$PROJECT.iam.gserviceaccount.com \
   PORTAL_GITHUB_CLIENT_ID=<staging OAuth app client ID> \
@@ -180,20 +184,11 @@ for v in PUBLISHER_SERVICE_ACCOUNT LITESTREAM_BUCKET TASK_INVOKER_EMAIL PORTAL_G
 done
 ```
 
-**fielddaylab/vault-rebuild** (the site) gets environments too:
-
-```bash
-S=fielddaylab/vault-rebuild
-for e in staging production; do gh api -X PUT repos/$S/environments/$e >/dev/null; done
-for kv in SERVICE=vault-site-staging SITE_URL=https://vaultlearninggames-staging.org/ \
-  VAULT_PORTAL=https://portal.vaultlearninggames-staging.org "ROBOTS_TAG=noindex, nofollow" \
-  SITE_SERVICE_ACCOUNT=vault-site-staging@$PROJECT.iam.gserviceaccount.com; do
-  gh variable set "${kv%%=*}" --env staging --body "${kv#*=}" -R $S; done
-for kv in SERVICE=vault-site SITE_URL=https://vaultlearninggames.org/ \
-  VAULT_PORTAL=https://portal.vaultlearninggames.org ROBOTS_TAG=all \
-  SITE_SERVICE_ACCOUNT=vault-site@$PROJECT.iam.gserviceaccount.com; do
-  gh variable set "${kv%%=*}" --env production --body "${kv#*=}" -R $S; done
-```
+`SITE_URL` is the website's address: Hugo's `baseURL` in the site build, and where listing previews load their CSS
+and images from. `SITE_BUCKET` is the R2 bucket the deploy publishes the site to; an environment without it builds
+the site as a check and publishes nothing. `PREVIEW_SITES` lists where the editor's Preview buttons open
+(`ADDRESS/_preview/TOKEN/`): the portal itself, which renders previews with `site/`, and on staging also the new
+design's own site.
 
 Point the test game at staging: `gh variable set VAULT_PUBLISHER_URL --body https://portal.vaultlearninggames-staging.org -R VaultLearningGames/vault-publisher-test`.
 
@@ -226,16 +221,15 @@ Then deploy staging: push to `main`. On its first start it seeds its database fr
 
 ## 6. Custom domains
 
-After each service's first deploy, map its domain. The domain must be verified for the project first
-(`gcloud domains verify vaultlearninggames-staging.org`). Keep the Cloudflare DNS records **DNS only** (grey cloud)
+After the portal's first deploy, map its domain. The domain must be verified for the project first
+(`gcloud domains verify vaultlearninggames-staging.org`). Keep the Cloudflare DNS record **DNS only** (grey cloud)
 until Google has issued the certificate.
 
 ```bash
 gcloud beta run domain-mappings create --region=$REGION --service=vault-publisher-staging --domain=portal.vaultlearninggames-staging.org
-gcloud beta run domain-mappings create --region=$REGION --service=vault-site-staging --domain=vaultlearninggames-staging.org
-# Production site, when it replaces Squarespace:
-# gcloud beta run domain-mappings create --region=$REGION --service=vault-site --domain=vaultlearninggames.org
 ```
+
+The website's address is an R2 custom domain, not a Cloud Run mapping: [The website on R2](#the-website-on-r2).
 
 ## 7. Scheduled tasks
 
@@ -296,6 +290,155 @@ setenv staging FORMS_NEWSLETTER_SHEET=<id> FORMS_SUBMIT_GAME_SHEET=<id> \
 A form whose spreadsheet variable is unset answers 503. Submissions are limited to 10 per form per client IP per
 hour, and a filled `company_website` honeypot field is accepted but not written. Failures are logged without the
 submitted values; each saved submission adds a `form.submit` audit entry (form and site only).
+
+## The website on R2
+
+The website (`site/`) is a few hundred static files. The deploy workflow builds them and `scripts/site-sync.ts`
+uploads them to the system's site bucket; Cloudflare serves the bucket at the site's address. Nothing runs for the
+site: no Cloud Run service, no nginx. Listing previews are rendered by the portal (`/_preview/TOKEN/`), which
+carries `site/` and Hugo in its image.
+
+**State on 2026-10-02 (staging).** `site-vaultlearninggames-staging` exists, holds a build of the site and answers
+at the test address `https://r2-site.vaultlearninggames-staging.org` (its files only: `/wake/index.html` works,
+`/wake/` not yet, because the zone rules below are not created). `vaultlearninggames-staging.org` is still the old
+Cloud Run site. Left to do, in order: A (key), B (rules on the test address, check), then the cutover.
+
+### What each piece does
+
+| nginx did | Now |
+| --- | --- |
+| Served files with a type by extension | `site-sync.ts` sets each object's `Content-Type` (same types; `.js` is `text/javascript`, `sitemap.xml` `application/xml`) |
+| `Cache-Control: public, max-age=3600` on assets, none on pages | Set per object at upload: pages, `sitemap.xml` 60 s; snapshot images (`name-<6 hex>.ext`) and fonts 30 days; everything else 1 hour. The stylesheet and script are requested as `?v=<hash>`. A cache rule makes Cloudflare follow these (without it, it raises browser lifetimes under 4 hours to 4 hours, as it does in front of nginx today) |
+| `/lakeland/` → `lakeland/index.html` | Rewrite rule: a path ending in `/` gets `index.html` appended |
+| `/lakeland` → 301 `/lakeland/` (also with a query: `/game-cards?offset=20`) | Redirect rule: a path with no `.` and no trailing `/` → 301 to the path + `/`, query kept. Differences: the `Location` is absolute; an address that doesn't exist is redirected once before its 404; a folder whose name contains a `.` isn't redirected (the site has none; a filter name with a `.` in it would be the first) |
+| `/s/keys-to-the-vault.pdf` → 301 `/files/keys-to-the-vault.pdf` | Redirect rule |
+| `/game-cards/category/Dev%3A+Field+Day+Lab` | The object is `game-cards/category/Dev:+Field+Day+Lab/index.html`; R2 decodes `%3A`, `%26`, `%2B` and keeps `+`, like nginx |
+| `X-Robots-Tag: noindex` (staging) / `all` (production) on every response | Response header rule |
+| gzip | Cloudflare compresses (Brotli or gzip) |
+| `/_preview/TOKEN/` proxied to the site's preview service | The portal: `PORTAL/_preview/TOKEN/` |
+| The site's 404 page (`404.html`), status 404 | **Status 404, but Cloudflare's plain "Not Found" page, not ours.** Showing `404.html` for a missing object needs a Custom Error Rule (Cloudflare Pro plan and up; the zones are Free) or a Worker. Not done: decide between the Pro plan for the zone, a Worker (or Workers static assets) in front of the bucket, and living with the plain page |
+
+Fonts and scripts are fetched by preview pages on the portal's address, so the bucket has a CORS policy that allows
+`GET` and `HEAD` from any origin. The Adobe Fonts kit (`zxo3yez`) must list the portal's domain as well as the
+site's, or previews fall back to the stand-in heading font.
+
+### A. The bucket's key (once per system)
+
+Cloudflare dashboard → R2 → Manage API tokens → Create Account API token: *Object Read & Write*, *Apply to specific
+buckets only* → `site-vaultlearninggames-staging`, no expiry. Then store the two values and let the deploy account
+(not the portal) read them:
+
+```bash
+newsecret vault-publisher-staging-r2-site-access-key-id
+newsecret vault-publisher-staging-r2-site-secret-access-key
+for s in r2-site-access-key-id r2-site-secret-access-key; do
+  gcloud secrets add-iam-policy-binding vault-publisher-staging-$s \
+    --member=serviceAccount:fieldday-github-deployer@$PROJECT.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+done
+gh variable set SITE_BUCKET --env staging --body site-vaultlearninggames-staging -R VaultLearningGames/vault-publisher
+gh variable set PREVIEW_SITES --env staging -R VaultLearningGames/vault-publisher \
+  --body "Site=https://portal.vaultlearninggames-staging.org New=https://new-design.vaultlearninggames-staging.org"
+```
+
+The deploy also gives the portal 1 GiB of memory (`--memory=1Gi` in the workflow; it was 512 MiB) for the Hugo runs.
+
+### B. The zone rules (once per hostname)
+
+`scripts/cloudflare-site-rules.sh HOST ROBOTS` prints the five rules; `--apply` creates or updates them, `--delete`
+removes them. Each rule matches one hostname only, and the script adds and changes single rules, never a whole
+ruleset. It needs a token with *Zone → Single Redirect: Edit, Transform Rules: Edit, Cache Rules: Edit* on the zone
+(the R2/DNS token used for the bucket can't read or write rules).
+
+```bash
+export CLOUDFLARE_API_TOKEN   # a token with the three rule permissions on vaultlearninggames-staging.org
+scripts/cloudflare-site-rules.sh r2-site.vaultlearninggames-staging.org noindex            # look at them
+scripts/cloudflare-site-rules.sh r2-site.vaultlearninggames-staging.org noindex --apply
+T=https://r2-site.vaultlearninggames-staging.org
+curl -sI $T/ | head -1                                   # 200
+curl -sI $T/lakeland | grep -iE '^(HTTP|location)'       # 301, location: …/lakeland/
+curl -sI $T/lakeland/ | grep -iE '^(HTTP|x-robots|cache-control)'   # 200, noindex, max-age=60
+curl -sI "$T/game-cards?offset=20" | grep -i location    # …/game-cards/?offset=20
+curl -sI "$T/game-cards/category/Dev%3A+Field+Day+Lab" | grep -iE '^(HTTP|location)'
+curl -sI $T/s/keys-to-the-vault.pdf | grep -i location   # …/files/keys-to-the-vault.pdf
+curl -sI $T/nope/ | head -1                              # 404
+```
+
+These rules have not been run against Cloudflare yet (no token with the permissions existed when they were
+written). If Cloudflare refuses an expression, fix it in the script; the first check above is where it shows.
+
+### Cutover: `vaultlearninggames-staging.org` from Cloud Run to R2
+
+Before: the branch is on `main` and deployed (the portal renders previews; the deploy has published the site to the
+bucket at least once: check the run's summary), A and B are done and the checks on the test address pass.
+
+The rules are safe to put on the live hostname while it is still nginx (they do what nginx does), so the only
+moment of change is the DNS switch. The apex is a proxied CNAME to `squarespace-design.vaultlearninggames-staging.org`
+today; R2 creates its own record and refuses while another record has the name, so the old record is deleted first.
+Expect up to a minute of errors between steps 2 and 3.
+
+```bash
+set -a; . ~/.config/vault-setup/cloudflare.env; set +a      # R2 + DNS token; RULES_TOKEN: the rules token from B
+A=53908534e6b25253c988befce2f9ad21 Z=5c261ab6d128ad7cfc70e8a9b829d1b3 H=vaultlearninggames-staging.org
+cf() { curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' "$@"; }
+API=https://api.cloudflare.com/client/v4
+
+# 1. Rules for the live hostname (no visible change while it is still nginx).
+CLOUDFLARE_API_TOKEN=$RULES_TOKEN scripts/cloudflare-site-rules.sh $H noindex --apply
+
+# 2. Delete the apex CNAME (note its id and content for the rollback).
+cf "$API/zones/$Z/dns_records?type=CNAME&name=$H" | jq -c '.result[]|{id,name,content,proxied}'
+REC=$(cf "$API/zones/$Z/dns_records?type=CNAME&name=$H" | jq -r '.result[0].id')
+cf -X DELETE "$API/zones/$Z/dns_records/$REC" | jq .success
+
+# 3. Attach the hostname to the bucket.
+cf -X POST "$API/accounts/$A/r2/buckets/site-vaultlearninggames-staging/domains/custom" \
+  -d "{\"domain\":\"$H\",\"zoneId\":\"$Z\",\"enabled\":true,\"minTLS\":\"1.2\"}" | jq -c '{success,errors}'
+cf "$API/accounts/$A/r2/buckets/site-vaultlearninggames-staging/domains/custom" | jq -c '.result.domains[]|{domain,status}'
+
+# 4. Check (the same checks as B, with T=https://$H), then a listing preview from the portal's editor.
+curl -sI https://$H/wake/ | grep -iE '^(HTTP|server|x-robots|cache-control|cf-cache-status)'
+```
+
+**Rollback** (back to the Cloud Run site, which is left running and mapped until the move is settled):
+
+```bash
+cf -X DELETE "$API/accounts/$A/r2/buckets/site-vaultlearninggames-staging/domains/custom/$H" | jq .success
+cf -X POST "$API/zones/$Z/dns_records" \
+  -d "{\"type\":\"CNAME\",\"name\":\"$H\",\"content\":\"squarespace-design.vaultlearninggames-staging.org\",\"proxied\":true,\"ttl\":1}" | jq .success
+# The rules can stay (nginx behaves the same with them) or go:
+CLOUDFLARE_API_TOKEN=$RULES_TOKEN scripts/cloudflare-site-rules.sh $H - --delete
+```
+
+Afterwards, when staging has run on R2 for a while: delete the test hostname (`r2-site.`: remove the bucket's custom
+domain, then its rules with `--delete`), and retire Cloud Run `vault-site-original-staging` with its domain mappings
+(`squarespace-design.` and the apex) and the `staging-original` environment in `vault-hugo-rebuild`. `www.` still
+points at the old Cloud Run site; redirect it to the apex or remove it. `new-design.` stays as it is.
+
+### Production, at launch
+
+1. R2: create `site-vaultlearninggames`; CORS policy: `GET`, `HEAD` from `*`; its key as in A, with
+   `vault-publisher-r2-site-access-key-id` / `-secret-access-key` and `SITE_BUCKET=site-vaultlearninggames`,
+   `PREVIEW_SITES=Site=https://portal.vaultlearninggames.org` in the `production` environment. Until `SITE_BUCKET`
+   is set, production deploys build the site and publish nothing.
+2. Deploy `production`; the run's summary shows the site published. Check a file through the bucket's test hostname
+   if one is attached.
+3. Rules: `scripts/cloudflare-site-rules.sh vaultlearninggames.org all --apply` (and the same for `www.` or a
+   redirect from it). `all`, not `noindex`.
+4. Adobe Fonts kit `zxo3yez`: add `portal.vaultlearninggames.org` to its domains.
+5. DNS: the apex and `www` point at Squarespace. Replace them by attaching `vaultlearninggames.org` to the bucket
+   (as cutover steps 2 and 3), keeping the old records' values for the rollback.
+6. `FORMS_ALLOWED_ORIGINS` already lists the site's addresses; the forms post to the production portal through the
+   `HUGOxPARAMSxFORMSx…` overrides the deploy sets from `PORTAL_URL`.
+
+### Rebuilding the site when listings change
+
+Publishing a listing changes `/v1/catalog`, not the site: someone runs *Deploy (portal and site)* with *Rebuild the
+site only* (README, [The website](../README.md#the-website)). Not built yet: the portal starting that run itself.
+Two ways it could: (a) the portal calls GitHub's `workflow_dispatch` for `deploy.yml` (`site_only=true`) a couple of
+minutes after the last publish, unpublish or featured change, which needs a GitHub credential with *Actions: write*
+on this repository in Secret Manager; or (b) a scheduled workflow that compares the catalog with the one the
+published site was built from (a hash stored as an object in the bucket) and rebuilds only when they differ, which
+needs no new credential and is at most one schedule interval late.
 
 ## 9. Pilot
 

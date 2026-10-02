@@ -1,8 +1,12 @@
 // Previewing a listing's unsaved edits on the website. The editor's Preview button posts the form as it is; the
 // fields are cleaned up exactly as a save would (nothing is saved) and turned into the game object /v1/catalog would
-// publish. That is kept for PREVIEW_TTL_MS under a random token, and the site shows it at SITE/_preview/TOKEN/,
-// fetching GET /v1/listing-previews/TOKEN:
-//   { "version": 1, "game": <a /v1/catalog game>, "studios": <as /v1/catalog's studios> }
+// publish. That is kept for PREVIEW_TTL_MS under a random token. The portal itself renders the page, with the
+// website's own templates (site-preview.ts runs Hugo on site/), at
+//   GET /_preview/TOKEN/              what the editor's Preview button opens (PREVIEW_SITES points at this portal)
+//   GET /v1/listing-previews/TOKEN    the same page
+// A caller that asks /v1/listing-previews/TOKEN for JSON (Accept: application/json, and not text/html) gets the data
+// instead, { "version": 1, "game": <a /v1/catalog game>, "studios": <as /v1/catalog's studios> }: a site that still
+// renders its own previews at SITE/_preview/TOKEN/ (the new design, on Cloud Run) reads it that way.
 // Previews are kept in memory: the service runs as one instance, and a lost preview only needs another click.
 import { randomBytes } from 'node:crypto';
 import type { Context, Hono } from 'hono';
@@ -12,6 +16,7 @@ import { normalize, problems, type ListingFields } from '../listings.ts';
 import type { PreviewSite } from '../config.ts';
 import { html, type Html } from './html.ts';
 import { listingPieces, type ListingHelpers, type ListingRow } from './listings.ts';
+import { EXPIRED, NOT_FOUND, PREVIEW_HEADERS, TOKEN_RE, UNAVAILABLE } from './site-preview.ts';
 
 export const PREVIEW_TTL_MS = 30 * 60 * 1000;
 export const MAX_PREVIEWS = 500;
@@ -80,12 +85,41 @@ export function registerListingPreview(app: Hono, h: ListingHelpers, store = new
     return c.json({ ok: true, token, expires_at: new Date(expires).toISOString(), urls: sites.map((site) => ({ label: site.label, url: `${site.url}/_preview/${token}/` })) });
   });
 
-  app.get('/v1/listing-previews/:token', (c: Context) => {
-    const body = store.get(c.req.param('token') ?? '');
+  // The preview as a page. Always no-store, noindex and sandboxed (PREVIEW_HEADERS), whatever the answer.
+  async function page(c: Context, token: string): Promise<Response> {
+    const send = (status: number, body: string) => new Response(c.req.method === 'HEAD' ? null : body, { status, headers: PREVIEW_HEADERS });
+    if (!TOKEN_RE.test(token)) return send(404, NOT_FOUND);
+    const body = store.get(token);
+    if (!body) return send(404, EXPIRED);
+    const previewer = h.deps.sitePreview;
+    if (!previewer) return send(503, UNAVAILABLE);
+    const { status, body: htmlPage } = await previewer.page(token, body);
+    return send(status, htmlPage);
+  }
+
+  app.get('/_preview/:token/', (c: Context) => page(c, c.req.param('token') ?? ''));
+  app.get('/_preview/:token', (c: Context) => {
+    const token = c.req.param('token') ?? '';
+    if (!TOKEN_RE.test(token)) return new Response(NOT_FOUND, { status: 404, headers: PREVIEW_HEADERS });
+    return new Response(null, { status: 301, headers: { Location: `/_preview/${token}/`, 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' } });
+  });
+  app.get('/_preview/*', () => new Response(NOT_FOUND, { status: 404, headers: PREVIEW_HEADERS }));
+
+  app.get('/v1/listing-previews/:token', async (c: Context): Promise<Response> => {
+    const token = c.req.param('token') ?? '';
+    if (!wantsJson(c.req.header('accept'))) return page(c, token);
+    const body = store.get(token);
     c.header('Cache-Control', 'no-store');
+    c.header('X-Robots-Tag', 'noindex, nofollow');
     if (!body) return c.json({ error: 'This preview has expired or doesn’t exist.' }, 404);
     return c.json(body);
   });
+}
+
+// JSON only for a caller that asks for it and not for a page: browsers (text/html) and plain requests get the page.
+export function wantsJson(accept: string | undefined): boolean {
+  const a = (accept ?? '').toLowerCase();
+  return a.includes('application/json') && !a.includes('text/html');
 }
 
 // The editor's save controls. Vault (who may publish) saves and publishes in one step; studio members save the draft

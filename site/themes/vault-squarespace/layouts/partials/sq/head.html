@@ -1,0 +1,29 @@
+{{- $siteTitle := site.Title -}}
+{{- $title := .Title -}}
+{{- with .Params.legacy }}{{ with .seo_title }}{{ $title = . }}{{ end }}{{ end -}}
+{{- $desc := .Params.seo_description | default "" -}}
+{{- with .Params.legacy }}{{ with .seo_description }}{{ $desc = . }}{{ end }}{{ end -}}
+{{- if .IsHome }}{{ $desc = site.Params.description }}{{ end -}}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ if or .IsHome (eq .Layout "home") }}{{ $siteTitle }}{{ else }}{{ $title }} &mdash; {{ $siteTitle }}{{ end }}</title>
+<meta name="description" content="{{ $desc }}">
+{{- $canon := .Permalink | strings.TrimSuffix "/" }}{{ if .IsHome }}{{ $canon = site.BaseURL | strings.TrimSuffix "/" }}{{ end }}
+{{- if eq .Layout "home" }}{{ $canon = site.BaseURL | strings.TrimSuffix "/" }}{{ end }}
+{{- with .Params.sq_path }}{{ $canon = printf "%s/%s" (site.BaseURL | strings.TrimSuffix "/") (replace (replace . ":" "%3A") "/" "/") }}{{ end }}
+<link rel="canonical" href="{{ $canon }}">
+<meta property="og:site_name" content="{{ $siteTitle }}">
+<meta property="og:title" content="{{ if .IsHome }}{{ $siteTitle }}{{ else }}{{ $title }} &mdash; {{ $siteTitle }}{{ end }}">
+<meta property="og:url" content="{{ $canon }}">
+<meta property="og:type" content="website">
+{{- with $desc }}<meta property="og:description" content="{{ . }}">{{ end }}
+<meta property="og:image" content="{{ "sq/img/site/og-vault-kids.jpg" | absURL }}">
+<link rel="icon" type="image/x-icon" media="(prefers-color-scheme: light)" href="{{ "favicon.ico" | relURL }}">
+<link rel="icon" type="image/x-icon" media="(prefers-color-scheme: dark)" href="{{ "favicon-dark.ico" | relURL }}">
+{{- /* Base 9 Sans, the heading font, is an Adobe Fonts typeface: it loads from Field Day's own Adobe Fonts web project
+       (params.fonts.adobe_kit). Until that's set, Share Tech Mono (self-hosted) stands in; html.no-base9 selects it. */}}
+{{- with site.Params.fonts.adobe_kit }}<link rel="stylesheet" href="https://use.typekit.net/{{ . }}.css">{{ end }}
+<link rel="preload" href="{{ "sq/fonts/montserrat-300-latin.woff2" | relURL }}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{ "sq/css/fonts.css" | relURL }}">
+<link rel="stylesheet" href="{{ "sq/css/vault-sq.css" | relURL }}{{ partialCached "sq/asset-v.html" "sq/css/vault-sq.css" "sq/css/vault-sq.css" }}">
+<script>document.documentElement.classList.add('js')</script>

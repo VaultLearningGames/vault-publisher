@@ -1,0 +1,1 @@
+{{- define "main" }}{{ partial "sq/section.html" (dict "s" (dict "theme" "white" "height" "medium" "blocks" slice) "page" . "key" "s0" "class" "is-first" "inner" (printf "<div class=\"sq-prose\"><h1>%s</h1>%s</div>" .Title .Content | safeHTML)) }}{{ end }}

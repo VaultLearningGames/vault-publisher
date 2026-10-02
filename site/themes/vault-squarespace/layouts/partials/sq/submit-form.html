@@ -1,0 +1,35 @@
+{{- /* The Submit a Game form (fields from content/submit-a-game.md). Posts to params.forms.submit_game (the portal's
+       /v1/forms/submit-game, set at build time from VAULT_PORTAL); when that's empty it says the form isn't connected.
+       vault-sq.js checks the required fields, sends it and shows the result the way Squarespace's form block does. */ -}}
+{{- $p := .page -}}
+{{- $action := site.Params.forms.submit_game -}}
+<div class="sq-form">
+  <form class="sub-form" method="post" {{ with $action }}action="{{ . }}" data-vault-form{{ else }}data-unconnected{{ end }} novalidate>
+    {{- range $i, $f := $p.Params.form }}
+    {{- $id := printf "f-%s-%d" ($f.name | default "x") $i }}
+    {{- if eq $f.type "section" }}
+    <div class="form-section">{{ $f.label }}</div>
+    {{- else if eq $f.type "checkbox-single" }}
+    <div class="form-item form-check"><label class="opt"><input type="checkbox" name="{{ $f.name }}" value="Sign up for news and updates"><span>{{ $f.label }}</span></label></div>
+    {{- else if or (eq $f.type "radio") (eq $f.type "checkbox") }}
+    <fieldset class="form-item">
+      <legend class="form-label">{{ $f.label }}{{ if $f.required }} <span class="req">(required)</span>{{ end }}</legend>
+      {{- with $f.desc }}<div class="form-desc">{{ . }}</div>{{ end }}
+      {{- range $f.options }}
+      <label class="opt"><input type="{{ $f.type }}" name="{{ $f.name }}" value="{{ . }}"{{ if and $f.required (eq $f.type "radio") }} required{{ end }}><span>{{ . }}</span></label>
+      {{- end }}
+    </fieldset>
+    {{- else }}
+    <div class="form-item">
+      <label class="form-label" for="{{ $id }}">{{ $f.label }}{{ if $f.required }} <span class="req">(required)</span>{{ end }}</label>
+      {{- with $f.desc }}<div class="form-desc">{{ . }}</div>{{ end }}
+      {{- if eq $f.type "textarea" }}<textarea id="{{ $id }}" name="{{ $f.name }}"></textarea>
+      {{- else }}<input id="{{ $id }}" name="{{ $f.name }}" type="{{ $f.type }}"{{ if $f.required }} required{{ end }}>{{ end }}
+    </div>
+    {{- end }}
+    {{- end }}
+    {{ partial "sq/form-honeypot.html" . }}
+    <div class="form-submit"><button type="submit" class="btn btn--primary"><span class="sub-btn-label">{{ $p.Params.submit_label | default "Submit" }}</span><span class="sub-btn-dot" aria-hidden="true"></span></button></div>
+    <div class="form-msg" role="status" hidden>{{ if $action }}Thank you!{{ else }}This form isn't connected yet.{{ end }}</div>
+  </form>
+</div>

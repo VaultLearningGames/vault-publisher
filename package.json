@@ -2,7 +2,7 @@
   "name": "vault-publisher",
   "version": "0.1.0",
   "private": true,
-  "description": "Publishes game builds to the Vault Learning Games CDN (Cloudflare R2), authorized by GitHub Actions OIDC.",
+  "description": "The Vault Studio Portal: publishes game builds to the Vault Learning Games CDN (Cloudflare R2), and builds and previews the Vault website (site/).",
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -11,7 +11,11 @@
     "start": "node src/server.ts",
     "dev": "node --watch src/server.ts",
     "test": "node --test test/*.test.ts",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "site:catalog": "node site/scripts/pull-catalog.mjs",
+    "site:build": "npm run site:catalog && hugo --source site --buildDrafts --cleanDestinationDir && node site/scripts/squarespace-paths.mjs",
+    "site:dev": "npm run site:catalog; hugo server --source site --buildDrafts --port 1313",
+    "site:sync": "node scripts/site-sync.ts site/public"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1139.0",

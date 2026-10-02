@@ -1,0 +1,2 @@
+{{- define "head" }}<meta name="sq-path" content="{{ .Params.sq_path }}">{{ end }}
+{{- define "main" }}{{ partial "sq/blog-grid.html" (dict "page" . "kind" .Params.filter_kind "value" .Params.filter_value) }}{{ end }}

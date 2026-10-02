@@ -1,0 +1,11 @@
+# Preview builds only (deploy/preview/server.mjs runs hugo with --config hugo.toml,<this file>): adds one output to the
+# home page, preview-map.json (layouts/home.previewmap.json), which maps each catalog slug to its page's address.
+# Nothing else changes: the home page keeps Hugo's default outputs (html, rss; rss is dropped where disableKinds has it).
+[outputFormats.previewmap]
+  mediaType = 'application/json'
+  baseName = 'preview-map'
+  isPlainText = true
+  notAlternative = true
+
+[outputs]
+  home = ['html', 'rss', 'previewmap']

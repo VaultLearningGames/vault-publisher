@@ -1,0 +1,13 @@
+{{- /* The original site path(s) of a catalog image that the Vault Studio Portal moved to the CDN unchanged: for a
+       …/_vault-assets/<kind>-<hash16>.<ext> URL whose hash16 is in data/squarespace/asset-hashes.json (written by
+       scripts/asset-hashes.mjs), the site paths of the file(s) with those bytes, e.g. slice "games/aquation/img/hero.png"
+       (usually one; identical placeholder files share a hash). Anything else, including an unknown hash (a genuinely
+       new upload) or a plain site path: an empty slice. */ -}}
+{{- $paths := slice -}}
+{{- with findRESubmatch `/_vault-assets/(?:[^/?#]*-)?([0-9a-f]{16})\.[A-Za-z0-9]+(?:[?#].*)?$` (. | default "" | string) 1 -}}
+  {{- $h := index (index . 0) 1 -}}
+  {{- with index ((index hugo.Data.squarespace "asset-hashes") | default dict) $h -}}
+    {{- $paths = cond (reflect.IsSlice .) . (slice .) -}}
+  {{- end -}}
+{{- end -}}
+{{- return $paths -}}

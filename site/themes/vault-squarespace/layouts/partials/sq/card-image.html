@@ -1,0 +1,6 @@
+{{- /* A game's Game Card thumbnail: the Squarespace card image, else the catalog thumbnail, else its hero image. */ -}}
+{{- $p := . -}}
+{{- $fb := $p.Params.thumb_image | default $p.Params.hero_image | default "" -}}
+{{- if and $fb (not (strings.HasPrefix $fb "/")) (not (strings.HasPrefix $fb "http")) }}{{ $fb = printf "/%s" $fb }}{{ end -}}
+{{- $ref := dict }}{{ with $p.Params.legacy }}{{ with .card_image }}{{ $ref = . }}{{ end }}{{ end -}}
+{{- return (partial "sq/game-image.html" (dict "ref" $ref "page" $p "fallback" $fb)) -}}

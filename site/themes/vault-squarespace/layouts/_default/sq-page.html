@@ -1,0 +1,5 @@
+{{- define "main" }}
+{{- range $i, $s := index hugo.Data.squarespace.pages .Params.sq_page }}
+{{- partial "sq/section.html" (dict "s" $s "page" $ "key" (printf "s%d" $i) "first" (eq $i 0) "class" (cond (eq $i 0) "is-first" "") "hooks" (dict "form" "sq/submit-form.html")) }}
+{{- end }}
+{{- end }}

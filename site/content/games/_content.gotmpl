@@ -1,0 +1,48 @@
+{{/*
+  Game pages come from the Vault Studio Portal, not from Markdown files in this folder.
+
+  Studios edit their games' listings at https://portal.vaultlearninggames.org (Site listings); Vault publishes them.
+  `npm run catalog` saves the published listings from the portal's /v1/catalog to data/catalog.json, and this
+  content adapter turns each one into a game page, with the same parameters the templates always used
+  (hero_image, about_this_game, game_url, …) plus `play` and `studio`.
+
+  On this branch (the replica of the Squarespace site) each page lives at the site root at its Squarespace
+  address: hugo.toml sets permalinks.page.games = "/:slug/", and the slug is the game's old Squarespace path from
+  the temporary data/squarespace/games.json (the catalog's own slug when a game isn't in it).
+*/}}
+{{- with hugo.Data.catalog -}}
+{{- range .games -}}
+  {{- $params := dict
+      "short_description" .short_description
+      "about_this_game" .about
+      "related_curriculum" .related_curriculum
+      "gameplay_video" .gameplay_video
+      "standards" .standards
+      "hero_image" .hero_image
+      "thumb_image" .thumb_image
+      "screenshots" .screenshots
+      "game_url" .play.url
+      "play" .play
+      "studio" .studio
+      "grades" .grades
+      "subjects" .subjects
+      "topics" .topics
+      "makers" .makers
+  -}}
+  {{- $legacy := index (hugo.Data.squarespace.games.games | default dict) .slug -}}
+  {{- $params = merge $params (dict "catalog_slug" .slug "legacy" ($legacy | default dict)) -}}
+  {{- $slug := .slug }}{{ with $legacy }}{{ with .path }}{{ $slug = . }}{{ end }}{{ end -}}
+  {{- $page := dict
+      "path" .slug
+      "slug" $slug
+      "title" .title
+      "kind" "page"
+      "type" "games"
+      "params" $params
+      "content" (dict "mediaType" "text/markdown" "value" .about)
+  -}}
+  {{- /* (a content adapter takes the date as dates.date; a top-level "date" is ignored and leaves the page undated) */ -}}
+  {{- with .published_at }}{{ $page = merge $page (dict "dates" (dict "date" (time .))) }}{{ end -}}
+  {{- $.AddPage $page -}}
+{{- end -}}
+{{- end -}}

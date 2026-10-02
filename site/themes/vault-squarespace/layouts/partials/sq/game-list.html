@@ -1,0 +1,8 @@
+{{- /* All game pages, newest first by their Squarespace Game Card date (legacy.date), then catalog date. Returns a slice. */ -}}
+{{- $items := slice -}}
+{{- range where site.RegularPages "Type" "games" -}}
+  {{- $d := .Date -}}
+  {{- with .Params.legacy }}{{ with .date }}{{ $d = time . }}{{ end }}{{ end -}}
+  {{- $items = $items | append (dict "page" . "date" $d "key" ($d.Unix)) -}}
+{{- end -}}
+{{- return (sort $items "key" "desc") -}}

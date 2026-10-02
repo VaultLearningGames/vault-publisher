@@ -1,0 +1,23 @@
+{{- /* Resolve an image reference from data/squarespace/games.json: {catalog: path} is used only while the catalog still
+       lists that image for the game (as that site path or its unchanged CDN copy), rendered as the catalog gives it;
+       {src: path} is a downloaded Squarespace image, used unless the fallback is a new portal upload (…/_vault-assets/…
+       with an unknown hash). Params: ref, page, fallback. */ -}}
+{{- $p := .page -}}
+{{- $out := .fallback | default "" -}}
+{{- with .ref -}}
+  {{- if .catalog -}}
+    {{- $c := .catalog -}}
+    {{- $all := slice $p.Params.hero_image $p.Params.thumb_image | append ($p.Params.screenshots | default slice) -}}
+    {{- /* The catalog image as the catalog gives it (a site path, or its CDN copy: partials/sq/asset-orig.html). */ -}}
+    {{- range $all }}
+      {{- $u := . | default "" -}}
+      {{- if or (eq (strings.TrimPrefix "/" $u) $c) (in (partial "sq/asset-orig.html" $u) $c) }}{{ $out = partial "sq/img-path.html" $u }}{{ end -}}
+    {{- end -}}
+  {{- else if .src -}}
+    {{- /* A downloaded Squarespace image, unless the studio has since uploaded a replacement in the portal (a
+           _vault-assets URL that isn't just an original catalog image moved to the CDN: partials/sq/is-upload.html). */ -}}
+    {{- if not (partial "sq/is-upload.html" $out) }}{{ $out = .src }}{{ end -}}
+  {{- end -}}
+{{- end -}}
+{{- if and $out (not (strings.HasPrefix $out "/")) (not (strings.HasPrefix $out "http")) }}{{ $out = printf "/%s" $out }}{{ end -}}
+{{- return $out -}}

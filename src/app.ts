@@ -5,11 +5,11 @@ import { randomUUID } from 'node:crypto';
 import { bearerToken, type GitHubIdentity, type Verifier } from './auth.ts';
 import type { Db, Game, ManifestFile, Studio } from './db.ts';
 import { copyRelease, makeLive, ReleaseLayoutError, releasePrefix } from './releases.ts';
-import { catalogGame, catalogStudios } from './catalog.ts';
+import { buildCatalog } from './catalog.ts';
 import type { PreviewSite } from './config.ts';
-import { catalogFeatured, readFeatured } from './featured.ts';
 import { parseRun } from './game-checks.ts';
 import { registerPortal, type PortalConfig } from './portal/routes.ts';
+import type { SitePreviewer } from './portal/site-preview.ts';
 import { registerForms, type FormsConfig } from './forms.ts';
 import { registerAdminTasks } from './admin-tasks.ts';
 import {
@@ -44,8 +44,11 @@ export interface AppDeps {
   forms?: FormsConfig;
   // The public website, where site-path listing images are fetched from to copy them to the CDN.
   siteUrl?: string;
-  // Sites that show unsaved listing previews at SITE/_preview/TOKEN/; none hides the editor's Preview buttons.
+  // Where the editor's Preview buttons open an unsaved listing preview, ADDRESS/_preview/TOKEN/: this portal (which
+  // renders it with sitePreview) and any site that still renders its own. None hides the buttons.
   previewSites?: PreviewSite[];
+  // Renders a listing preview with the website's templates (Hugo on site/). Without it /_preview/TOKEN/ answers 503.
+  sitePreview?: Pick<SitePreviewer, 'page'> | null;
   // Injected in tests (image migration downloads).
   fetch?: typeof fetch;
   // How URL monitors fetch a studio's hosted game (net-guard.ts: public addresses only). Injected in tests.
@@ -323,15 +326,9 @@ export function createApp(deps: AppDeps) {
   // `studios` is every studio with a game on the site, or named as a maker of one, and its website, so the site can
   // link any maker name that matches a studio (a game can list several makers).
   app.get('/v1/catalog', (c) => {
-    const published = db.listings({ published: true });
-    const games = published.map((l) => catalogGame(db, deps.prodPublicUrl, l, l.published!));
-    // The home page's Featured Games, in ascending sequence, ties by title (only games that are on the site).
-    const titles = new Map(games.map((g) => [g.slug, g.title]));
-    const featured = catalogFeatured(readFeatured(db), (slug) => titles.get(slug));
-    const studios = catalogStudios(published, db.studios(), games);
     c.header('Access-Control-Allow-Origin', '*');
     c.header('Cache-Control', 'public, max-age=60');
-    return c.json({ version: 1, generated_at: new Date().toISOString(), featured, studios, games });
+    return c.json(buildCatalog(db, deps.prodPublicUrl));
   });
 
   // Start a preview upload for the branch or tag in the caller's OIDC token.

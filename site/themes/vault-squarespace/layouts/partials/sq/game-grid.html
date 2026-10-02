@@ -1,0 +1,40 @@
+{{- /* All Games on the home page: grade / subject / maker filters, search, 30 per page (assets/sq/js: vault-sq.js). */ -}}
+{{- $items := partial "sq/game-list.html" . -}}
+{{- $grades := slice }}{{ $subjects := slice }}{{ $makers := slice -}}
+{{- range $items }}{{ with .page.Params }}
+  {{- range .grades }}{{ $grades = $grades | append (strings.TrimPrefix "Grades " .) }}{{ end }}
+  {{- range .subjects }}{{ if and . (ne . "null") }}{{ $subjects = $subjects | append . }}{{ end }}{{ end }}
+  {{- range .makers }}{{ $makers = $makers | append . }}{{ end }}
+{{- end }}{{ end -}}
+<div class="gg" data-page-size="30">
+  {{- /* Up to 500px wide the filters are a panel that slides in from the left (Filter opens it, the X at its foot
+         closes it); wider, they are a row of dropdowns above the grid. See "All Games grid" in vault-sq.css. */}}
+  <button type="button" class="gg-mobile-trigger" aria-expanded="false" aria-controls="gg-filters">Filter</button>
+  <div class="gg-filters" id="gg-filters">
+    <div class="gg-filters-in">
+    {{- range slice (dict "k" "grade" "name" "Grade" "vals" ($grades | uniq | sort)) (dict "k" "subject" "name" "Subject" "vals" ($subjects | uniq | sort)) (dict "k" "maker" "name" "Maker" "vals" ($makers | uniq | sort)) }}
+    <div class="gg-dd" data-filter="{{ .k }}">
+      <button type="button" class="gg-dd-toggle" aria-expanded="false"><span class="gg-dd-name">{{ .name }}</span><span class="gg-dd-val"> : All</span><span class="gg-dd-caret" aria-hidden="true"></span></button>
+      <ul class="gg-dd-list" role="listbox" aria-multiselectable="true">
+        {{- range .vals }}<li><button type="button" role="option" aria-selected="false" data-val="{{ . }}">{{ . }}</button></li>{{ end }}
+      </ul>
+    </div>
+    {{- end }}
+    <label class="gg-search"><span class="gg-search-icon" aria-hidden="true"></span><input type="search" placeholder="Search" aria-label="Search"></label>
+    </div>
+    <button type="button" class="gg-panel-close" aria-label="Close filters"></button>
+  </div>
+  <div class="gg-list">
+    {{- range $items }}{{ $p := .page }}
+    {{- $img := partial "sq/card-image.html" $p }}
+    {{- $grades := slice }}{{ range $p.Params.grades }}{{ $grades = $grades | append (strings.TrimPrefix "Grades " .) }}{{ end }}
+    <div class="gg-item" data-grade="{{ delimit $grades "|" }}" data-subject="{{ delimit ($p.Params.subjects | default slice) "|" }}" data-maker="{{ delimit ($p.Params.makers | default slice) "|" }}" data-text="{{ lower (printf "%s %s" $p.Title $p.Params.short_description) }}">
+      <a class="gg-thumb" href="{{ strings.TrimSuffix "/" $p.RelPermalink }}" aria-label="{{ $p.Title }}">{{ with $img }}<img src="{{ . }}" alt="{{ $p.Title }}" loading="lazy" decoding="async">{{ end }}</a>
+      <div class="gg-title"><a href="{{ strings.TrimSuffix "/" $p.RelPermalink }}">{{ $p.Title }}</a></div>
+      <div class="gg-excerpt"><p>{{ partial "sq/game-desc.html" $p }}</p></div>
+    </div>
+    {{- end }}
+  </div>
+  <p class="gg-empty" hidden>No results</p>
+  <nav class="gg-pages" aria-label="Pages"></nav>
+</div>

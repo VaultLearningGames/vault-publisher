@@ -1,0 +1,6 @@
+{{- /* Spam trap for the portal's form endpoints: bots fill it in, people never see it (off-screen, hidden from
+       assistive tech, out of the tab order, no autofill). The portal rejects any submission where it isn't empty. */ -}}
+<div class="sq-hp" aria-hidden="true"><label>Company website <input type="text" name="company_website" value="" tabindex="-1" autocomplete="off"></label></div>
+{{- /* The page's own address: with JavaScript off, the portal sends the visitor back here (browsers only tell another
+       site the origin, so the Referer alone would land them on the home page). */}}
+<input type="hidden" name="return_to" value="{{ page.Permalink }}">

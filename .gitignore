@@ -4,3 +4,9 @@ data/
 *.db-shm
 *.db-wal
 .env
+# The website's build: the catalog is pulled from the portal (npm run site:catalog), the rest is Hugo's output.
+site/data/catalog.json
+site/public/
+site/resources/
+site/.hugo_build.lock
+.DS_Store

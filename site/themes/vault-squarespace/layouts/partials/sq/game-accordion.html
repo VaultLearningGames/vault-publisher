@@ -1,0 +1,46 @@
+{{- /* Accordion items for a game page, in the Squarespace order: About this game, Trailer, Curriculum, Made By.
+       Content comes from the catalog; where a catalog field is empty, the Squarespace text
+       (data/squarespace/games.json live_items) is kept.
+       About this game shows whenever there is text for it. The catalog's `about` wins, except when it is only a copy
+       of the short description (what the import put there before the real text was entered in the portal) and the
+       Squarespace page has its own text: the hero already shows the short description.
+       The other items follow the Squarespace page when the game has one (Trailer isn't on every page); a game without
+       one gets every item with content. Whether the first item starts open is the block's `open_first`
+       (partials/sq/block.html). */ -}}
+{{- $p := .page -}}
+{{- $live := dict -}}
+{{- range .live }}{{ $live = merge $live (dict (lower .title) .body) }}{{ end -}}
+{{- $video := $p.Params.gameplay_video | default "" -}}
+{{- $cur := $p.Params.related_curriculum | default "" -}}
+{{- $aboutMd := $p.Params.about_this_game | default "" | strings.TrimSpace -}}
+{{- if and $aboutMd (eq $aboutMd ($p.Params.short_description | default "" | strings.TrimSpace)) (index $live "about this game") }}{{ $aboutMd = "" }}{{ end -}}
+{{- /* (.RenderString, not markdownify: block-level, so one paragraph is a <p> too, like the Squarespace text) */ -}}
+{{- $about := "" }}{{ with $aboutMd }}{{ $about = $p.RenderString (dict "display" "block") . | strings.TrimSpace }}{{ end -}}
+{{- $trailer := "" }}{{ with $video }}{{ $trailer = printf "<p><a target=\"_blank\" href=\"%s\">Watch the trailer here</a></p>" . }}{{ end -}}
+{{- $curric := "" }}{{ with $cur }}{{ if findRE `^https?://\S+$` . }}{{ $curric = printf "<p><a target=\"_blank\" href=\"%s\">Link to curriculum</a></p>" . }}{{ else }}{{ $curric = . | markdownify | printf "<p>%s</p>" }}{{ end }}{{ end -}}
+{{- /* Made By: each maker links to its website (partials/sq/maker-url.html) when the catalog has one; plain text otherwise. */ -}}
+{{- $made := "" }}{{ with $p.Params.makers }}
+  {{- $names := slice }}
+  {{- range . }}
+    {{- $url := partial "sq/maker-url.html" (dict "name" . "page" $p) }}
+    {{- $names = $names | append (cond (ne $url "") (printf "<a target=\"_blank\" rel=\"noopener\" href=\"%s\">%s</a>" ($url | htmlEscape) (. | htmlEscape)) (. | htmlEscape)) }}
+  {{- end }}
+  {{- $made = printf "<p>%s</p>" (delimit $names ", ") }}
+{{- end -}}
+{{- $defs := slice
+    (dict "k" "about this game" "t" "About this game" "v" $about)
+    (dict "k" "trailer" "t" "Trailer" "v" $trailer "alt" "gameplay")
+    (dict "k" "curriculum" "t" "Curriculum" "v" $curric)
+    (dict "k" "made by" "t" "Made By" "v" $made) -}}
+{{- $items := slice -}}
+{{- $hasLive := gt (len .live) 0 -}}
+{{- range $d := $defs }}
+  {{- $liveKey := "" }}{{ $liveTitle := $d.t }}
+  {{- range $.live }}{{ $lt := lower .title }}{{ if or (eq $lt $d.k) (and $d.alt (eq $lt $d.alt)) }}{{ $liveKey = $lt }}{{ $liveTitle = .title }}{{ end }}{{ end }}
+  {{- $liveBody := "" }}{{ with $liveKey }}{{ $liveBody = index $live . }}{{ end }}
+  {{- $show := cond $hasLive (ne $liveKey "") (ne $d.v "") }}
+  {{- if eq $d.k "about this game" }}{{ $show = true }}{{ end }}
+  {{- $body := $d.v | default $liveBody }}
+  {{- if and $show $body }}{{ $items = $items | append (dict "title" $liveTitle "body" $body) }}{{ end }}
+{{- end -}}
+{{- return $items -}}

@@ -1,0 +1,32 @@
+{{- $b := .b -}}
+{{- if eq $b.type "text" }}
+<div class="sq-text">{{ $b.html | safeHTML }}</div>
+{{- else if eq $b.type "image" }}
+{{- $st := printf "--ratio:%s;--radius:%s;--focal:%s" ($b.ratio | default (cond (and $b.w $b.h) (printf "%v/%v" $b.w $b.h) "3/2")) ($b.radius | default "0") ($b.focal | default "50% 50%") }}
+<div class="sq-img fit-{{ $b.fit | default "cover" }}" style="{{ $st | safeCSS }}">
+  {{- if $b.href }}<a class="sq-img-in" href="{{ $b.href }}"{{ if $b.blank }} target="_blank" rel="noopener"{{ end }}>{{ else }}<div class="sq-img-in">{{ end -}}
+  <img src="{{ $b.src | relURL }}" alt="{{ $b.alt | default "" }}" loading="lazy" decoding="async">
+  {{- if $b.href }}</a>{{ else }}</div>{{ end }}
+</div>
+{{- else if eq $b.type "button" }}
+<div class="sq-btn align-{{ $b.align | default "center" }}">
+  <a class="btn btn--{{ $b.style | default "primary" }} btn--{{ $b.size | default "medium" }}" href="{{ $b.href }}"{{ if $b.blank }} target="_blank" rel="noopener"{{ end }}{{ with $b.attrs }} {{ . | safeHTMLAttr }}{{ end }}>{{ $b.label }}</a>
+</div>
+{{- else if eq $b.type "accordion" }}
+<ul class="sq-acc">
+  {{- /* open_first: the first item starts open (Squarespace's "expand first item", on about a third of the game pages) */}}
+  {{- range $i, $it := $b.items }}
+  {{- $open := and $b.open_first (eq $i 0) }}
+  <li class="acc-item{{ if $open }} is-open{{ end }}">
+    <h4 class="acc-h"><button type="button" class="acc-btn" aria-expanded="{{ cond $open "true" "false" }}" aria-controls="acc-{{ $.key }}-{{ $i }}"><span class="acc-title">{{ $it.title }}</span><span class="acc-plus" aria-hidden="true"><i></i><i></i></span></button></h4>
+    <div class="acc-drop" id="acc-{{ $.key }}-{{ $i }}" role="region"><div class="acc-desc">{{ $it.body | safeHTML }}</div></div>
+  </li>
+  {{- end }}
+</ul>
+{{- else if eq $b.type "newsletter" }}
+{{- partial "sq/newsletter.html" . }}
+{{- else if eq $b.type "marquee" }}
+<div class="sq-marquee" data-speed="{{ $b.speed }}" data-dir="{{ $b.direction }}" data-freq="{{ $b.frequency }}" data-amp="{{ $b.intensity }}" style="--mq-size:{{ $b.size }};--mq-gap:{{ $b.spacing }}">
+  <h1 class="mq-text" aria-label="{{ delimit $b.items "" | strings.TrimSpace }}">{{ range $b.items }}<span class="mq-item">{{ strings.TrimSpace . }}</span>{{ end }}</h1>
+</div>
+{{- end }}

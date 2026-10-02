@@ -1,0 +1,28 @@
+{{- /*
+  The website a game's maker name links to, or "" for plain text.
+  Called as: partial "sq/maker-url.html" (dict "name" <maker> "page" <game page>)
+
+  The portal's catalog lists every studio with a published game under `studios: [{slug, name, url}]`,
+  and each game carries its own `studio: {slug, name, url}` and `makers: [names]`.
+  A maker links to the studio whose name matches it (case-insensitive, trimmed); failing that, a game
+  with exactly one maker links it to the game's own studio.url. No URL → "" (plain text).
+  Catalogs without these fields give "" everywhere.
+*/ -}}
+{{- $name := .name | string | strings.TrimSpace | lower -}}
+{{- $url := "" -}}
+{{- $matched := false -}}
+{{- with hugo.Data.catalog -}}
+  {{- range .studios -}}
+    {{- if and (not $matched) (eq (.name | string | strings.TrimSpace | lower) $name) -}}
+      {{- $matched = true -}}
+      {{- $url = .url | default "" -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $matched -}}
+  {{- $p := .page.Params -}}
+  {{- if eq (len ($p.makers | default slice)) 1 -}}
+    {{- with $p.studio -}}{{- $url = .url | default "" -}}{{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- return ($url | string) -}}

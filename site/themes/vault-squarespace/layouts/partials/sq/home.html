@@ -1,0 +1,30 @@
+{{- /* Home page (also served at /home): the Squarespace home sections, with the three featured games from the
+       catalog's `featured` list and the All Games grid built from the catalog. */ -}}
+{{- $games := dict -}}
+{{- range where site.RegularPages "Type" "games" }}{{ $games = merge $games (dict .Params.catalog_slug .) }}{{ end -}}
+{{- $featured := slice -}}
+{{- range (hugo.Data.catalog.featured | default slice) }}{{ $f := . }}{{ with index $games .slug }}{{ $featured = $featured | append (dict "page" . "image" $f.image "blurb" $f.blurb) }}{{ end }}{{ end -}}
+{{- range $i, $s := hugo.Data.squarespace.pages.home }}
+  {{- $blocks := $s.blocks -}}
+  {{- if eq $i 1 }}
+    {{- /* Featured games: the snapshot has marquee, then (image, text, button) per featured game. */ -}}
+    {{- $out := slice }}{{ $n := -1 }}
+    {{- range $b := $s.blocks }}
+      {{- if eq $b.type "image" }}{{ $n = add $n 1 }}{{ end }}
+      {{- if and (ge $n 0) (lt $n (len $featured)) }}
+        {{- $f := index $featured $n }}{{ $g := $f.page }}
+        {{- /* An uploaded image's absolute URL as is, a site path from the site root, else the game's own image. */}}
+        {{- $src := $f.image | default $g.Params.hero_image | default $g.Params.thumb_image }}
+        {{- if not (or (hasPrefix $src "https://") (hasPrefix $src "http://")) }}{{ $src = strings.TrimPrefix "/" $src | printf "/%s" }}{{ end }}
+        {{- if eq $b.type "image" }}{{ $b = merge $b (dict "src" $src "alt" $g.Title "href" $g.RelPermalink) }}
+        {{- else if eq $b.type "text" }}
+          {{- $blurb := $f.blurb | default (partial "sq/game-desc.html" $g) }}
+          {{- $b = merge $b (dict "html" (printf "<h4>%s</h4><p>%s</p>" ($g.Title | htmlEscape) ($blurb | markdownify))) }}
+        {{- else if eq $b.type "button" }}{{ $b = merge $b (dict "href" (strings.TrimSuffix "/" $g.RelPermalink)) }}{{ end }}
+        {{- $out = $out | append $b }}
+      {{- else if lt $n 0 }}{{ $out = $out | append $b }}{{ end }}
+    {{- end }}
+    {{- $blocks = $out }}
+  {{- end }}
+  {{- partial "sq/section.html" (dict "s" (merge $s (dict "blocks" $blocks)) "page" $ "key" (printf "s%d" $i) "first" (eq $i 0) "class" (cond (eq $i 0) "is-first" "") "hooks" (dict "summary" "sq/game-grid.html")) }}
+{{- end }}

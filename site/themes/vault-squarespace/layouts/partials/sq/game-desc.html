@@ -1,0 +1,7 @@
+{{- /* A game's short description as HTML: the catalog's, unless it's empty or an import leftover ("## Trailer"),
+       then the text of its Squarespace page (data/squarespace/games.json live_description). */ -}}
+{{- $d := .Params.short_description | default "" -}}
+{{- if or (not $d) (strings.HasPrefix $d "#") -}}
+  {{- with .Params.legacy }}{{ $d = .live_description | default "" }}{{ end -}}
+{{- end -}}
+{{- return ($d | markdownify) -}}

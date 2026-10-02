@@ -1,0 +1,23 @@
+{{- /* Site header: logo, navigation, Join Vault button; on phones a burger opens a full-screen menu. */ -}}
+{{- $here := .RelPermalink -}}
+{{- $nav := slice (dict "name" "About" "url" "/about") (dict "name" "Privacy" "url" "/privacy-policy") (dict "name" "Submit a Game" "url" "/submit-a-game") -}}
+<header id="header" class="sq-header theme-black-bold">
+  <div class="hdr-inner">
+    <a class="hdr-logo" href="/"><img src="{{ "sq/img/site/vault-game-library.png" | relURL }}" alt="Vault Learning Games Library" width="454" height="75"></a>
+    <nav class="hdr-nav" aria-label="Main">
+      {{- range $nav }}
+      <a href="{{ .url }}"{{ if eq (printf "%s/" .url) $here }} class="is-active" aria-current="page"{{ end }}>{{ .name }}</a>
+      {{- end }}
+    </nav>
+    <a class="hdr-cta btn btn--primary" href="/get-involved">Join Vault</a>
+    <button type="button" class="hdr-burger" aria-expanded="false" aria-controls="hdr-menu" aria-label="Open Menu"><span></span><span></span></button>
+  </div>
+  <div class="hdr-menu" id="hdr-menu">
+    <nav class="hdr-menu-nav" aria-label="Main">
+      {{- range $nav }}
+      <a href="{{ .url }}"{{ if eq (printf "%s/" .url) $here }} aria-current="page"{{ end }}>{{ .name }}</a>
+      {{- end }}
+    </nav>
+    <a class="hdr-menu-cta btn btn--primary" href="/get-involved">Join Vault</a>
+  </div>
+</header>

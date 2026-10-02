@@ -1,10 +1,20 @@
-name: Deploy (Cloud Run)
+name: Deploy (portal and site)
 
 # Two separate systems run this same code, each with its own database, R2 buckets, secrets and GitHub OAuth app:
 #   main        → staging     vault-publisher-staging  https://portal.vaultlearninggames-staging.org
+#                             site bucket              https://vaultlearninggames-staging.org
 #   production  → production  vault-publisher          https://portal.vaultlearninggames.org
+#                             site bucket              https://vaultlearninggames.org
+# One run does both halves, from one commit: it builds the website (site/, Hugo) from that system's published
+# catalog, deploys the portal image (which carries site/ and Hugo, for listing previews) to Cloud Run, and publishes
+# the built website to the system's site bucket on R2. So a preview always renders with the templates of the site
+# that is live.
 # Each GitHub environment ("staging", "production") holds that system's variables; Secret Manager secrets are
 # named after its service. One-time setup: docs/setup.md
+#
+# When listings change (a game published, edited or taken off the site) nothing here has changed, but the site must
+# be rebuilt: Run workflow → the system → "Rebuild the site only". It builds and publishes the site and leaves the
+# portal alone.
 on:
   workflow_dispatch:
     inputs:
@@ -13,12 +23,16 @@ on:
         type: choice
         options: [staging, production]
         default: staging
+      site_only:
+        description: Rebuild the site only (listings changed); don't redeploy the portal
+        type: boolean
+        default: false
   push:
     branches: [ main, production ]
 
 jobs:
   deploy:
-    name: Deploy to Cloud Run (${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }})
+    name: Deploy (${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }})
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
     # Never run two deploys of one system at once: only one instance may write its SQLite database.
@@ -38,12 +52,18 @@ jobs:
         TARGET: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
         SERVICE: ${{ vars.SERVICE }}
         PUBLISHER_SERVICE_ACCOUNT: ${{ vars.PUBLISHER_SERVICE_ACCOUNT }}
-        VALUES: ${{ vars.BUILDS_BUCKET }} ${{ vars.BUILDS_PUBLIC_URL }} ${{ vars.CDN_BUCKET }} ${{ vars.CDN_PUBLIC_URL }} ${{ vars.PORTAL_URL }} ${{ vars.LITESTREAM_BUCKET }}
+        SITE_BUCKET: ${{ vars.SITE_BUCKET }}
+        SITE_ONLY: ${{ inputs.site_only }}
+        VALUES: ${{ vars.BUILDS_BUCKET }} ${{ vars.BUILDS_PUBLIC_URL }} ${{ vars.CDN_BUCKET }} ${{ vars.CDN_PUBLIC_URL }} ${{ vars.PORTAL_URL }} ${{ vars.LITESTREAM_BUCKET }} ${{ vars.SITE_URL }} ${{ vars.SITE_BUCKET }}
       run: |
         set -eu
         case "$TARGET:$SERVICE" in production:vault-publisher|staging:vault-publisher-staging) ;; *) echo "::error::SERVICE is '$SERVICE' in the $TARGET environment"; exit 1 ;; esac
         case "$PUBLISHER_SERVICE_ACCOUNT" in "$SERVICE"@*) ;; *) echo "::error::PUBLISHER_SERVICE_ACCOUNT '$PUBLISHER_SERVICE_ACCOUNT' isn't $SERVICE's"; exit 1 ;; esac
-        [ "$(echo $VALUES | wc -w)" -eq 6 ] || { echo "::error::a bucket, URL or LITESTREAM_BUCKET variable is missing"; exit 1; }
+        [ "$(echo $VALUES | wc -w)" -eq "$([ -n "$SITE_BUCKET" ] && echo 8 || echo 7)" ] || { echo "::error::a bucket, URL, LITESTREAM_BUCKET or SITE_URL variable is missing"; exit 1; }
+        # A system without SITE_BUCKET has no site bucket yet (production, until its site moves to R2): the site
+        # is built, as a check, and not published.
+        [ -n "$SITE_BUCKET" ] || echo "::warning::SITE_BUCKET is not set in the $TARGET environment: the site will be built but not published"
+        if [ "$SITE_ONLY" = true ] && [ -z "$SITE_BUCKET" ]; then echo "::error::nothing to do: site only, and no SITE_BUCKET"; exit 1; fi
         for v in $VALUES; do
           case "$TARGET:$v" in staging:*staging*|production:*) ;; *) echo "::error::$v isn't a staging value"; exit 1 ;; esac
           case "$TARGET:$v" in production:*staging*) echo "::error::$v is a staging value"; exit 1 ;; esac
@@ -55,7 +75,41 @@ jobs:
       with:
         node-version: 24
         cache: npm
+
+    # The Hugo that builds the site is the one the image renders previews with: the version in the Dockerfile.
+    - name: Read the Hugo version from the Dockerfile
+      id: hugo
+      run: |
+        v=$(sed -n 's/^ARG HUGO_VERSION=//p' Dockerfile)
+        [ -n "$v" ] || { echo "::error::no ARG HUGO_VERSION in the Dockerfile"; exit 1; }
+        echo "version=$v" >> "$GITHUB_OUTPUT"
+    - uses: peaceiris/actions-hugo@v3
+      with:
+        hugo-version: ${{ steps.hugo.outputs.version }}
+        extended: true
+
+    # With Hugo installed the tests also render a real preview from site/.
     - run: npm ci && npm run typecheck && npm test
+
+    # The website, from this system's published listings. A portal that can't be reached fails the build (there is
+    # no catalog in the repository to fall back on). The Join Vault and Submit a Game forms post to this system's
+    # portal: Hugo reads config overrides from HUGOx-delimited variables (params.forms.* in site/hugo.toml; the x
+    # delimiter keeps the underscore in submit_game). The greps fail the build if an override didn't take.
+    - name: Build the site
+      env:
+        VAULT_PORTAL: ${{ vars.PORTAL_URL }}
+        SITE_URL: ${{ vars.SITE_URL }}
+      run: |
+        set -eu
+        export HUGO_BASEURL="${SITE_URL%/}/"
+        export HUGOxPARAMSxFORMSxNEWSLETTER="${VAULT_PORTAL%/}/v1/forms/newsletter"
+        export HUGOxPARAMSxFORMSxSUBMIT_GAME="${VAULT_PORTAL%/}/v1/forms/submit-game"
+        rm -f site/data/catalog.json
+        npm run site:build
+        grep -q "action=\"$HUGOxPARAMSxFORMSxSUBMIT_GAME\"" site/public/submit-a-game/index.html
+        grep -q "action=\"$HUGOxPARAMSxFORMSxNEWSLETTER\"" site/public/index.html
+        grep -q "<link rel=\"canonical\" href=\"${SITE_URL%/}\">" site/public/index.html
+        echo "$(find site/public -type f | wc -l) files, $(du -sh site/public | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v3
@@ -65,6 +119,7 @@ jobs:
 
     - name: Deploy to Cloud Run
       id: deploy
+      if: ${{ !inputs.site_only }}
       uses: google-github-actions/deploy-cloudrun@v3
       with:
         service: ${{ vars.SERVICE }}
@@ -101,11 +156,35 @@ jobs:
           GITHUB_CLIENT_SECRET=${{ vars.SERVICE }}-github-client-secret:latest
           SESSION_SECRET=${{ vars.SERVICE }}-session-secret:latest
         # Exactly one instance: SQLite has a single writer, and it stays warm so Litestream isn't restoring on every request.
+        # 1Gi: listing previews run Hugo in this container (up to two at once, about 130 MB each, with their
+        # files in the in-memory /tmp) next to Node and Litestream.
         flags: >-
           --service-account=${{ vars.PUBLISHER_SERVICE_ACCOUNT }}
           --allow-unauthenticated
           --min-instances=1 --max-instances=1
-          --memory=512Mi --cpu-boost
+          --memory=1Gi --cpu-boost
 
     - name: Show URL
+      if: ${{ !inputs.site_only }}
       run: echo "Deployed to ${{ steps.deploy.outputs.url }}"
+
+    # The site goes out after the portal, so the two change within the same minute. The R2 key can write this
+    # system's site bucket and nothing else; it lives in Secret Manager like the service's other R2 keys, readable
+    # by the deploy account.
+    - name: Read the site bucket's R2 key
+      id: r2
+      if: ${{ vars.SITE_BUCKET != '' }}
+      uses: google-github-actions/get-secretmanager-secrets@v3
+      with:
+        secrets: |-
+          access_key_id:${{ vars.GCP_PROJECT_ID }}/${{ vars.SERVICE }}-r2-site-access-key-id
+          secret_access_key:${{ vars.GCP_PROJECT_ID }}/${{ vars.SERVICE }}-r2-site-secret-access-key
+
+    - name: Publish the site to R2
+      if: ${{ vars.SITE_BUCKET != '' }}
+      env:
+        R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+        SITE_BUCKET: ${{ vars.SITE_BUCKET }}
+        R2_SITE_ACCESS_KEY_ID: ${{ steps.r2.outputs.access_key_id }}
+        R2_SITE_SECRET_ACCESS_KEY: ${{ steps.r2.outputs.secret_access_key }}
+      run: node scripts/site-sync.ts site/public | tee -a "$GITHUB_STEP_SUMMARY"

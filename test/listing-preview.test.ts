@@ -38,7 +38,7 @@ describe('listing previews', () => {
     assert.deepEqual(p.urls, [{ label: 'Squarespace', url: `https://sq.test/_preview/${p.token}/` }, { label: 'New', url: `https://new.test/_preview/${p.token}/` }]);
     assert.equal(JSON.stringify(t.db.listing('wake')), before, 'nothing saved');
 
-    const got = await t.app.request(`/v1/listing-previews/${p.token}`);
+    const got = await t.app.request(`/v1/listing-previews/${p.token}`, { headers: { Accept: 'application/json' } });
     assert.equal(got.status, 200);
     assert.equal(got.headers.get('cache-control'), 'no-store');
     const body = (await got.json()) as { version: number; game: Record<string, any>; studios: unknown[] };
@@ -54,7 +54,7 @@ describe('listing previews', () => {
     assert.deepEqual(body.game.studio, { slug: 'fieldday', name: 'Field Day Lab', url: null });
     assert.equal(body.game.play.fit, null, 'player fit is Vault’s: ignored from studio members, as on save');
 
-    assert.equal((await t.app.request('/v1/listing-previews/nope')).status, 404);
+    assert.equal((await t.app.request('/v1/listing-previews/nope', { headers: { Accept: 'application/json' } })).status, 404);
   });
 
   test('a CDN game plays from its current release, as in the catalog; studio website included', async () => {
@@ -65,7 +65,7 @@ describe('listing previews', () => {
     t.db.setCurrentRelease(g.id, r.id);
     t.db.linkListing(t.db.listing('wake')!.id, g.id);
     const p = (await (await t.as('mia', 'none', 'maintainer').post(`${L}/wake/preview`, { play_source: 'cdn', cdn_path: 'deep' })).json()) as Preview;
-    const { game } = (await (await t.app.request(`/v1/listing-previews/${p.token}`)).json()) as { game: any };
+    const { game } = (await (await t.app.request(`/v1/listing-previews/${p.token}`, { headers: { Accept: 'application/json' } })).json()) as { game: any };
     assert.deepEqual(game.play, { url: 'https://prod.test/fieldday/wake/deep/', source: 'cdn', release: 'm3.1', embed: true, fit: null });
     assert.equal(game.studio.url, t.db.studioBySlug('fieldday')!.website);
     assert.match(game.studio.url, /^https:\/\/fielddaylab\.wisc\.edu/);

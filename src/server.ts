@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
 import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createApp } from './app.ts';
 import { createVerifier } from './auth.ts';
 import { loadConfig } from './config.ts';
@@ -8,6 +9,8 @@ import { relayoutReleases } from './releases.ts';
 import { createR2Storage } from './storage.ts';
 import { googleSheets } from './forms.ts';
 import { syncStudiosFile } from './studios-file.ts';
+import { buildCatalog } from './catalog.ts';
+import { clearPreviewTemp, hugoRunner, SitePreviewer } from './portal/site-preview.ts';
 
 const config = loadConfig();
 const db = new Db(config.dbPath);
@@ -30,6 +33,19 @@ const production =
         bucket: config.prodBucket,
       })
     : null;
+
+// Listing previews are rendered here, with the website's templates: Hugo on the site source in the image.
+const sitePreview = existsSync(join(config.siteDir, 'hugo.toml'))
+  ? new SitePreviewer({
+      siteDir: config.siteDir,
+      siteUrl: config.siteUrl,
+      portalUrl: config.portalUrl,
+      hugo: hugoRunner(config.hugoBin),
+      catalog: () => buildCatalog(db, config.prodPublicUrl),
+    })
+  : null;
+if (sitePreview) void clearPreviewTemp();
+else console.error(`listing previews: no site source at ${config.siteDir}; /_preview/ answers 503`);
 
 const app = createApp({
   db,
@@ -56,6 +72,7 @@ const app = createApp({
   previewRetentionDays: config.previewRetentionDays,
   siteUrl: config.siteUrl,
   previewSites: config.previewSites,
+  sitePreview,
   taskInvokerEmail: config.taskInvokerEmail,
   forms: {
     allowedOrigins: config.formsAllowedOrigins,

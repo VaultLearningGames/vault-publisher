@@ -1,6 +1,12 @@
 # vault-publisher
 
-Publishes web game builds to Vault Learning Games:
+The Vault Studio Portal and the Vault website, in one repository with one deploy:
+
+- the **portal** (`src/`): studios' builds, releases and site listings, on Cloud Run;
+- the **website** (`site/`, Hugo): built from the portal's published listings and served as static files from
+  Cloudflare R2. See [The website](#the-website).
+
+The portal publishes web game builds to Vault Learning Games:
 
 - **Test builds** (your studio controls them): every branch and tag →
   `https://builds.vaultlearninggames.org/STUDIO/GAME/BRANCH/`
@@ -13,7 +19,8 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | | |
 | --- | --- |
 | Runtime | Node 24 (native TypeScript, ESM) |
-| Framework | [Hono](https://hono.dev) (`@hono/node-server`) — one app serves the machine API, portal UI and site forms |
+| Framework | [Hono](https://hono.dev) (`@hono/node-server`) — one app serves the machine API, portal UI, site forms and listing previews |
+| Website | [Hugo](https://gohugo.io) 0.166 extended (`site/`); the version is the Dockerfile's `HUGO_VERSION`, used by the deploy's site build and by the image, which renders listing previews |
 | Database | `node:sqlite`, plain SQL + numbered migrations (`src/db.ts`); no ORM (Postgres-portable) |
 | Storage | Cloudflare R2 via AWS SDK v3 (`src/storage.ts`); build uploads are presigned PUTs (from CI and from the browser) — the API never proxies them. URL monitors stream each file from the studio's site into R2 |
 | Auth | `jose`: GitHub Actions OIDC tokens (CI), Google ID tokens (scheduled tasks); portal login is interactive GitHub OAuth → HMAC-signed `vault_session` cookie (`src/portal/session.ts`) |
@@ -34,6 +41,10 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | `public/setup.js` | Upload builds page: workflow snippets, and reading and uploading a zip in the browser |
 | `src/{releases,storage,paths,config,forms,catalog,game-checks}.ts` | Domain logic |
 | `src/studios-file.ts` | `studios.json` at startup: studios and the repositories assigned to them |
+| `src/portal/site-preview.ts` | Listing previews: runs Hugo on `site/` with the previewed game in the catalog, and returns its page |
+| `src/site-sync.ts`, `scripts/site-sync.ts` | Publishes the built site (`site/public`) to its R2 bucket |
+| `site/` | The website: `hugo.toml`, `content/`, `data/`, `themes/vault-squarespace/`, `static/` ([site/README.md](site/README.md)) |
+| `scripts/cloudflare-site-rules.sh` | The Cloudflare rules a site hostname needs (directory index, redirects, robots, caching) |
 
 ### API
 
@@ -62,7 +73,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `POST /portal/api/s/:studio/monitors[/:id/check\|delete]` | URL monitors: register (and copy now), check now, stop |
 | | `POST /portal/api/s/:studio/members[?]` | Studio members add/remove, website URL |
 | | `POST /portal/api/vault/…` | Vault-admin: studios CRUD, a studio's `repositories` (add/remove), users/roles, listings import, featured |
-| | `GET /v1/listing-previews/:token` | Unsaved listing previews |
+| Public (token) | `GET /_preview/:token/` · `GET /v1/listing-previews/:token` | An unsaved listing preview, rendered as the website's page (the second answers the preview's JSON to `Accept: application/json`) |
 
 **Admin-lane** routes (`/v1/admin/*`) additionally require the token's repository to be the admin repo running in the protected environment; **portal mutations** require a signed-in Vault-admin session.
 
@@ -228,12 +239,26 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
 * Vault publishes them from **Vault → Game Catalog**, sends them back with a note, or takes the game off the site.
 * Vault staff's editor has one **Save and Publish Changes** button (saves the draft and publishes it); studio members
   have **Save and Submit for Review**: every studio save goes to Vault for review.
-* **Preview** shows the editor's unsaved edits on the website: the form is cleaned up as a save would (nothing is
-  saved), turned into the game object `/v1/catalog` would publish and kept for 30 minutes (in memory) under a random
-  token. The site shows it at `SITE/_preview/TOKEN/`, reading public `GET /v1/listing-previews/TOKEN` →
-  `{ "version": 1, "game": <a catalog game>, "studios": <as in the catalog> }` (`Cache-Control: no-store`; 404 once
-  expired). Sites come from `PREVIEW_SITES`, space-separated `label=url` pairs; the first is the main Preview button,
-  the others "Preview (Label)". Empty hides the buttons.
+* **Preview** shows the editor's unsaved edits as the website would: the form is cleaned up as a save would (nothing
+  is saved), turned into the game object `/v1/catalog` would publish and kept for 30 minutes (in memory) under a
+  random token. The portal renders the page itself at `PORTAL/_preview/TOKEN/`: it runs Hugo on `site/` (the same
+  templates as the live site, carried in the image) with the published catalog and that game put in its place, makes
+  the page's addresses absolute to the site (`SITE_URL`), so its CSS, scripts and images load from the live site, and
+  adds a "Preview — not published" badge.
+  * At most two Hugo builds run at once (others wait), each stopped after 25 s; a rendered page is kept per token for
+    3 minutes. A build takes about a third of a second.
+  * Every answer is `Cache-Control: no-store` and `X-Robots-Tag: noindex, nofollow`. An expired or unknown token gets
+    a short "This preview has expired" page (404); a failed build a short 500 page (the reason is in the log).
+  * The page is sent with `Content-Security-Policy: sandbox …` (without `allow-same-origin`): listing text is the
+    studio's Markdown, raw HTML included, and the portal's address holds people's sessions, so a preview gets an
+    origin of its own and can't act as the person viewing it. A game opened in the preview's player is sandboxed too
+    (no saved progress there).
+  * `GET /v1/listing-previews/TOKEN` is the same page; a caller that sends `Accept: application/json` gets the data
+    instead: `{ "version": 1, "game": <a catalog game>, "studios": <as in the catalog> }`. A site that renders its own
+    previews (the new design, still on Cloud Run from `vault-hugo-rebuild`) reads it that way.
+  * `PREVIEW_SITES` lists where the Preview buttons open, space-separated `label=url` pairs (`URL/_preview/TOKEN/`):
+    this portal, and any site that renders its own. The first is the main Preview button, the others "Preview
+    (Label)". Empty hides the buttons.
 * **Copying site images to the Vault CDN** (Vault admins; `POST /portal/api/vault/listings/migrate-images` with
   `base`, the site to download from; the portal has no page for it) downloads every listing image and featured image
   that is still a site path (published and draft), stores it like an upload in `STUDIO/GAME/_vault-assets/` and
@@ -241,7 +266,7 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   alone and listed; re-running changes nothing. The last run's result is kept in the `listing_image_migration` setting.
 * The public **`GET /v1/catalog`** lists published games with their play URL resolved. That's either the web address or
   `cdn.vaultlearninggames.org/STUDIO/GAME/` plus an optional folder, so one CDN game can hold a collection (The Yard).
-  The site ([vault-rebuild](https://github.com/fielddaylab/vault-rebuild)) is built from it. Each game's `studio`
+  The site (`site/` in this repository) is built from it. Each game's `studio`
   carries the studio's website as `url`, and `studios` lists every studio with a game on the site or named as a
   maker of one (`slug`, `name`, `url`) so the site can link maker names. Studio admins set the website on their
   **Members** page.
@@ -271,7 +296,8 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
 Vault admins can import the Hugo prototype's game pages once, from that repo's `migration/` folder
 (`POST /portal/api/vault/listings/import` with `pages` and optional `overrides`; the portal has no form for it). The
 import creates missing studios as Vault-managed studios. `node scripts/dev-portal.ts` does it automatically when
-`vault-rebuild` is checked out next to this repo; sign in as `lee` to edit NMSU's games.
+`vault-hugo-rebuild` (formerly `vault-rebuild`, which still holds `migration/`) is checked out next to this repo as
+`vault-rebuild`, or at `$VAULT_REBUILD`; sign in as `lee` to edit NMSU's games.
 
 ## Admin tasks
 
@@ -352,9 +378,41 @@ Locally: `node scripts/admin-task.ts --portal URL --task TASK --args 'JSON' [--d
 `--dry-run=false`; `--pages FILE --overrides FILE` send an export from disk for `import`). Against
 `node scripts/dev-portal.ts` use `--portal http://localhost:4181 --token dev`.
 
+## The website
+
+`site/` is the public site (vaultlearninggames.org): Hugo, theme `vault-squarespace` (the replica of the Squarespace
+design). It came from `VaultLearningGames/vault-hugo-rebuild` (branch `original-squarespace-design`), which is no
+longer where the site is edited or deployed from. Details of the theme: [site/README.md](site/README.md).
+
+* **Game pages come from the portal**, not from files: `npm run site:catalog` saves this system's `GET /v1/catalog`
+  to `site/data/catalog.json` (not in git), and `site/content/games/_content.gotmpl` turns each listing into a page.
+* **Build:** `VAULT_PORTAL=https://portal.vaultlearninggames-staging.org npm run site:build` → `site/public`
+  (catalog, `hugo`, then `site/scripts/squarespace-paths.mjs` for the `/game-cards/category|tag/…` addresses).
+  `npm run site:dev` serves it on http://localhost:1313. Game images are on the Vault CDN; `site/` holds only the
+  theme's own files (17 MB, mostly the Squarespace snapshot images) and `static/files/keys-to-the-vault.pdf`.
+* **Deploy:** the [deploy workflow](.github/workflows/deploy.yml) does it with the portal, from the same commit: build
+  the site from that system's catalog (the forms post to that system's portal, through the
+  `HUGOxPARAMSxFORMSx…` overrides), deploy the portal image (which carries `site/` and Hugo for previews), then
+  `node scripts/site-sync.ts` uploads every file to the system's site bucket and deletes what the build no longer
+  has. `main` → `site-vaultlearninggames-staging`, `production` → `site-vaultlearninggames`. Cloudflare serves the
+  bucket at the site's address; zone rules add what R2 lacks (`scripts/cloudflare-site-rules.sh`,
+  [docs/setup.md](docs/setup.md#the-website-on-r2)).
+* **When listings change** (published, edited, taken off the site, featured) the site must be rebuilt, though no
+  code changed: **Actions → Deploy (portal and site) → Run workflow**, choose the system and tick *Rebuild the site
+  only*, or `gh workflow run deploy.yml -f environment=staging -f site_only=true`. It builds and publishes the site
+  and doesn't touch the portal.
+* **Addresses built in scripts** must be absolute (`absURL`): a preview is served from the portal, and only addresses
+  in HTML attributes and CSS `url()` are rewritten to the site.
+
+The new design (theme `vault-theme`) is not here: it stays in `vault-hugo-rebuild` (`main`), deployed by that
+repository's workflow to Cloud Run `vault-site-staging` (`new-design.vaultlearninggames-staging.org`), and renders its
+own previews from this portal's JSON.
+
 ## Develop
 
-Node 24, no build step: `npm install && npm test`. Preview the portal with example data: `node scripts/dev-portal.ts`.
+Node 24, no build step: `npm install && npm test` (with Hugo installed, the tests also render a real preview from
+`site/`). Preview the portal with example data: `node scripts/dev-portal.ts` (its Preview button renders `site/`
+locally, with CSS and images from the staging site).
 The portal's "Need support?" link (sidebar foot and sign-in page) is `SUPPORT_URL`: by default the invitation to the
 Slack workspace, where people join `#vault-game-publishing-support`; `none` hides it.
 Deployment and cloud setup: [docs/setup.md](docs/setup.md).

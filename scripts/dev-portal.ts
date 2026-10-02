@@ -11,6 +11,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { importListings } from '../src/listings-import.ts';
 import { saveFeatured } from '../src/featured.ts';
 import { parsePreviewSites } from '../src/config.ts';
+import { buildCatalog } from '../src/catalog.ts';
+import { SitePreviewer } from '../src/portal/site-preview.ts';
 import { countLevels, parseRun, type GameCheck } from '../src/game-checks.ts';
 
 class MemoryStorage implements Storage {
@@ -29,6 +31,8 @@ class MemoryStorage implements Storage {
 }
 
 const PORT = Number(process.env.PORT ?? 4181);
+// The site whose pages the image migration reads and whose assets listing previews load.
+const SITE_URL = (process.env.SITE_URL ?? 'https://vaultlearninggames-staging.org').replace(/\/+$/, '');
 const db = new Db(':memory:');
 db.syncStudios([
   { slug: 'fieldday', name: 'Field Day Lab', github_owner: 'fielddaylab', github_owner_id: '1881825' },
@@ -134,8 +138,14 @@ const app = createApp({
   stagingPublicUrl: 'https://builds.vaultlearninggames.org', prodPublicUrl: 'https://cdn.vaultlearninggames.org',
   adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production',
   previewRetentionDays: 90, taskInvokerEmail: 'dev@example.org',
-  siteUrl: process.env.SITE_URL ?? 'https://new-design.vaultlearninggames-staging.org',
-  previewSites: parsePreviewSites(process.env.PREVIEW_SITES ?? 'Squarespace=https://squarespace-design.vaultlearninggames-staging.org New=https://new-design.vaultlearninggames-staging.org'),
+  siteUrl: SITE_URL,
+  // Preview opens on this dev portal, which renders it with ../site (Hugo must be installed); the page loads its
+  // CSS and images from SITE_URL.
+  previewSites: parsePreviewSites(process.env.PREVIEW_SITES ?? `Site=http://localhost:${PORT}`),
+  sitePreview: new SitePreviewer({
+    siteDir: new URL('../site/', import.meta.url).pathname, siteUrl: SITE_URL, portalUrl: `http://localhost:${PORT}`,
+    catalog: () => buildCatalog(db, 'https://cdn.vaultlearninggames.org'),
+  }),
   portal: {
     baseUrl: `http://localhost:${PORT}`, sessionSecret: 'dev-only-secret', vaultAdmins: ['boss'],
     oauth: {

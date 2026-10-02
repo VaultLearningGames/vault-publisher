@@ -1,0 +1,42 @@
+{{- /*
+  One page section, from a section model (data/squarespace/pages.json, or built by the game template):
+    theme   white | black-bold | bright-inverse | bright | light   (the Squarespace section themes)
+    height  small | medium | large | custom (+ custom: 0..100)      min-height in vh, vertical padding in vmax/10
+    valign  top | middle | bottom
+    bg, bg_focal, overlay, mode ("generative": the animated gradient on Get Involved)
+    rows    {m, d}: fluid-engine grid rows on phones (8 columns) and from 768px up (24 columns)
+    blocks  [{type, aream, aread, zm, zd, jm, jd, am, ad, ...}]
+  Params: s, page, key (unique per page), and optionally hooks: dict of block type -> partial name for dynamic blocks.
+*/ -}}
+{{- $s := .s -}}
+{{- $h := 0 -}}
+{{- if eq $s.height "small" }}{{ $h = 33 }}{{ else if eq $s.height "medium" }}{{ $h = 66 }}{{ else if eq $s.height "large" }}{{ $h = 100 }}{{ else }}{{ $h = $s.custom | default 0 }}{{ end -}}
+{{- $rows := $s.rows | default dict -}}
+<section class="sq-sec theme-{{ $s.theme | default "white" }} va-{{ $s.valign | default "middle" }}{{ if eq $s.mode "generative" }} bg-generative{{ end }}{{ with .class }} {{ . }}{{ end }}" data-section-theme="{{ $s.theme }}" style="--h:{{ $h }}">
+  {{- if eq $s.mode "generative" }}
+  {{- /* Squarespace's animated gradient background: drifting green glows over film grain (CSS only). */}}
+  <div class="sq-bg sq-gen" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <button type="button" class="sq-gen-pause" aria-label="Pause background animation" aria-pressed="false"></button>
+  {{- end }}
+  {{- with $s.bg }}
+  <div class="sq-bg">
+    <img src="{{ . | relURL }}" alt="" {{ with $s.bg_focal }}style="object-position:{{ . }}" {{ end }}decoding="async"{{ if not $.first }} loading="lazy"{{ end }}>
+    {{- with $s.overlay }}<div class="sq-ov" style="opacity:{{ . }}"></div>{{ end }}
+  </div>
+  {{- end }}
+  <div class="sq-wrap">
+    {{- if $s.blocks }}
+    <div class="fe" style="--rm:{{ $rows.m | default 1 }};--rd:{{ $rows.d | default 1 }}">
+      {{- range $i, $b := $s.blocks }}
+      {{- $style := printf "--am:%s;--ad:%s;--zm:%v;--zd:%v;--jm:%s;--jd:%s;--alm:%s;--ald:%s" ($b.aream | default "auto") ($b.aread | default "auto") ($b.zm | default 0) ($b.zd | default 0) ($b.jm | default "flex-start") ($b.jd | default "flex-start") ($b.am | default "flex-start") ($b.ad | default "flex-start") }}
+      <div class="fb fb-{{ $b.type }}{{ if or $b.sticky $b.stickym }} sticky-m{{ end }}{{ if $b.stickyd }} sticky-d{{ end }}{{ with $b.role }} role-{{ . }}{{ end }}" style="{{ $style | safeCSS }}">
+        {{- $hook := "" }}{{ with $.hooks }}{{ $hook = index . $b.type | default "" }}{{ end }}
+        {{- if $hook }}{{ partial $hook (dict "b" $b "page" $.page "key" (printf "%s-%d" $.key $i)) }}
+        {{- else }}{{ partial "sq/block.html" (dict "b" $b "page" $.page "key" (printf "%s-%d" $.key $i)) }}{{ end }}
+      </div>
+      {{- end }}
+    </div>
+    {{- end }}
+    {{- with .inner }}{{ . }}{{ end }}
+  </div>
+</section>

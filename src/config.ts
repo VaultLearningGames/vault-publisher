@@ -36,11 +36,15 @@ export interface Config {
   formsNewsletterSheet?: string;
   formsSubmitGameSheet?: string;
   // The public website (https://vaultlearninggames.org): where listings' site-path images are fetched from when they
-  // are copied to the CDN (image-migration.ts).
+  // are copied to the CDN (image-migration.ts), and the address listing previews are built for.
   siteUrl: string;
-  // Sites that can show an unsaved listing preview at SITE/_preview/TOKEN/ (listing-preview.ts). The first is the
-  // editor's main Preview button.
+  // Where an unsaved listing preview opens, ADDRESS/_preview/TOKEN/ (listing-preview.ts): this portal, which renders
+  // it itself, and any site that still renders its own. The first is the editor's main Preview button.
   previewSites: PreviewSite[];
+  // The website's source (Hugo: hugo.toml, content/, data/, themes/), carried in the image, and the Hugo binary: the
+  // portal renders listing previews from them (portal/site-preview.ts). The pages load their assets from siteUrl.
+  siteDir: string;
+  hugoBin: string;
   // The portal's "Need support?" link: the invitation to the Slack workspace. '' hides the link.
   supportUrl: string;
 }
@@ -115,6 +119,8 @@ export function loadConfig(): Config {
     formsSubmitGameSheet: process.env.FORMS_SUBMIT_GAME_SHEET?.trim() || undefined,
     siteUrl: (process.env.SITE_URL?.trim() || 'https://vaultlearninggames.org').replace(/\/+$/, ''),
     previewSites: parsePreviewSites(process.env.PREVIEW_SITES),
+    siteDir: process.env.SITE_DIR?.trim() || 'site',
+    hugoBin: process.env.HUGO_BIN?.trim() || 'hugo',
     supportUrl: parseSupportUrl(process.env.SUPPORT_URL),
   };
 }

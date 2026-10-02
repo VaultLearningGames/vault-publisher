@@ -1,0 +1,38 @@
+{{- /* The /game-cards collection page (a Squarespace blog grid): 20 cards per page, newest first, "Older Posts" /
+       "Newer Posts" links with Squarespace's ?offset=<date> addresses (paged in the browser by vault-sq.js).
+       Filtered by a category (grade band / "Dev: <maker>") or a tag ("Subject: X" / "Topic: X") on the filter pages. */ -}}
+{{- $page := .page }}{{ $kind := .kind | default "" }}{{ $val := .value | default "" -}}
+{{- $items := partial "sq/game-list.html" . -}}
+{{- $head := index hugo.Data.squarespace.pages "game-cards" 0 -}}
+{{- partial "sq/section.html" (dict "s" $head "page" $page "key" "s0" "first" true "class" "is-first") }}
+<section class="sq-sec theme-white sq-blog" data-section-theme="white">
+  <div class="blog-grid" data-page-size="20">
+    {{- range $items }}{{ $p := .page }}
+    {{- $cats := slice }}{{ range $p.Params.grades }}{{ $cats = $cats | append . }}{{ end }}{{ range $p.Params.makers }}{{ $cats = $cats | append (printf "Dev: %s" .) }}{{ end }}
+    {{- with $p.Params.legacy }}{{ with .card_categories }}{{ $cats = . }}{{ end }}{{ end }}
+    {{- $tags := slice }}{{ range $p.Params.subjects }}{{ if and . (ne . "null") }}{{ $tags = $tags | append (printf "Subject: %s" .) }}{{ end }}{{ end }}{{ range $p.Params.topics }}{{ $tags = $tags | append (printf "Topic: %s" .) }}{{ end }}
+    {{- $show := true }}
+    {{- if eq $kind "category" }}{{ $all := slice }}{{ range $p.Params.grades }}{{ $all = $all | append . }}{{ end }}{{ range $p.Params.makers }}{{ $all = $all | append (printf "Dev: %s" .) }}{{ end }}{{ $show = in $all $val }}{{ end }}
+    {{- if eq $kind "tag" }}{{ $show = in $tags $val }}{{ end }}
+    {{- if $show }}
+    {{- $href := strings.TrimSuffix "/" $p.RelPermalink }}
+    {{- $img := partial "sq/card-image.html" $p }}
+    <article class="blog-item" data-offset="{{ mul .date.Unix 1000 }}">
+      <a class="blog-img" href="{{ $href }}">{{ with $img }}<img src="{{ . }}" alt="{{ $p.Title }}" loading="lazy" decoding="async">{{ end }}</a>
+      <div class="blog-meta">
+        <span class="blog-cats">{{ range $i, $c := $cats }}{{ if $i }}, {{ end }}<a href="/game-cards/category/{{ replace (replace $c " " "+") ":" "%3A" }}">{{ $c }}</a>{{ end }}</span>
+        <span class="blog-delim" aria-hidden="true"></span>
+        <time class="blog-date" datetime="{{ .date.Format "2006-01-02" }}">{{ .date.Format "1/2/06" }}</time>
+      </div>
+      <h1 class="blog-title"><a href="{{ $href }}">{{ with $p.Params.legacy }}{{ .card_title | default $p.Title }}{{ else }}{{ $p.Title }}{{ end }}</a></h1>
+      <div class="blog-excerpt"><p>{{ partial "sq/game-desc.html" $p }}</p></div>
+      <a class="blog-more" href="{{ $href }}">Read More</a>
+    </article>
+    {{- end }}
+    {{- end }}
+  </div>
+  <nav class="blog-pages" aria-label="Pages">
+    <a class="blog-newer" href="#" hidden><span class="chev" aria-hidden="true"></span>Newer Posts</a>
+    <a class="blog-older" href="#" hidden>Older Posts<span class="chev" aria-hidden="true"></span></a>
+  </nav>
+</section>

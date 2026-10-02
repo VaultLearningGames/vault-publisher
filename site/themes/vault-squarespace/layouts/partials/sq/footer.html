@@ -1,0 +1,6 @@
+{{- /* Footer: the Join Vault sign-up and the credits, as on every Squarespace page. */ -}}
+<footer id="footer">
+  {{- range $i, $s := hugo.Data.squarespace.pages.footer }}
+  {{- partial "sq/section.html" (dict "s" $s "page" $ "key" (printf "f%d" $i)) }}
+  {{- end }}
+</footer>

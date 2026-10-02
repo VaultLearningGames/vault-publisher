@@ -1,0 +1,10 @@
+{{- /* Preview builds only (deploy/preview/server.mjs copies this into layouts/): each catalog game's slug and the
+       address of its page, so the preview server finds the page whatever permalink the design gives it. */ -}}
+{{- $games := slice -}}
+{{- range (hugo.Data.catalog.games | default slice) -}}
+  {{- $slug := .slug -}}
+  {{- with site.GetPage (printf "/games/%s" $slug) -}}
+    {{- $games = $games | append (dict "slug" $slug "path" .RelPermalink) -}}
+  {{- end -}}
+{{- end -}}
+{{- dict "games" $games | jsonify -}}

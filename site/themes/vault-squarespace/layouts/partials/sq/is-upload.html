@@ -1,0 +1,4 @@
+{{- /* Whether an image URL is a new portal upload: a …/_vault-assets/ URL that isn't one of the site's original catalog
+       images moved to the CDN (partials/sq/asset-orig.html). */ -}}
+{{- $s := . | default "" | string -}}
+{{- return (and (strings.Contains $s "/_vault-assets/") (eq (len (partial "sq/asset-orig.html" $s)) 0)) -}}

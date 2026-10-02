@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en-US"{{ if not site.Params.fonts.adobe_kit }} class="no-base9"{{ end }}>
+<head>
+  {{- partial "sq/head.html" . }}
+  {{- block "head" . }}{{ end }}
+</head>
+<body class="{{ block "bodyclass" . }}{{ end }}">
+  <a href="#page" class="skip-link">Skip to Content</a>
+  {{- partial "sq/header.html" . }}
+  <main id="page" role="main">
+    {{- block "main" . }}{{ end }}
+  </main>
+  {{- partial "sq/footer.html" . }}
+  <script src="{{ "sq/js/vault-sq.js" | relURL }}{{ partialCached "sq/asset-v.html" "sq/js/vault-sq.js" "sq/js/vault-sq.js" }}" defer></script>
+  {{- block "scripts" . }}{{ end }}
+</body>
+</html>

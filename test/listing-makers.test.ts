@@ -187,7 +187,7 @@ describe('the catalog’s studios include the makers’ studios', () => {
     const res = await boss.post(`${L}/wake/preview`, { 'makers:University of Calgary': true });
     assert.equal(res.status, 200);
     const { token } = (await res.json()) as { token: string };
-    const preview = (await (await t.app.request(`/v1/listing-previews/${token}`)).json()) as { game: { makers: string[] }; studios: { slug: string }[] };
+    const preview = (await (await t.app.request(`/v1/listing-previews/${token}`, { headers: { Accept: 'application/json' } })).json()) as { game: { makers: string[] }; studios: { slug: string }[] };
     assert.deepEqual(preview.game.makers, ['University of Calgary']);
     assert.deepEqual(preview.studios.map((s) => s.slug), ['fieldday', 'ucalgary', 'wilson']);
   });

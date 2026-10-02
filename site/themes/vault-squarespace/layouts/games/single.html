@@ -1,0 +1,78 @@
+{{- /*
+  A game's landing page, at the site root (/aquation, /wake, ...), in one of the two Squarespace layouts:
+    standard  white section: title, short description, Play button, cover image (catalog hero_image) on the right;
+              then the screenshots and the accordion (About this game / Trailer / Curriculum / Made By).
+    hero      black section over a full-width background image, the game's logo art (or its title), description and
+              an outlined Play button; then the screenshots, the title and the accordion.
+  Content comes from the catalog (data/catalog.json). The layout, the grid positions and the images the catalog has
+  no field for (hero background, logo art, studio logo) come from the temporary data/squarespace/games.json
+  (.Params.legacy); a game that isn't in it gets the default layout in data/squarespace/default-game.json.
+  The one intentional change from Squarespace: Play opens the game in Vault's in-page player (partials/vault-player.html).
+*/ -}}
+{{- define "head" }}
+{{- with .Params.studio }}<meta name="vault:studio" content="{{ .name }}">{{ end }}
+{{- with .Params.play }}{{ with .fit }}<meta name="vault:fit" content="{{ delimit . "," }}">{{ end }}{{ end }}
+{{- end }}
+{{- define "scripts" }}{{ partial "vault-player.html" . }}{{ end }}
+{{- define "main" }}
+{{- $p := . -}}
+{{- $lg := .Params.legacy | default dict -}}
+{{- $layout := $lg.layout | default "standard" -}}
+{{- $secs := $lg.sections | default (index hugo.Data.squarespace "default-game" $layout).sections -}}
+{{- $play := .Params.play | default dict -}}
+{{- /* catalog screenshots not already placed by a {catalog:} reference, used for slots whose image isn't in the catalog */ -}}
+{{- /* (a screenshot moved to the CDN unchanged counts as its original site path: partials/sq/asset-orig.html) */ -}}
+{{- $placed := slice -}}
+{{- range $secs }}{{ range .blocks }}{{ with .catalog }}{{ $placed = $placed | append (printf "/%s" .) }}{{ end }}{{ end }}{{ end -}}
+{{- $spare := slice -}}
+{{- range .Params.screenshots -}}
+  {{- $src := partial "sq/img-path.html" . -}}
+  {{- $isPlaced := in $placed $src -}}
+  {{- range partial "sq/asset-orig.html" . }}{{ if in $placed (printf "/%s" .) }}{{ $isPlaced = true }}{{ end }}{{ end -}}
+  {{- if not $isPlaced }}{{ $spare = $spare | append $src }}{{ end -}}
+{{- end -}}
+{{- $hero := partial "sq/img-path.html" .Params.hero_image -}}
+{{- $out := slice -}}
+{{- range $si, $s := $secs }}
+  {{- $s2 := $s -}}
+  {{- with $s.bg }}{{ $s2 = merge $s2 (dict "bg" (partial "sq/game-image.html" (dict "ref" . "page" $p "fallback" $hero))) }}{{ end -}}
+  {{- $blocks := slice -}}
+  {{- range $b := $s.blocks }}
+    {{- $r := $b.role | default "" -}}
+    {{- $nb := $b -}}
+    {{- if eq $r "text" }}
+      {{- $title := "" }}
+      {{- if eq $layout "standard" }}{{ $title = cond (ne $lg.title_strong false) (printf "<h1><strong>%s</strong></h1>" ($p.Title | htmlEscape)) (printf "<h1>%s</h1>" ($p.Title | htmlEscape)) }}
+      {{- else }}
+        {{- $hasLogo := false }}{{ range $s.blocks }}{{ if eq .role "titleimg" }}{{ $hasLogo = true }}{{ end }}{{ end }}
+        {{- if not $hasLogo }}{{ $title = printf "<div class=\"sqsrte-scaled-text-container\"><span class=\"sqsrte-scaled-text\"><h1><span class=\"sqsrte-text-color--white\">%s</span></h1></span></div>" ($p.Title | htmlEscape) }}{{ end }}
+      {{- end }}
+      {{- $nb = merge $b (dict "type" "text" "html" (printf "%s<p class=\"sqsrte-large\">%s</p>" $title (partial "sq/game-desc.html" $p))) }}
+    {{- else if eq $r "button" }}
+      {{- $href := $play.url | default "" }}
+      {{- $nb = merge $b (dict "type" "button" "label" "Play Game" "href" (printf "%s%s" $href (cond (eq $play.embed false) "#noembed" "")) "blank" true) }}
+    {{- else if eq $r "cover" }}
+      {{- $nb = merge $b (dict "type" "image" "src" (partial "sq/game-image.html" (dict "ref" $b "page" $p "fallback" $hero)) "alt" $p.Title) }}
+    {{- else if or (eq $r "logo") (eq $r "titleimg") }}
+      {{- $nb = merge $b (dict "type" "image" "src" (partial "sq/game-image.html" (dict "ref" $b "page" $p)) "alt" ($b.alt | default $p.Title)) }}
+    {{- else if hasPrefix $r "shot" }}
+      {{- $src := partial "sq/game-image.html" (dict "ref" (cond (isset $b "catalog") $b dict) "page" $p) }}
+      {{- if and (not $src) (gt (len $spare) 0) }}{{ $src = index $spare 0 }}{{ $spare = after 1 $spare }}{{ end }}
+      {{- if not $src }}{{ $src = partial "sq/game-image.html" (dict "ref" (dict "src" $b.src) "page" $p) }}{{ end }}
+      {{- $nb = merge $b (dict "type" "image" "src" $src "alt" ($b.alt | default "")) }}
+    {{- else if eq $r "heading" }}
+      {{- $nb = merge $b (dict "type" "text" "html" (printf "<h4>%s</h4>" ($p.Title | htmlEscape))) }}
+    {{- else if eq $r "accordion" }}
+      {{- $nb = merge $b (dict "type" "accordion" "items" (partial "sq/game-accordion.html" (dict "page" $p "live" ($b.live_items | default slice)))) }}
+    {{- end }}
+    {{- if or (ne $nb.type "image") $nb.src }}{{ $blocks = $blocks | append $nb }}{{ end }}
+  {{- end }}
+  {{- $out = $out | append (merge $s2 (dict "blocks" $blocks)) }}
+{{- end }}
+{{- /* Hero pages that show the game's logo art have no title text; give the page (and the player's title bar) one. */ -}}
+{{- $logo := false }}{{ range (index $out 0).blocks }}{{ if eq .role "titleimg" }}{{ $logo = true }}{{ end }}{{ end -}}
+{{- if $logo }}<h1 class="vh">{{ .Title }}</h1>{{ end }}
+{{- range $i, $s := $out }}
+{{- partial "sq/section.html" (dict "s" $s "page" $p "key" (printf "s%d" $i) "first" (eq $i 0) "class" (cond (eq $i 0) (printf "is-first game-%s" $layout) "")) }}
+{{- end }}
+{{- end }}

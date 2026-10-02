@@ -1,0 +1,40 @@
+# Branch original-squarespace-design: a static replica of the Squarespace site (vaultlearninggames.org as of
+# 2026-09-29), with the same URLs. Game pages still come from the Vault Studio Portal catalog (data/catalog.json).
+baseURL = 'https://vaultlearninggames.org'
+languageCode = 'en-US'
+title = 'Vault Learning Games Library'
+theme = 'vault-squarespace'
+# Squarespace has no taxonomy pages or RSS here; its /game-cards/category|tag pages are built by
+# content/game-cards/_content.gotmpl instead.
+disableKinds = ['taxonomy', 'term', 'rss']
+
+[params]
+  description = "Vault is the most comprehensive library of free learning games for grade 3+ created by education researchers at Field Day Lab (University of Wisconsin - Madison)"
+  author = "Field Day Lab"
+
+  [params.fonts]
+    # Adobe Fonts web project (kit id, e.g. "abc1def") with Base 9 Sans Regular/Bold (+ italics), the heading font.
+    # Empty: Share Tech Mono (self-hosted, OFL) stands in for it.
+    adobe_kit = "zxo3yez"
+
+  [params.forms]
+    # Where the Join Vault sign-up and the Submit a Game form post: the Vault Studio Portal's /v1/forms/newsletter and
+    # /v1/forms/submit-game. Left empty here; the deploy workflow sets them from the environment's VAULT_PORTAL through
+    # HUGOxPARAMSxFORMSxNEWSLETTER / HUGOxPARAMSxFORMSxSUBMIT_GAME. Empty (local dev): the forms say they aren't connected.
+    newsletter = ""
+    submit_game = ""
+
+# Game pages live at the site root, at their Squarespace address (content/games/_content.gotmpl sets the slug).
+[permalinks.page]
+  games = '/:slug/'
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+    # Catalog text is shown as typed, as on Squarespace: no "smart" quotes, dashes or ellipses.
+    [markup.goldmark.extensions.typographer]
+      disable = true
+
+[sitemap]
+  changeFreq = 'monthly'

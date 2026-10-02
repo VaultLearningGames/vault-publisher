@@ -1,0 +1,315 @@
+{{- /* Vault in-page game player: a copy of themes/vault-theme/layouts/partials/vault-player.html (main's design), with the
+       logo served from this site. Keep the two in step. */ -}}
+<!--
+  Vault in-page game player.
+  Paste this whole file into Squarespace: Settings > Advanced > Code Injection > FOOTER.
+  (Code Injection needs a Business plan or higher.)
+
+  Every "Play Game" / "Play Now" button that points off-site opens the game in a full-window
+  player on the Vault page instead of a new tab. The game URL is taken off the button (no hover
+  preview, no "open in new tab"), and the address bar stays on vaultlearninggames.org.
+  Back button and Esc close the player.
+
+  Some game sites forbid being shown inside another site (X-Frame-Options / frame-ancestors); those
+  are listed in NO_EMBED below and keep opening in a new tab. To exclude any other button, add
+  "#noembed" to the end of its link URL in Squarespace, or add its URL prefix to NO_EMBED.
+-->
+<style>
+  /* Vault look: black bar, site logo top-left (click = close and return), cyan accent from the logo. */
+  .vault-player { --vp-accent: #00ecd0; position: fixed; inset: 0; z-index: 2147483000; display: none;
+    flex-direction: column; background: #000; }
+  .vault-player.is-open { display: flex; }
+  .vault-player__bar { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 10px 0 6px; flex: none;
+    background: #000; color: #fff; border-bottom: 2px solid var(--vp-accent);
+    font: 600 15px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .vault-player__home { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 10px 0 6px; border: 0;
+    border-radius: 8px; background: transparent; color: #fff; cursor: pointer; }
+  .vault-player__home img { display: block; height: 26px; width: auto; }
+  .vault-player__home svg { width: 18px; height: 18px; transition: transform .15s; }
+  /* Game title and studio, in the Vault site's own fonts (Squarespace defines these variables on :root). */
+  .vault-player__titles { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px;
+    padding-left: 14px; border-left: 1px solid rgba(255,255,255,.2); line-height: 1.1; }
+  .vault-player__title, .vault-player__studio { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .vault-player__title { color: #fff; font-size: 18px;
+    font-family: var(--heading-font-font-family, "base-9-sans"), "Montserrat", system-ui, sans-serif;
+    font-weight: var(--heading-font-font-weight, 400); font-style: var(--heading-font-font-style, normal);
+    letter-spacing: var(--heading-font-letter-spacing, -.02em); text-transform: var(--heading-font-text-transform, uppercase); }
+  .vault-player__studio { color: rgba(255,255,255,.62); font-size: 12px;
+    font-family: var(--meta-font-font-family, "Archivo"), system-ui, sans-serif;
+    font-weight: var(--meta-font-font-weight, 500); letter-spacing: var(--meta-font-letter-spacing, 0); }
+  .vault-player__studio:empty { display: none; }
+  .vault-player__btn { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border: 0;
+    border-radius: 50%; background: rgba(255,255,255,.1); color: #fff; cursor: pointer; }
+  .vault-player__btn svg { width: 20px; height: 20px; }
+  .vault-player__home:hover, .vault-player__home:focus-visible { background: rgba(255,255,255,.08); outline: none; }
+  .vault-player__home:hover svg, .vault-player__home:focus-visible svg { color: var(--vp-accent); transform: translateX(-3px); }
+  .vault-player__btn:hover, .vault-player__btn:focus-visible { background: var(--vp-accent); color: #000; outline: none; }
+  /* Loading line along the bottom of the bar, driven by games that send "game-embed/1" progress messages. */
+  .vault-player__bar { position: relative; }
+  .vault-player__progress { position: absolute; left: 0; bottom: -2px; height: 2px; width: 0; background: #fff;
+    opacity: 0; transition: width .25s, opacity .4s; }
+  .vault-player__progress.is-on { opacity: 1; }
+  .vault-player__stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #000; }
+  .vault-player__frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
+  .vault-player__frame.is-fit { inset: auto; left: 0; top: 0; transform-origin: 0 0; }
+  html.vault-player-open, html.vault-player-open body { overflow: hidden !important; }
+  @media (max-width: 520px) {
+    .vault-player__bar { height: 48px; gap: 8px; }
+    .vault-player__home img { height: 20px; }
+    .vault-player__titles { padding-left: 10px; gap: 2px; }
+    .vault-player__title { font-size: 14px; }
+    .vault-player__studio { font-size: 11px; }
+    .vault-player__btn { width: 36px; height: 36px; }
+  }
+</style>
+<script>
+(function () {
+  var LABEL = /^\s*(play( game| now)?|launch game)\s*$/i;
+  // Checked 2026-09-25 (see vault-game-inventory.csv): these pages send X-Frame-Options/frame-ancestors,
+  // so an iframe would be blank. Each entry is matched as a URL prefix.
+  var NO_EMBED = [
+    'https://studiosaffron.itch.io/',          // Angle Jungle
+    'https://testtubegames.com/',              // Electric Shocktopus, Velocity Raptor
+    'https://www.mathplayground.com/',         // Addition Blocks
+    'https://www.wilsoncenter.org/microsite/', // Infosphere Invaders page (the /sites/default/files/ game embeds fine)
+    'https://plasticpipeline.wilsoncenter.org/games/',
+    'https://ssec.si.edu/morphy',
+    'https://ssec.si.edu/pick-your-plate',
+    'https://www.annenbergclassroom.org/',     // That's Your Right page
+    'https://quandarygame.org/',               // Quandary: its game needs functions from its own /play page, which can't be framed
+  ];
+  // Games that don't size themselves to the window, or that sit inside a publisher's page. The player loads the page
+  // at a fixed size, shows only the game's rectangle, and scales that to fit the window (recomputed on every resize).
+  //   [URL prefix, page width, page height, game x, game y, game width, game height]   (CSS pixels at that page size)
+  // Measured 2026-09-28 by loading each game at that page size; re-measure if a publisher changes their layout.
+  var FIT = [
+    ["https://outbreaksquad.com/game/index.html", 1280, 900, 0, 89, 1280, 720],                                       // Outbreak Squad: hides the site menu bar
+    ["https://mathsnacks.com/agrinautica.html", 1280, 1000, 225, 222, 800, 600],                                      // Agrinautica: hides the Math Snacks page
+    ["https://mathsnacks.com/curse-reverse.html", 1280, 1000, 121, 222, 1038, 584],                                   // Curse Reverse: hides the Math Snacks page
+    ["https://itch.io/embed-upload/13560417", 1920, 1024, 480, 182, 960, 600],                                        // Angle Jungle (itch.io embed)
+    ["https://playground.fluency-games.com/AdditionBlocks/", 1920, 1024, 560, 212, 800, 600],                         // Addition Blocks
+    ["https://theyardgames.org/game/bacteria", 1920, 1024, 520, 10, 880, 660],                                        // Antibiotic Resistance
+    ["https://fielddaylab.org/play/atom-touch/build/iframe.html", 1920, 1024, 320, 152, 1280, 720],                   // Atom Touch
+    ["https://ed.icivics.org/game-player/?domain=org.icivics.briefthechief", 1920, 1024, 480, 212, 960, 600],         // Brief the Chief
+    ["https://theyardgames.org/game/carbon.html", 1920, 1024, 520, 169, 880, 660],                                    // Carbon Cycle Game
+    ["https://ed.icivics.org/game-player/?domain=wisdom", 1920, 1024, 360, 112, 1200, 800],                           // Constitutional Compromise
+    ["https://ed.icivics.org/game-player/?domain=convenethecouncil", 1920, 1024, 480, 212, 960, 600],                 // Convene the Council
+    ["https://theyardgames.org/game/crystal.html", 1920, 1024, 520, 169, 880, 660],                                   // Crystal Cave
+    ["https://theyardgames.org/game/earthquake.html", 1920, 1024, 520, 169, 880, 660],                                // Earthquake!
+    ["https://game-cdn.legendsoflearning.com/content-deploy/4452/EcoKingdoms-Interactions_427/index.html", 1920, 1024, 0, 0, 1024, 768],// EcoKingdoms
+    ["https://ed.icivics.org/game-player/?domain=executive_command", 1920, 1024, 490, 182, 940, 660],                 // Executive Command
+    ["https://mathsnacks.com/gate/gate-unity/index.html", 1920, 1024, 520, 263, 880, 495],                            // Gate
+    ["https://theyardgames.org/game/balloon.html", 1920, 1024, 520, 169, 880, 660],                                   // Hot Air Balloon
+    ["https://www.wilsoncenter.org/sites/default/files/interactives/101191/index.html", 1920, 1024, 480, 191, 960, 600],// Infosphere Invaders
+    ["https://fielddaylab.wisc.edu/play/lakeland/game/", 1920, 1024, 448, 0, 1024, 660],                              // Lakeland
+    ["https://theyardgames.org/game/magnetism.html", 1920, 1024, 520, 169, 880, 660],                                 // Magnet Hunt
+    ["https://mathsnacks.com/monster-school-bus-2021/index.html", 1920, 1024, 560, 253, 800, 514],                    // Monster School Bus
+    ["https://ssec.si.edu/sites/default/files/games/Morphy/release/", 1920, 1024, 480, 125, 960, 720],                // Morphy
+    ["https://playground.fluency-games.com/MxBlocks/", 1920, 1024, 200, 42, 880, 660],                                // Multiplication Blocks
+    ["https://ed.icivics.org/game-player/?domain=org.icivics.activate", 1920, 1024, 480, 212, 960, 600],              // Neighborhood Good
+    ["https://theyardgames.org/game/nitrogen.html", 1920, 1024, 520, 169, 880, 660],                                  // Nitrogen Cycle Game
+    ["https://ed.icivics.org/game-player/?domain=budget", 1920, 1024, 480, 212, 960, 600],                            // People's Pie
+    ["https://ssec.si.edu/sites/default/files/games/TamisTower/index.html", 1920, 1024, 8, 85, 1280, 720],            // Tami’s Tower
+    ["https://ed.icivics.org/game-player/?domain=org.icivics.uncoveringloyalties", 1920, 1024, 360, 112, 1200, 800],  // Uncovering Loyalties
+    ["https://theyardgames.org/game/water.html", 1920, 1024, 520, 169, 880, 660],                                     // Water Cycle Game
+    ["https://theyardgames.org/game/waves.html", 1920, 1024, 520, 169, 880, 660],                                     // Wave Combinator
+    ["https://theyardgames.org/game/wind.html", 1920, 1024, 520, 169, 880, 660]                                       // Wind Simulator
+  ];
+  var games = [];            // index -> game URL; kept out of the DOM
+  var player, stage, frame, fit, title, studioEl, progress, lastFocus;
+
+  var LOGO = '{{ "sq/img/site/vault-game-library.png" | absURL }}';
+  var ICON = {
+    back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>',
+    fs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+  };
+
+  function build() {
+    player = document.createElement('div');
+    player.className = 'vault-player';
+    player.setAttribute('role', 'dialog');
+    player.setAttribute('aria-modal', 'true');
+    player.innerHTML =
+      '<div class="vault-player__bar">' +
+        '<button type="button" class="vault-player__home" data-act="close" title="Back to Vault" aria-label="Close game and return to Vault">' +
+          ICON.back + '<img src="' + LOGO + '" alt="Vault Game Library"></button>' +
+        '<div class="vault-player__titles"><span class="vault-player__title"></span><span class="vault-player__studio"></span></div>' +
+        '<button type="button" class="vault-player__btn" data-act="fs" title="Full screen" aria-label="Full screen">' + ICON.fs + '</button>' +
+        '<button type="button" class="vault-player__btn" data-act="close" title="Close" aria-label="Close game">' + ICON.close + '</button>' +
+        '<div class="vault-player__progress" role="progressbar" aria-label="Game loading" aria-valuemin="0" aria-valuemax="100"></div>' +
+      '</div>' +
+      '<div class="vault-player__stage"></div>';
+    stage = player.querySelector('.vault-player__stage');
+    title = player.querySelector('.vault-player__title');
+    studioEl = player.querySelector('.vault-player__studio');
+    progress = player.querySelector('.vault-player__progress');
+    player.setAttribute('aria-label', 'Game player');
+    player.addEventListener('click', function (e) {
+      var btn = e.target.closest && e.target.closest('[data-act]');
+      var act = btn && btn.getAttribute('data-act');
+      if (act === 'close') dismiss();
+      // Full screen the stage, not the iframe, so cropped/scaled games keep their layout.
+      if (act === 'fs' && frame) (stage.requestFullscreen || stage.webkitRequestFullscreen || function () {}).call(stage);
+    });
+    if (window.ResizeObserver) new ResizeObserver(layout).observe(stage);
+    else window.addEventListener('resize', layout);
+    player.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    document.body.appendChild(player);
+  }
+
+  function open(i) {
+    if (!player) build();
+    lastFocus = document.activeElement;
+    // A fresh iframe each time, so closing really stops the game (and its audio).
+    frame = document.createElement('iframe');
+    frame.className = 'vault-player__frame';
+    frame.setAttribute('allow', 'fullscreen; autoplay; gamepad; clipboard-write; accelerometer; gyroscope');
+    frame.setAttribute('allowfullscreen', '');
+    frame.setAttribute('title', 'Game');
+    fit = null;
+    for (var k = 0; k < FIT.length; k++) if (games[i].indexOf(FIT[k][0]) === 0) fit = FIT[k];
+    // A page can also give the rectangle itself (e.g. for a game served from the Vault CDN):
+    // <meta name="vault:fit" content="pageWidth,pageHeight,x,y,width,height">
+    var metaFit = document.querySelector('meta[name="vault:fit"]');
+    if (!fit && metaFit) {
+      var n = metaFit.getAttribute('content').split(',').map(Number);
+      if (n.length === 6 && n.every(function (v) { return v >= 0; })) fit = [games[i]].concat(n);
+    }
+    // Fit games are measured at a fixed page size; an #anchor would scroll the page away from those coordinates.
+    frame.src = fit ? games[i].split('#')[0] : games[i];
+    if (fit) {
+      frame.classList.add('is-fit');
+      frame.style.width = fit[1] + 'px';
+      frame.style.height = fit[2] + 'px';
+      // Show only the game's rectangle; everything else on the page (menus, text, margins) is clipped away.
+      frame.style.clipPath = 'inset(' + fit[4] + 'px ' + (fit[1] - fit[3] - fit[5]) + 'px ' +
+        (fit[2] - fit[4] - fit[6]) + 'px ' + fit[3] + 'px)';
+      frame.setAttribute('scrolling', 'no');
+    }
+    stage.appendChild(frame);
+    player.classList.add('is-open');
+    layout();
+    var h1 = document.querySelector('h1');
+    title.textContent = (h1 && h1.textContent.trim()) || document.title.split(/\s+[—-]\s+/)[0];
+    studioEl.textContent = '';
+    findStudio(function (name) { if (studioEl) studioEl.textContent = name ? 'by ' + name : ''; });
+    document.documentElement.classList.add('vault-player-open');
+    if (!(history.state && history.state.vaultPlayer)) history.pushState({ vaultPlayer: true }, '', '#play');
+    frame.focus();
+  }
+
+  // Scale and position a FIT game so its rectangle is as large as possible and centred in the stage.
+  function layout() {
+    if (!frame || !fit || !stage) return;
+    var sw = stage.clientWidth, sh = stage.clientHeight;
+    if (!sw || !sh) return;
+    var s = Math.min(sw / fit[5], sh / fit[6]);
+    var tx = (sw - fit[5] * s) / 2 - fit[3] * s, ty = (sh - fit[6] * s) / 2 - fit[4] * s;
+    frame.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + s + ')';
+  }
+
+  function close() {
+    if (!player || !player.classList.contains('is-open')) return;
+    if (frame) { frame.remove(); frame = null; fit = null; }
+    showProgress(null);
+    player.classList.remove('is-open');
+    document.documentElement.classList.remove('vault-player-open');
+    if (location.hash === '#play') history.replaceState(null, '', location.pathname + location.search);
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+
+  // Close via Back when we pushed the #play entry, so Back and Close stay in sync.
+  function dismiss() { history.state && history.state.vaultPlayer ? history.back() : close(); }
+
+  // The game's studio. A page can say it directly with <meta name="vault:studio" content="...">; otherwise it comes
+  // from the page's Game Card on Squarespace, whose "Dev: <studio>" category the library already uses as a filter.
+  // Cards live at /game-cards/<id>; most ids match the game page's address, the rest are found by scanning the list.
+  var studioName = null, studioWaiters = null;
+  function findStudio(cb) {
+    if (studioName !== null) return cb(studioName);
+    if (studioWaiters) return studioWaiters.push(cb);
+    studioWaiters = [cb];
+    var done = function (name) {
+      studioName = name || '';
+      try { sessionStorage.setItem('vault-studio:' + location.pathname, studioName); } catch (e) {}
+      studioWaiters.forEach(function (f) { f(studioName); }); studioWaiters = null;
+    };
+    var meta = document.querySelector('meta[name="vault:studio"]');
+    if (meta) return done(meta.getAttribute('content'));
+    try { var saved = sessionStorage.getItem('vault-studio:' + location.pathname); if (saved !== null) return done(saved); } catch (e) {}
+    var slug = location.pathname.replace(/\/+$/, '').split('/').pop();
+    var isThisPage = function (item) { return item && (item.sourceUrl || '').replace(/\/+$/, '').split('/').pop() === slug; };
+    var studioOf = function (item) {
+      var dev = (item.categories || []).filter(function (c) { return /^Dev:\s*/.test(c); })[0];
+      return dev ? dev.replace(/^Dev:\s*/, '') : '';
+    };
+    var getJson = function (url) { return fetch(url, { credentials: 'same-origin' }).then(function (r) { if (!r.ok) throw r; return r.json(); }); };
+    var scan = function (url) {
+      getJson(url).then(function (d) {
+        var hit = (d.items || []).filter(isThisPage)[0];
+        if (hit) return done(studioOf(hit));
+        var next = d.pagination && d.pagination.nextPage && d.pagination.nextPageUrl;
+        next ? scan(next + (next.indexOf('?') < 0 ? '?' : '&') + 'format=json') : done('');
+      }).catch(function () { done(''); });
+    };
+    if (!slug) return done('');
+    getJson('/game-cards/' + encodeURIComponent(slug) + '?format=json')
+      .then(function (d) { isThisPage(d.item) ? done(studioOf(d.item)) : scan('/game-cards?format=json'); })
+      .catch(function () { scan('/game-cards?format=json'); });
+  }
+
+  function wire(root) {
+    var links = (root || document).querySelectorAll('a[href]');
+    for (var j = 0; j < links.length; j++) {
+      var a = links[j];
+      if (a.hasAttribute('data-vault-play') || !LABEL.test(a.textContent)) continue;
+      var url;
+      try { url = new URL(a.getAttribute('href'), location.href); } catch (e) { continue; }
+      if (url.hash === '#noembed' || url.host === location.host || !/^https?:$/.test(url.protocol)) continue;
+      if (NO_EMBED.some(function (p) { return url.href.indexOf(p) === 0; })) continue;
+      var i = games.push(url.href) - 1;
+      a.setAttribute('data-vault-play', i);
+      a.setAttribute('href', '#play');
+      a.setAttribute('role', 'button');
+      a.removeAttribute('target');
+    }
+  }
+
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[data-vault-play]');
+    if (!a) return;
+    e.preventDefault();
+    open(+a.getAttribute('data-vault-play'));
+  }, true);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && player && player.classList.contains('is-open') && !document.fullscreenElement) dismiss();
+  });
+  window.addEventListener('popstate', close);
+
+  // Optional handshake for games that publish an embed page: {protocol: 'game-embed/1', type: 'loading'|'ready', progress: 0..1}.
+  // Only messages from the game currently in the player are used; games that send nothing are unaffected.
+  function showProgress(p) {
+    if (!progress) return;
+    var on = typeof p === 'number' && p < 1;
+    progress.classList.toggle('is-on', on);
+    progress.style.width = (on ? Math.max(2, p * 100) : (p === 1 ? 100 : 0)) + '%';
+    progress.setAttribute('aria-valuenow', Math.round((p || 0) * 100));
+  }
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!frame || e.source !== frame.contentWindow || !d || d.protocol !== 'game-embed/1') return;
+    if (d.type === 'loading') showProgress(+d.progress || 0);
+    if (d.type === 'ready') showProgress(1);
+  });
+
+  function init() {
+    wire();
+    if (games.length) findStudio(function () {});   // look it up early so the bar is ready when a game opens
+    if (location.hash === '#play') history.replaceState(null, '', location.pathname + location.search);
+    // Squarespace can render or swap blocks after load; catch late buttons too.
+    new MutationObserver(function () { wire(); }).observe(document.body, { childList: true, subtree: true });
+  }
+  document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', init) : init();
+})();
+</script>

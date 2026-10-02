@@ -1,0 +1,5 @@
+{{- /* "?v=<hash>" for a theme stylesheet or script (a path under static/), so a deploy that changes the file isn't
+       paired with the copy a browser or the CDN still has cached. */ -}}
+{{- $f := printf "themes/vault-squarespace/static/%s" . -}}
+{{- $v := "" }}{{ if fileExists $f }}{{ $v = printf "?v=%s" (substr (readFile $f | md5) 0 8) }}{{ end -}}
+{{- return $v -}}

@@ -1,0 +1,5 @@
+{{- /* An image reference as a URL: an absolute http(s) URL (e.g. an upload in the CDN's _vault-assets/) as is, a site
+       path from the site root, "" as "". */ -}}
+{{- $s := . | default "" -}}
+{{- if and $s (not (hasPrefix $s "http://")) (not (hasPrefix $s "https://")) }}{{ $s = strings.TrimPrefix "/" $s | printf "/%s" }}{{ end -}}
+{{- return $s -}}

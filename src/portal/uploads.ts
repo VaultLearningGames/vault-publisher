@@ -165,9 +165,14 @@ export function registerUploads(app: Hono, h: ListingHelpers) {
     const next = (items: (Html | string)[]) => html`<div class="next"><h3>What happens next</h3><ul class="tight">${items.map((i) => html`<li>${i}</li>`)}</ul></div>`;
     const where = html`<span class="mono wrap">${host(builds)}/${s.slug}/<span data-game>my-game</span>/</span>`;
     const membersOnly = html`<p class="fix">Only studio maintainers and studio admins can do this. Ask a studio admin on the <a href="/s/${s.slug}/members">Members</a> page.</p>`;
+    // Who may upload for this studio from GitHub: its organization's repositories, and single repositories Vault has
+    // assigned to it (a game kept in someone else's organization).
+    const assigned = db.studioRepositories(s.id).map((r) => r.repository);
+    const repos = assigned.map((r, i) => html`${i ? ', ' : ''}<b>github.com/${r}</b>`);
     const github = s.github_owner
-      ? html`Vault accepts uploads from repositories in <b>github.com/${s.github_owner}</b>. The first repository to upload a game name owns that name.`
-      : html`<b>This studio has no GitHub organization registered with Vault yet.</b> Ask Vault to add it before using GitHub, or use path 3 or 4, which don’t need it.`;
+      ? html`Vault accepts uploads from repositories in <b>github.com/${s.github_owner}</b>${assigned.length ? html`, and from ${repos}` : ''}. The first repository to upload a game name owns that name.`
+      : assigned.length ? html`Vault accepts uploads for this studio from ${repos}. To add another repository, ask Vault.`
+      : html`<b>This studio has no GitHub organization or repository registered with Vault yet.</b> Ask Vault to add one before using GitHub, or use path 3 or 4, which don’t need it.`;
 
     const path1 = html`<section class="card path" id="path-1">
       ${title(1, 'Upload every push from GitHub', 'GitHub Actions')}

@@ -5,7 +5,11 @@ import { Readable } from 'node:stream';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import type { Fetcher } from '../src/net-guard.ts';
 import { uploadRefName } from '../src/portal/uploads.ts';
-import { monitorsForStudio } from '../src/url-monitor.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Db } from '../src/db.ts';
+import { monitorsForStudio, saveMonitor } from '../src/url-monitor.ts';
 import { FakeStorage, portalHarness } from './portal-harness.ts';
 
 const repo: GitHubIdentity = { owner: 'fielddaylab', ownerId: '1881825', repository: 'fielddaylab/tide', repositoryId: '100', ref: 'refs/heads/production', sha: 'a'.repeat(40), actor: 'dev', eventName: 'push' };
@@ -291,5 +295,87 @@ describe('monitoring a web address in the portal (path 4)', () => {
     assert.deepEqual(cleanup.removed, []);
     assert.equal(cleanup.monitors.checked.length, 1);
     assert.equal(h.db.build(game().id, 'web-copy')!.status, 'live');
+  });
+});
+
+describe('a repository assigned to a studio (its organization belongs to another studio)', () => {
+  // VaultLearningGames/hosted-quest is assigned to ucalgary, which has no GitHub organization of its own.
+  const hosted: GitHubIdentity = { owner: 'VaultLearningGames', ownerId: '214136763', repository: 'VaultLearningGames/hosted-quest', repositoryId: '555', ref: 'refs/heads/production', sha: 'e'.repeat(40), actor: 'vaultdev', eventName: 'push' };
+  const calgary = () => h.db.studioBySlug('ucalgary')!;
+  beforeEach(() => {
+    h.db.syncStudios([{ slug: 'vault', name: 'Vault Learning Games', github_owner: 'VaultLearningGames', github_owner_id: '214136763' }]);
+    h.db.bindRepository({ repository_id: '555', repository: 'VaultLearningGames/hosted-quest', studio_id: calgary().id, created_by: 'user:boss', source: 'portal' });
+    ids.hosted = hosted;
+    ids.sibling = { ...hosted, repository: 'VaultLearningGames/vault-publisher-test', repositoryId: '556' }; // same organization, not assigned
+  });
+
+  test('its automatic publish request is filed in the studio it is assigned to, not its organization’s', async () => {
+    await publish('hosted', 'quest');
+    const out = await (await ci('/v1/release-requests', 'hosted', { game: 'quest' })).json() as { status: string; version: string; url: string };
+    assert.deepEqual([out.status, out.version, out.url], ['requested', 'production-eeeeeee', 'https://portal.test/s/ucalgary/g/quest?tab=cdn']);
+    const quest = h.db.game(calgary().id, 'quest')!;
+    assert.deepEqual(h.db.releaseRequests({ gameId: quest.id }).map((r) => [r.studio_slug, r.version, r.status]), [['ucalgary', 'production-eeeeeee', 'requested']]);
+    assert.equal(h.db.game(h.db.studioBySlug('vault')!.id, 'quest'), undefined);
+    // Another repository of the same organization publishes for the organization's studio, where there is no such game.
+    assert.equal((await ci('/v1/release-requests', 'sibling', { game: 'quest' })).status, 404);
+    // Once the assignment is removed, the repository is its organization's again and can't reach the game.
+    h.db.unbindRepository('555');
+    assert.equal((await ci('/v1/release-requests', 'hosted', { game: 'quest' })).status, 404);
+  });
+
+  test('a zip uploaded in the portal goes to that studio, and the assigned repository takes the game over on its first push', async () => {
+    h.db.setMembership(calgary().id, 'cal', 'maintainer', 'test');
+    const cal = h.as('cal');
+    const files = [{ path: 'index.html', size: 9 }];
+    const up = await (await cal.post('/portal/api/s/ucalgary/uploads', { game: 'quest', files })).json() as { upload_id: string; ref: string; files: { url: string }[] };
+    assert.equal(up.files[0].url, `https://r2.test/ucalgary/quest/${up.ref}/index.html`);
+    staging.objects.set(`ucalgary/quest/${up.ref}/index.html`, 9);
+    assert.equal((await cal.post(`/portal/api/s/ucalgary/uploads/${up.upload_id}/finalize`)).status, 200);
+    assert.equal((await cal.post('/portal/api/s/fieldday/uploads', { game: 'quest', files })).status, 404); // not a member there
+    const quest = () => h.db.game(calgary().id, 'quest')!;
+    assert.equal(quest().repository_id, 'vault:ucalgary/quest');
+    assert.equal((await ci('/v1/previews', 'sibling', { game: 'quest', files })).status, 200); // the organization's own studio: a different game
+    assert.equal(quest().repository_id, 'vault:ucalgary/quest');
+    await publish('hosted', 'quest');
+    assert.equal(quest().repository, 'VaultLearningGames/hosted-quest');
+    assert.deepEqual(h.db.liveBuilds(quest().id).map((b) => b.ref_name).sort(), ['production', up.ref].sort()); // the upload is still there
+    assert.equal((await ci('/v1/release-requests', 'hosted', { game: 'quest' })).status, 200);
+    const page = await (await cal.get('/s/ucalgary/register')).text();
+    assert.match(page, /Vault accepts uploads for this studio from <b>github\.com\/VaultLearningGames\/hosted-quest<\/b>/);
+  });
+});
+
+describe('the url_monitors migration is v15', () => {
+  const version = (db: Db) => (db.sqlite.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+  const tables = (db: Db) => (db.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
+
+  test('a new database ends at v15 with both tables', () => {
+    const db = new Db(':memory:');
+    assert.equal(version(db), 15);
+    assert.ok(tables(db).includes('studio_repositories') && tables(db).includes('url_monitors'));
+  });
+
+  test('a database already at v14 (repository assignments, no monitors) upgrades to v15 and keeps its data', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vault-publisher-v15-'));
+    try {
+      const path = join(dir, 'publisher.db');
+      const main = new Db(path);
+      main.syncStudios([{ slug: 'ucalgary', name: 'University of Calgary', github_owner: '', github_owner_id: 'vault:ucalgary' }]);
+      const studio = main.studioBySlug('ucalgary')!;
+      main.bindRepository({ repository_id: '555', repository: 'VaultLearningGames/hosted-quest', studio_id: studio.id, created_by: 'user:boss', source: 'portal' });
+      const game = main.createGame(studio.id, 'quest', 'VaultLearningGames/hosted-quest', '555');
+      main.sqlite.exec('DROP TABLE url_monitors; PRAGMA user_version = 14;'); // as origin/main leaves it
+      main.sqlite.close();
+      for (let boot = 0; boot < 2; boot++) { // the upgrade, then an ordinary restart
+        const db = new Db(path);
+        assert.equal(version(db), 15);
+        assert.equal(db.studioByRepositoryId('555')!.slug, 'ucalgary');
+        const m = saveMonitor(db, { game_id: game.id, url: 'https://games.example.org/quest/', files_from: 'crawl', list_url: null, by: 'user:boss' });
+        assert.equal(monitorsForStudio(db, studio.id)[0].id, m.id);
+        db.sqlite.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

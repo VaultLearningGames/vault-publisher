@@ -4,6 +4,7 @@
 // runs scripts/admin-task.ts). The audit log records the workflow's GitHub actor ("github:LOGIN").
 //
 //   GET  /v1/admin/listings[?slug=a&slug=b]     drafts, published listings and review state, to verify a task
+//   POST /v1/admin/featured                     { games: [{ slug, sequence?, blurb?, image? }] }
 //   POST /v1/admin/listings/import              { source, slugs?, pages?, overrides? }
 //   POST /v1/admin/listings/migrate-images      { base, budget_seconds? }
 //   POST /v1/admin/listings/move                { slug, studio }
@@ -13,6 +14,7 @@
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody, type AppDeps } from './app.ts';
 import type { GitHubIdentity } from './auth.ts';
+import { MAX_FEATURED, normalizeFeatured, readFeatured, saveFeatured, sortFeatured } from './featured.ts';
 import { isSlug } from './paths.ts';
 import { changedFields, EMPTY_LISTING, normalize, type ListingFields } from './listings.ts';
 import { baseUrl, copySiteImages, draftProblems, importFromExport, moveListingToStudio, saveListing, type ListingRow } from './listing-ops.ts';
@@ -209,5 +211,27 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
       })),
       unchanged: plans.filter((p) => !todo.includes(p)).map((p) => p.l.slug),
     });
+  });
+
+  // The home page's Featured Games, as Vault → Game Catalog sets them: the whole list is replaced (games unticked
+  // by this are parked, so the portal can bring their blurb and image back). Every game must be a site listing.
+  app.post('/v1/admin/featured', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const dry = dryRun(body);
+    if (!Array.isArray(body.games)) fail(400, 'games must be a list of { slug, sequence?, blurb?, image? }');
+    if (body.games.length > MAX_FEATURED) fail(400, `At most ${MAX_FEATURED} games can be featured.`);
+    const games = normalizeFeatured(body.games);
+    if (games.length !== body.games.length) fail(400, 'Each game needs a valid, distinct slug.');
+    const missing = games.filter((g) => !db.listing(g.slug)).map((g) => g.slug);
+    if (missing.length) fail(400, `Not site listings: ${missing.join(', ')}.`);
+    const before = readFeatured(db);
+    const keep = new Set(games.map((g) => g.slug));
+    const unfeatured = [...before.games.filter((g) => !keep.has(g.slug)), ...before.unfeatured.filter((g) => !keep.has(g.slug))];
+    if (!dry) {
+      saveFeatured(db, { games, unfeatured }, actorOf(id));
+      db.audit(actorOf(id), 'featured.set', games.map((g) => g.slug).join(',') || '(none)', { before: before.games.map((g) => g.slug) });
+    }
+    return c.json({ dry_run: dry, featured: sortFeatured(games), before: sortFeatured(before.games) });
   });
 }

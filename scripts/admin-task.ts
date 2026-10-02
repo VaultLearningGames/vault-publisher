@@ -21,6 +21,7 @@ const TASKS: Record<string, { method: 'GET' | 'POST'; path: string }> = {
   'migrate-images': { method: 'POST', path: '/v1/admin/listings/migrate-images' },
   move: { method: 'POST', path: '/v1/admin/listings/move' },
   update: { method: 'POST', path: '/v1/admin/listings/update' },
+  featured: { method: 'POST', path: '/v1/admin/featured' },
 };
 const MAX_ROUNDS = 20;             // migrate-images continues while images remain
 const MAX_SUMMARY_CHARS = 200_000; // a job summary holds 1 MiB

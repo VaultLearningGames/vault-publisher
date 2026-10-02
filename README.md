@@ -378,6 +378,8 @@ Locally: `node scripts/admin-task.ts --portal URL --task TASK --args 'JSON' [--d
 `--dry-run=false`; `--pages FILE --overrides FILE` send an export from disk for `import`). Against
 `node scripts/dev-portal.ts` use `--portal http://localhost:4181 --token dev`.
 
+`featured` sets the home page's Featured Games (the whole list): `-f task=featured -f args='{"games":[{"slug":"project-hercules","sequence":1,"image":"images/featured/project-hercules.webp"}]}'`. A site-path image is copied to the CDN by the next `migrate-images`.
+
 ## The website
 
 `site/` is the public site (vaultlearninggames.org): Hugo, theme `vault-squarespace` (the replica of the Squarespace

@@ -418,3 +418,31 @@ describe('admin task: update', () => {
     assert.equal((await post('update', { updates: [about('wake', 'x')], publish: 'yes' })).status, 400);
   });
 });
+
+describe('admin task: featured', () => {
+  const featured = async (body: unknown, token: string | null = 'admin') => {
+    const res = await call('POST', '/v1/admin/featured', token, body);
+    return { status: res.status, json: (await res.json()) as any };
+  };
+
+  test('sets the home page’s featured games; a dry run changes nothing; unknown games are refused', async () => {
+    const games = [{ slug: 'wake', sequence: 2, blurb: 'In *Wake*…', image: 'images/featured/wake.webp' }];
+    const dry = await featured({ games, dry_run: true });
+    assert.equal(dry.status, 200);
+    assert.equal(dry.json.dry_run, true);
+    assert.deepEqual((await (await t.app.request('/v1/catalog')).json() as any).featured, []);
+
+    assert.equal((await featured({ games: [{ slug: 'nope' }] })).status, 400);
+    assert.equal((await featured({ games: 'wake' })).status, 400);
+    assert.equal((await featured({ games }, null)).status, 401);
+
+    const r = await featured({ games });
+    assert.equal(r.status, 200);
+    assert.deepEqual((await (await t.app.request('/v1/catalog')).json() as any).featured, [{ slug: 'wake', blurb: 'In *Wake*…', image: 'images/featured/wake.webp', sequence: 2 }]);
+    assert.deepEqual(audits('featured.set').map((a) => [a.actor, a.target]), [['github:octo', 'wake']]);
+
+    // Replacing the list with nothing parks the game.
+    assert.equal((await featured({ games: [] })).status, 200);
+    assert.deepEqual((await (await t.app.request('/v1/catalog')).json() as any).featured, []);
+  });
+});

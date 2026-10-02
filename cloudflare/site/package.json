@@ -1,0 +1,8 @@
+{
+  "name": "vault-site-hosting",
+  "private": true,
+  "description": "Only pins wrangler (with package-lock.json) for publishing and checking the website: see wrangler.jsonc.",
+  "devDependencies": {
+    "wrangler": "4.147.0"
+  }
+}

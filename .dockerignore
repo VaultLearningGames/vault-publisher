@@ -3,6 +3,7 @@ data
 test
 docs
 action
+cloudflare
 .github
 .git
 *.db*

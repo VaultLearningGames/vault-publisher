@@ -15,4 +15,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # Includes the website's hosting files (_headers, _redirects) and its Worker configuration: test/site-hosting.test.ts.
+      # The build itself is checked under the hosting's runtime by the deploy workflow (cloudflare/site/check.sh).
       - run: npm test
+      - run: bash -n scripts/cloudflare-site-hosts.sh scripts/cloudflare-site-rules.sh cloudflare/site/check.sh

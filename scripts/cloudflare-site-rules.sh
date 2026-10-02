@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
-# The Cloudflare zone rules that make an R2 bucket's custom domain behave like the website's old nginx
-# (docs/setup.md, "The website on R2"). Five rules, each scoped to exactly one hostname:
+# R2-ERA, kept for two things only: removing these rules from a hostname (--delete; scripts/cloudflare-site-hosts.sh
+# remove-r2 calls it), and putting them back if a cutover is rolled back. The website is on Cloudflare static hosting
+# now (docs/setup.md, "The website on Cloudflare static hosting"), which needs none of them, and a hostname attached
+# to the site's Worker must NOT have rule 3: it makes every page a redirect loop.
+#
+# The Cloudflare zone rules that make an R2 bucket's custom domain behave like the website's old nginx. Five rules,
+# each scoped to exactly one hostname:
 #
 #   1. redirect   /s/keys-to-the-vault.pdf            → 301 /files/keys-to-the-vault.pdf   (Squarespace's old address)
 #   2. redirect   /lakeland, /game-cards?offset=20    → 301 the same address with "/"       (a path with no "." and no
 #                                                       trailing "/"; the query string is kept)
 #   3. rewrite    /lakeland/                          → /lakeland/index.html                (R2 has no directory index)
 #   4. header     X-Robots-Tag: <robots>              on every response
-#   5. cache      edge and browser lifetimes follow the object's Cache-Control (src/site-sync.ts); without this
+#   5. cache      edge and browser lifetimes follow the object's Cache-Control; without this
 #                 Cloudflare raises browser lifetimes below 4 hours to 4 hours and never caches pages at the edge
 #
 # Not covered, because no rule on the Free plan can do it: the site's own 404 page for a missing address (R2 answers
-# 404 with Cloudflare's plain page). See docs/setup.md, "The 404 page".
+# 404 with Cloudflare's plain page): the reason the site left R2.
 #
 #   CLOUDFLARE_API_TOKEN=... scripts/cloudflare-site-rules.sh HOST ROBOTS            # prints what it would send
 #   CLOUDFLARE_API_TOKEN=... scripts/cloudflare-site-rules.sh HOST ROBOTS --apply    # creates or updates the five rules

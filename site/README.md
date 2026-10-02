@@ -4,7 +4,7 @@ The public site, vaultlearninggames.org (staging: vaultlearninggames-staging.org
 [`vault-squarespace`](themes/vault-squarespace/README.md), a replica of the site as it was on Squarespace, with the
 same addresses. This folder is where the site is edited; it moved here from `VaultLearningGames/vault-hugo-rebuild`
 (branch `original-squarespace-design`) on 2026-10-02. How it is built, previewed and deployed:
-[the repository README](../README.md#the-website) and [docs/setup.md](../docs/setup.md#the-website-on-r2).
+[the repository README](../README.md#the-website) and [docs/setup.md](../docs/setup.md#the-website-on-cloudflare-static-hosting).
 
 | | |
 | --- | --- |

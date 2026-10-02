@@ -3,8 +3,8 @@
 The Vault Studio Portal and the Vault website, in one repository with one deploy:
 
 - the **portal** (`src/`): studios' builds, releases and site listings, on Cloud Run;
-- the **website** (`site/`, Hugo): built from the portal's published listings and served as static files from
-  Cloudflare R2. See [The website](#the-website).
+- the **website** (`site/`, Hugo): built from the portal's published listings and served as static files by
+  Cloudflare (static hosting). See [The website](#the-website).
 
 The portal publishes web game builds to Vault Learning Games:
 
@@ -42,9 +42,12 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | `src/{releases,storage,paths,config,forms,catalog,game-checks}.ts` | Domain logic |
 | `src/studios-file.ts` | `studios.json` at startup: studios and the repositories assigned to them |
 | `src/portal/site-preview.ts` | Listing previews: runs Hugo on `site/` with the previewed game in the catalog, and returns its page |
-| `src/site-sync.ts`, `scripts/site-sync.ts` | Publishes the built site (`site/public`) to its R2 bucket |
+| `src/site-hosting.ts`, `scripts/site-hosting.ts` | The static hosting's `_headers` and `_redirects`, written into the built site (`site/public`) |
+| `cloudflare/site/` | The site's hosting: `wrangler.jsonc` (one Worker per system, files only), the pinned wrangler, `check.sh` |
+| `scripts/site-check.ts` | Checks a served copy of the site against its build: every address, redirects, 404 page, headers |
 | `site/` | The website: `hugo.toml`, `content/`, `data/`, `themes/vault-squarespace/`, `static/` ([site/README.md](site/README.md)) |
-| `scripts/cloudflare-site-rules.sh` | The Cloudflare rules a site hostname needs (directory index, redirects, robots, caching) |
+| `scripts/cloudflare-site-hosts.sh` | Admin, once per hostname: attach it to the site's Worker, detach it, remove its R2-era setup |
+| `scripts/cloudflare-site-rules.sh` | R2-era: the five zone rules a bucket's hostname needed. Kept to remove them (and for a rollback) |
 
 ### API
 
@@ -389,16 +392,20 @@ longer where the site is edited or deployed from. Details of the theme: [site/RE
 * **Game pages come from the portal**, not from files: `npm run site:catalog` saves this system's `GET /v1/catalog`
   to `site/data/catalog.json` (not in git), and `site/content/games/_content.gotmpl` turns each listing into a page.
 * **Build:** `VAULT_PORTAL=https://portal.vaultlearninggames-staging.org npm run site:build` → `site/public`
-  (catalog, `hugo`, then `site/scripts/squarespace-paths.mjs` for the `/game-cards/category|tag/…` addresses).
+  (catalog, `hugo`, `site/scripts/squarespace-paths.mjs` for the `/game-cards/category|tag/…` addresses, then
+  `scripts/site-hosting.ts` for the hosting's `_headers` and `_redirects`).
   `npm run site:dev` serves it on http://localhost:1313. Game images are on the Vault CDN; `site/` holds only the
   theme's own files (17 MB, mostly the Squarespace snapshot images) and `static/files/keys-to-the-vault.pdf`.
 * **Deploy:** the [deploy workflow](.github/workflows/deploy.yml) does it with the portal, from the same commit: build
   the site from that system's catalog (the forms post to that system's portal, through the
-  `HUGOxPARAMSxFORMSx…` overrides), deploy the portal image (which carries `site/` and Hugo for previews), then
-  `node scripts/site-sync.ts` uploads every file to the system's site bucket and deletes what the build no longer
-  has. `main` → `site-vaultlearninggames-staging`, `production` → `site-vaultlearninggames`. Cloudflare serves the
-  bucket at the site's address; zone rules add what R2 lacks (`scripts/cloudflare-site-rules.sh`,
-  [docs/setup.md](docs/setup.md#the-website-on-r2)).
+  `HUGOxPARAMSxFORMSx…` overrides), check the build under the hosting's own runtime (`cloudflare/site/check.sh`),
+  deploy the portal image (which carries `site/` and Hugo for previews), then `wrangler deploy` publishes the build
+  to the system's Worker as static files: `main` → `vault-site-staging`, `production` → `vault-site`
+  (`cloudflare/site/wrangler.jsonc`). Cloudflare serves the files itself, with the build's `404.html` for a missing
+  address; the build's `_headers` and `_redirects` (`src/site-hosting.ts`) carry the cache lifetimes, `noindex`,
+  CORS and redirects. Hostnames are attached to a Worker once, by an admin
+  ([docs/setup.md](docs/setup.md#the-website-on-cloudflare-static-hosting)).
+* **Check a build locally:** `npm run site:build`, `npm ci --prefix cloudflare/site` (once), `npm run site:check`.
 * **When listings change** (published, edited, taken off the site, featured) the site must be rebuilt, though no
   code changed: **Actions → Deploy (portal and site) → Run workflow**, choose the system and tick *Rebuild the site
   only*, or `gh workflow run deploy.yml -f environment=staging -f site_only=true`. It builds and publishes the site

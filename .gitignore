@@ -9,4 +9,6 @@ site/data/catalog.json
 site/public/
 site/resources/
 site/.hugo_build.lock
+# wrangler's local state (cloudflare/site/check.sh, wrangler dev).
+.wrangler/
 .DS_Store

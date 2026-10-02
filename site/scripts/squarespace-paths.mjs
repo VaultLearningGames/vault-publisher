@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // After `hugo`: move the /game-cards/category|tag pages (built under public/game-cards/_filters/) to the folders that
 // serve their Squarespace URLs, e.g. /game-cards/category/Dev%3A+Field+Day+Lab -> public/game-cards/category/Dev:+Field+Day+Lab/.
-// nginx decodes %3A and %2F before looking up files and keeps "+", so the folder names use ":" "/" and "+".
+// The folder names use ":" "/" and "+" (what the address means once %3A and %2F are decoded, "+" kept); the hosting's
+// _redirects (src/site-hosting.ts) serves each at the address the site links to.
 import { readdir, readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 

@@ -2,13 +2,13 @@ name: Deploy (portal and site)
 
 # Two separate systems run this same code, each with its own database, R2 buckets, secrets and GitHub OAuth app:
 #   main        → staging     vault-publisher-staging  https://portal.vaultlearninggames-staging.org
-#                             site bucket              https://vaultlearninggames-staging.org
+#                             vault-site-staging       https://vaultlearninggames-staging.org
 #   production  → production  vault-publisher          https://portal.vaultlearninggames.org
-#                             site bucket              https://vaultlearninggames.org
+#                             vault-site               https://vaultlearninggames.org
 # One run does both halves, from one commit: it builds the website (site/, Hugo) from that system's published
 # catalog, deploys the portal image (which carries site/ and Hugo, for listing previews) to Cloud Run, and publishes
-# the built website to the system's site bucket on R2. So a preview always renders with the templates of the site
-# that is live.
+# the built website to the system's site Worker on Cloudflare (static hosting: cloudflare/site/wrangler.jsonc). So a
+# preview always renders with the templates of the site that is live.
 # Each GitHub environment ("staging", "production") holds that system's variables; Secret Manager secrets are
 # named after its service. One-time setup: docs/setup.md
 #
@@ -52,18 +52,21 @@ jobs:
         TARGET: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
         SERVICE: ${{ vars.SERVICE }}
         PUBLISHER_SERVICE_ACCOUNT: ${{ vars.PUBLISHER_SERVICE_ACCOUNT }}
-        SITE_BUCKET: ${{ vars.SITE_BUCKET }}
+        SITE_WORKER: ${{ vars.SITE_WORKER }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         SITE_ONLY: ${{ inputs.site_only }}
-        VALUES: ${{ vars.BUILDS_BUCKET }} ${{ vars.BUILDS_PUBLIC_URL }} ${{ vars.CDN_BUCKET }} ${{ vars.CDN_PUBLIC_URL }} ${{ vars.PORTAL_URL }} ${{ vars.LITESTREAM_BUCKET }} ${{ vars.SITE_URL }} ${{ vars.SITE_BUCKET }}
+        VALUES: ${{ vars.BUILDS_BUCKET }} ${{ vars.BUILDS_PUBLIC_URL }} ${{ vars.CDN_BUCKET }} ${{ vars.CDN_PUBLIC_URL }} ${{ vars.PORTAL_URL }} ${{ vars.LITESTREAM_BUCKET }} ${{ vars.SITE_URL }}
       run: |
         set -eu
         case "$TARGET:$SERVICE" in production:vault-publisher|staging:vault-publisher-staging) ;; *) echo "::error::SERVICE is '$SERVICE' in the $TARGET environment"; exit 1 ;; esac
         case "$PUBLISHER_SERVICE_ACCOUNT" in "$SERVICE"@*) ;; *) echo "::error::PUBLISHER_SERVICE_ACCOUNT '$PUBLISHER_SERVICE_ACCOUNT' isn't $SERVICE's"; exit 1 ;; esac
-        [ "$(echo $VALUES | wc -w)" -eq "$([ -n "$SITE_BUCKET" ] && echo 8 || echo 7)" ] || { echo "::error::a bucket, URL, LITESTREAM_BUCKET or SITE_URL variable is missing"; exit 1; }
-        # A system without SITE_BUCKET has no site bucket yet (production, until its site moves to R2): the site
-        # is built, as a check, and not published.
-        [ -n "$SITE_BUCKET" ] || echo "::warning::SITE_BUCKET is not set in the $TARGET environment: the site will be built but not published"
-        if [ "$SITE_ONLY" = true ] && [ -z "$SITE_BUCKET" ]; then echo "::error::nothing to do: site only, and no SITE_BUCKET"; exit 1; fi
+        [ "$(echo $VALUES | wc -w)" -eq 7 ] || { echo "::error::a bucket, URL, LITESTREAM_BUCKET or SITE_URL variable is missing"; exit 1; }
+        # SITE_WORKER is the Worker the site is published to (cloudflare/site/wrangler.jsonc names one per system).
+        # A system without it isn't set up for publishing yet: the site is built and checked, and not published.
+        case "$TARGET:$SITE_WORKER" in staging:vault-site-staging|production:vault-site|*:) ;; *) echo "::error::SITE_WORKER is '$SITE_WORKER' in the $TARGET environment"; exit 1 ;; esac
+        [ -n "$SITE_WORKER" ] || echo "::warning::SITE_WORKER is not set in the $TARGET environment: the site will be built but not published"
+        if [ -n "$SITE_WORKER" ] && [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; exit 1; fi
+        if [ "$SITE_ONLY" = true ] && [ -z "$SITE_WORKER" ]; then echo "::error::nothing to do: site only, and no SITE_WORKER"; exit 1; fi
         for v in $VALUES; do
           case "$TARGET:$v" in staging:*staging*|production:*) ;; *) echo "::error::$v isn't a staging value"; exit 1 ;; esac
           case "$TARGET:$v" in production:*staging*) echo "::error::$v is a staging value"; exit 1 ;; esac
@@ -95,8 +98,12 @@ jobs:
     # no catalog in the repository to fall back on). The Join Vault and Submit a Game forms post to this system's
     # portal: Hugo reads config overrides from HUGOx-delimited variables (params.forms.* in site/hugo.toml; the x
     # delimiter keeps the underscore in submit_game). The greps fail the build if an override didn't take.
+    # The build ends by writing the hosting's _headers and _redirects (src/site-hosting.ts). Only production's real
+    # address may be indexed (SITE_INDEX_HOST); staging, and any other hostname either build is served at, says
+    # noindex.
     - name: Build the site
       env:
+        TARGET: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
         VAULT_PORTAL: ${{ vars.PORTAL_URL }}
         SITE_URL: ${{ vars.SITE_URL }}
         GOOGLE_ANALYTICS_ID: ${{ vars.GOOGLE_ANALYTICS_ID }}
@@ -106,8 +113,16 @@ jobs:
         export HUGOxPARAMSxANALYTICSxGOOGLE="${GOOGLE_ANALYTICS_ID:-}"
         export HUGOxPARAMSxFORMSxNEWSLETTER="${VAULT_PORTAL%/}/v1/forms/newsletter"
         export HUGOxPARAMSxFORMSxSUBMIT_GAME="${VAULT_PORTAL%/}/v1/forms/submit-game"
+        site_host="${SITE_URL#*://}"; site_host="${site_host%%/*}"
+        if [ "$TARGET" = production ]; then export SITE_INDEX_HOST="$site_host"; else export SITE_INDEX_HOST=; fi
         rm -f site/data/catalog.json
         npm run site:build
+        # ("! grep" never fails a step: bash exempts a negated command from -e. Hence the ifs.)
+        if [ "$TARGET" = production ]; then grep -qxF "https://$site_host/*" site/public/_headers
+        elif grep -q '^https://' site/public/_headers; then echo "::error::a $TARGET build that may be indexed"; exit 1; fi
+        grep -qxF '  X-Robots-Tag: noindex' site/public/_headers
+        grep -qxF '/s/keys-to-the-vault.pdf /files/keys-to-the-vault.pdf 301' site/public/_redirects
+        test -f site/public/files/keys-to-the-vault.pdf
         grep -q "action=\"$HUGOxPARAMSxFORMSxSUBMIT_GAME\"" site/public/submit-a-game/index.html
         grep -q "action=\"$HUGOxPARAMSxFORMSxNEWSLETTER\"" site/public/index.html
         grep -q "<link rel=\"canonical\" href=\"${SITE_URL%/}\">" site/public/index.html
@@ -116,16 +131,27 @@ jobs:
           grep -q "gtag/js?id=${GOOGLE_ANALYTICS_ID}\"" site/public/index.html
           grep -q "gtag/js?id=${GOOGLE_ANALYTICS_ID}\"" site/public/wake/index.html
         else
-          ! grep -rq "googletagmanager" site/public
+          if grep -rq "googletagmanager" site/public; then echo "::error::analytics in a build that has no GOOGLE_ANALYTICS_ID"; exit 1; fi
         fi
         # The 404 page is shown at any address, so nothing in it may be a relative address; and it is never indexed.
         grep -q '<meta name="robots" content="noindex">' site/public/404.html
         grep -q 'src="/sq/img/site/vault-tv-wide-48947b.jpg"' site/public/404.html
         test -f site/public/sq/img/site/vault-tv-wide-48947b.jpg
-        ! grep -oE '(href|src|action)="[^"]*"' site/public/404.html | grep -vE '="(/|https://|#)'
+        if grep -oE '(href|src|action)="[^"]*"' site/public/404.html | grep -vE '="(/|https://|#)'; then echo "::error::a relative address in 404.html"; exit 1; fi
         echo "$(find site/public -type f | wc -l) files, $(du -sh site/public | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
+    # The build under the real hosting runtime on this runner (wrangler dev; no account, nothing deployed): every
+    # file and sitemap address answers 200 at once with the build's bytes and its headers, "/page" is a 301 to
+    # "/page/", a missing address is a 404 with the site's page (scripts/site-check.ts). wrangler is the version in
+    # cloudflare/site/package-lock.json.
+    - name: Check the site as the hosting serves it
+      run: |
+        set -euo pipefail
+        npm ci --prefix cloudflare/site
+        cloudflare/site/check.sh | tail -40
+
     - name: Authenticate to Google Cloud
+      if: ${{ !inputs.site_only }}
       uses: google-github-actions/auth@v3
       with:
         workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -182,23 +208,22 @@ jobs:
       if: ${{ !inputs.site_only }}
       run: echo "Deployed to ${{ steps.deploy.outputs.url }}"
 
-    # The site goes out after the portal, so the two change within the same minute. The R2 key can write this
-    # system's site bucket and nothing else; it lives in Secret Manager like the service's other R2 keys, readable
-    # by the deploy account.
-    - name: Read the site bucket's R2 key
-      id: r2
-      if: ${{ vars.SITE_BUCKET != '' }}
-      uses: google-github-actions/get-secretmanager-secrets@v3
-      with:
-        secrets: |-
-          access_key_id:${{ vars.GCP_PROJECT_ID }}/${{ vars.SERVICE }}-r2-site-access-key-id
-          secret_access_key:${{ vars.GCP_PROJECT_ID }}/${{ vars.SERVICE }}-r2-site-secret-access-key
-
-    - name: Publish the site to R2
-      if: ${{ vars.SITE_BUCKET != '' }}
+    # The site goes out after the portal, so the two change within the same minute. A deploy replaces the Worker's
+    # files in one step (a visitor gets the old site or the new one, never a mix) and leaves its hostnames alone:
+    # those are attached once, by an admin (scripts/cloudflare-site-hosts.sh). The token is this environment's
+    # secret and can only edit Workers: no DNS, no rules, no R2 (docs/setup.md, "The deploy's Cloudflare token").
+    - name: Publish the site
+      if: ${{ vars.SITE_WORKER != '' }}
       env:
-        R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
-        SITE_BUCKET: ${{ vars.SITE_BUCKET }}
-        R2_SITE_ACCESS_KEY_ID: ${{ steps.r2.outputs.access_key_id }}
-        R2_SITE_SECRET_ACCESS_KEY: ${{ steps.r2.outputs.secret_access_key }}
-      run: node scripts/site-sync.ts site/public | tee -a "$GITHUB_STEP_SUMMARY"
+        TARGET: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
+        CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        SITE_WORKER: ${{ vars.SITE_WORKER }}
+        WRANGLER_SEND_METRICS: 'false'
+      run: |
+        set -euo pipefail
+        [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::the $TARGET environment has no CLOUDFLARE_API_TOKEN secret"; exit 1; }
+        log="$RUNNER_TEMP/site-deploy.log"
+        (cd cloudflare/site && ./node_modules/.bin/wrangler deploy --env "$TARGET" --message "${GITHUB_SHA::12}, run $GITHUB_RUN_ID") | tee "$log"
+        grep -q "Uploaded $SITE_WORKER " "$log" || { echo "::error::wrangler did not publish to $SITE_WORKER"; exit 1; }
+        { echo "Site published to the Worker \`$SITE_WORKER\`:"; grep -E "Uploaded $SITE_WORKER |Version ID" "$log" | sed 's/^/- /'; } >> "$GITHUB_STEP_SUMMARY"

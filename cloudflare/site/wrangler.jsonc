@@ -1,0 +1,31 @@
+// The website's hosting: the built site (site/public, from `npm run site:build`) published as Cloudflare Workers
+// Static Assets. One Worker per system, with no script: Cloudflare serves the files itself, answers a missing
+// address with the build's 404.html and status 404, and reads the build's _headers and _redirects
+// (src/site-hosting.ts). Requests for static assets are free and not counted.
+//
+//   publish (the deploy workflow does this):  wrangler deploy --env staging | --env production
+//   try a build on this machine:              cloudflare/site/check.sh
+//
+// No hostname is named here on purpose: a deploy only replaces the files. Hostnames are attached to a Worker once,
+// by an admin (scripts/cloudflare-site-hosts.sh; docs/setup.md, "The website on Cloudflare static hosting"), so the
+// deploy's token needs no access to DNS. A deploy leaves attached hostnames as they are.
+{
+  // Without --env: only `wrangler dev` (check.sh). The two systems are the environments below.
+  "name": "vault-site-local",
+  "compatibility_date": "2026-09-01",
+  // No *.workers.dev address and no per-version preview addresses: the site is reachable at its hostnames only.
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "../../site/public",
+    // The nearest 404.html up the tree (the build has one, at the root), with status 404.
+    "not_found_handling": "404-page",
+    // /wake/ is wake/index.html; /wake and /wake/index.html redirect to /wake/. (The build's _redirects answers
+    // /wake first, with a 301.)
+    "html_handling": "auto-trailing-slash"
+  },
+  "env": {
+    "staging": { "name": "vault-site-staging" },
+    "production": { "name": "vault-site" }
+  }
+}

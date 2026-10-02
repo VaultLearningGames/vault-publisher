@@ -23,6 +23,11 @@
 {{- /* Base 9 Sans, the heading font, is an Adobe Fonts typeface: it loads from Field Day's own Adobe Fonts web project
        (params.fonts.adobe_kit). Until that's set, Share Tech Mono (self-hosted) stands in; html.no-base9 selects it. */}}
 {{- with site.Params.fonts.adobe_kit }}<link rel="stylesheet" href="https://use.typekit.net/{{ . }}.css">{{ end }}
+{{- /* Google Analytics, as on the Squarespace site; only where the build is given an id (params.analytics.google). */}}
+{{- with site.Params.analytics.google }}
+<script async src="https://www.googletagmanager.com/gtag/js?id={{ . }}"></script>
+<script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', {{ . }});</script>
+{{- end }}
 <link rel="preload" href="{{ "sq/fonts/montserrat-300-latin.woff2" | relURL }}" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="{{ "sq/css/fonts.css" | relURL }}">
 <link rel="stylesheet" href="{{ "sq/css/vault-sq.css" | relURL }}{{ partialCached "sq/asset-v.html" "sq/css/vault-sq.css" "sq/css/vault-sq.css" }}">

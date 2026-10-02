@@ -99,9 +99,11 @@ jobs:
       env:
         VAULT_PORTAL: ${{ vars.PORTAL_URL }}
         SITE_URL: ${{ vars.SITE_URL }}
+        GOOGLE_ANALYTICS_ID: ${{ vars.GOOGLE_ANALYTICS_ID }}
       run: |
         set -eu
         export HUGO_BASEURL="${SITE_URL%/}/"
+        export HUGOxPARAMSxANALYTICSxGOOGLE="${GOOGLE_ANALYTICS_ID:-}"
         export HUGOxPARAMSxFORMSxNEWSLETTER="${VAULT_PORTAL%/}/v1/forms/newsletter"
         export HUGOxPARAMSxFORMSxSUBMIT_GAME="${VAULT_PORTAL%/}/v1/forms/submit-game"
         rm -f site/data/catalog.json
@@ -109,6 +111,13 @@ jobs:
         grep -q "action=\"$HUGOxPARAMSxFORMSxSUBMIT_GAME\"" site/public/submit-a-game/index.html
         grep -q "action=\"$HUGOxPARAMSxFORMSxNEWSLETTER\"" site/public/index.html
         grep -q "<link rel=\"canonical\" href=\"${SITE_URL%/}\">" site/public/index.html
+        # Analytics only where the environment has an id: then on the home page and on game pages.
+        if [ -n "${GOOGLE_ANALYTICS_ID:-}" ]; then
+          grep -q "gtag/js?id=${GOOGLE_ANALYTICS_ID}\"" site/public/index.html
+          grep -q "gtag/js?id=${GOOGLE_ANALYTICS_ID}\"" site/public/wake/index.html
+        else
+          ! grep -rq "googletagmanager" site/public
+        fi
         echo "$(find site/public -type f | wc -l) files, $(du -sh site/public | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
     - name: Authenticate to Google Cloud

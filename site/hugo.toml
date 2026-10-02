@@ -17,6 +17,12 @@ disableKinds = ['taxonomy', 'term', 'rss']
     # Empty: Share Tech Mono (self-hosted, OFL) stands in for it.
     adobe_kit = "zxo3yez"
 
+  [params.analytics]
+    # Google Analytics 4 measurement id ("G-XXXXXXXXXX"). Left empty here so local builds, staging and listing
+    # previews send nothing; the deploy workflow sets it from the environment's GOOGLE_ANALYTICS_ID variable through
+    # HUGOxPARAMSxANALYTICSxGOOGLE (production: the property the Squarespace site used).
+    google = ""
+
   [params.forms]
     # Where the Join Vault sign-up and the Submit a Game form post: the Vault Studio Portal's /v1/forms/newsletter and
     # /v1/forms/submit-game. Left empty here; the deploy workflow sets them from the environment's VAULT_PORTAL through

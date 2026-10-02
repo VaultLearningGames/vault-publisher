@@ -17,7 +17,6 @@ import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '..
 import type { PortalDeps } from './routes.ts';
 import { imageField } from './listing-assets.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
-import { migrationCard } from './image-migration.ts';
 
 export interface ListingHelpers {
   db: Db;
@@ -271,8 +270,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
       ${queue.length ? html`<h2>Waiting for Vault (${queue.length})</h2><div class="grid">${queue}</div>` : html`<div class="card"><p class="muted">No site changes are waiting for review.</p></div>`}
       <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th>Game</th><th>Studio</th><th>Site</th><th>Featured</th><th>Hosted by</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
         <tbody>${rows.length ? rows : html`<tr><td colspan="${COLS}" class="muted">No games yet.</td></tr>`}</tbody></table></div>
-      ${featuring ? '' : html`<p class="small muted">Only Vault release managers can change the featured games.</p>`}
-      ${h.isVaultAdmin(u) ? migrationCard(h) : ''}`;
+      ${featuring ? '' : html`<p class="small muted">Only Vault release managers can change the featured games.</p>`}`;
     return h.page(c, 'Game Catalog', body, { active: 'vault-listings' });
   });
 

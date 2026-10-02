@@ -1,6 +1,7 @@
 import { beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import type { MigrationResult } from '../src/image-migration.ts';
 import { portalHarness } from './portal-harness.ts';
 
 const L = '/portal/api/s/fieldday/listings';
@@ -75,11 +76,13 @@ describe('copying site images to the Vault CDN', () => {
     assert.deepEqual(cat.featured[0], { slug: 'wake', blurb: 'Dive!', image: cdn('featured', WEBP, 'webp'), sequence: 1 });
     assert.equal(cat.games[0].hero_image, cdn('hero', PNG, 'png'));
 
-    // The summary on the page, and one audit entry with counts.
-    const page = await (await boss.get('/vault/listings')).text();
-    assert.match(page, /<b>7<\/b> migrated \(4 new files\), <b>0<\/b> already on the CDN, <b>3<\/b> failed, <b>2<\/b> external links left alone/);
-    assert.match(page, /HTTP 404 from https:\/\/site\.test\/games\/wake\/img\/missing\.png/);
-    assert.match(page, /not a PNG, JPEG or WebP image/);
+    // The run's result is kept (the portal has no page for it), and there is one audit entry with counts.
+    const last = JSON.parse(t.db.setting('listing_image_migration')!) as MigrationResult;
+    assert.deepEqual([last.migrated.length, last.objects_written, last.already, last.failed.length, last.external.length], [7, 4, 0, 3, 2]);
+    assert.deepEqual([last.base, last.by], ['https://site.test', 'user:boss']);
+    const reasons = last.failed.map((i) => i.reason).join('\n');
+    assert.match(reasons, /HTTP 404 from https:\/\/site\.test\/games\/wake\/img\/missing\.png/);
+    assert.match(reasons, /not a PNG, JPEG or WebP image/);
     const audits = t.db.auditFor(['listing.images.migrate'], 10);
     assert.equal(audits.length, 1);
 
@@ -103,12 +106,17 @@ describe('copying site images to the Vault CDN', () => {
     assert.equal(t.db.listing('wake')!.published!.hero_image, `https://prod.test/${key}`);
   });
 
-  test('Vault admins only; needs the CDN storage; the site address defaults to SITE_URL', async () => {
+  test('Vault admins only; needs the site address and the CDN storage; the Game Catalog page has no form for it', async () => {
     assert.equal((await t.as('rm', 'release_manager').post(M, { base: 'https://site.test' })).status, 403);
     assert.equal((await t.as('ada', 'none', 'admin').post(M, { base: 'https://site.test' })).status, 403);
     assert.equal((await t.as('boss', 'admin').post(M, { base: 'ftp://site.test' })).status, 400);
-    assert.match(await (await t.as('boss', 'admin').get('/vault/listings')).text(), /name="base" value="https:\/\/vaultlearninggames\.org"/);
-    assert.doesNotMatch(await (await t.as('rm', 'release_manager').get('/vault/listings')).text(), /Copy site images/);
+    assert.equal((await t.as('boss', 'admin').post(M, {})).status, 400, 'the site address is required');
+    assert.equal(t.db.setting('listing_image_migration'), undefined, 'nothing ran');
+    for (const who of [t.as('boss', 'admin'), t.as('rm', 'release_manager')]) {
+      const res = await who.get('/vault/listings');
+      assert.equal(res.status, 200);
+      assert.doesNotMatch(await res.text(), /Copy site images|migrate-images|name="base"/);
+    }
     t.rebuild({ production: null });
     assert.equal((await t.as('boss', 'admin').post(M, { base: 'https://site.test' })).status, 503);
     assert.equal(t.db.listing('wake')!.published!.hero_image, 'games/wake/img/hero.png');

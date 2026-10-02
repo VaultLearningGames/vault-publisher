@@ -15,7 +15,7 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | Runtime | Node 24 (native TypeScript, ESM) |
 | Framework | [Hono](https://hono.dev) (`@hono/node-server`) — one app serves the machine API, portal UI and site forms |
 | Database | `node:sqlite`, plain SQL + numbered migrations (`src/db.ts`); no ORM (Postgres-portable) |
-| Storage | Cloudflare R2 via AWS SDK v3 (`src/storage.ts`); uploads are presigned PUTs — the API never proxies bytes |
+| Storage | Cloudflare R2 via AWS SDK v3 (`src/storage.ts`); build uploads are presigned PUTs (from CI and from the browser) — the API never proxies them. URL monitors stream each file from the studio's site into R2 |
 | Auth | `jose`: GitHub Actions OIDC tokens (CI), Google ID tokens (scheduled tasks); portal login is interactive GitHub OAuth → HMAC-signed `vault_session` cookie (`src/portal/session.ts`) |
 | Deps | `hono`, `@hono/node-server`, `@aws-sdk/client-s3` + `s3-request-presigner`, `jose` — nothing else |
 
@@ -29,7 +29,9 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | `src/auth.ts` | OIDC/Google token verification (`jose`) |
 | `src/db.ts` | Schema, migrations, all SQL access |
 | `src/portal/routes.ts` | Portal HTML pages + `/portal/api/*` routes |
-| `src/portal/{listings,listing-makers,people,featured,listing-preview,image-migration,availability}.ts` | Portal features by domain |
+| `src/portal/{listings,listing-makers,people,featured,listing-preview,image-migration,availability,uploads}.ts` | Portal features by domain (`uploads.ts`: the Upload builds page, zip uploads, URL monitors) |
+| `src/url-monitor.ts`, `src/net-guard.ts` | URL monitors: find a hosted game's files, copy what changed; fetch only public addresses |
+| `public/setup.js` | Upload builds page: workflow snippets, and reading and uploading a zip in the browser |
 | `src/{releases,storage,paths,config,forms,catalog,game-checks}.ts` | Domain logic |
 | `src/studios-file.ts` | `studios.json` at startup: studios and the repositories assigned to them |
 
@@ -42,18 +44,22 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | GitHub OIDC (studio's CI) | `POST /v1/previews` | Start a build upload → presigned PUTs per file |
 | | `POST /v1/previews/:uploadId/finalize` | Verify files landed, prune stale, record build |
 | | `POST /v1/previews/delete` | Remove a branch preview |
+| | `POST /v1/release-requests` | From the game's own workflow: ask Vault to publish the build this commit uploaded |
 | | `POST /v1/admin/previews` + `/finalize` | Same, for Vault uploads into any studio's game |
 | | `POST /v1/admin/releases/approve` · `promote` | Approve staging build as release; make current / roll back |
 | | `POST /v1/admin/game-checks` | Post availability-check results |
 | | `GET /v1/admin/listings` · `POST /v1/admin/listings/{import,migrate-images,move,update}` | [Admin tasks](#admin-tasks): the Vault-admin listing operations, for workflows |
 | | `GET /v1/releases/:studio/:game[/check]` | Read-only: a game's releases, or pre-flight check of a release run |
 | | `GET /v1/catalog` | Public: site listings, studios, featured games |
-| Google ID token | `POST /v1/tasks/cleanup` | Nightly: expire stale previews (Cloud Scheduler) |
+| Google ID token | `POST /v1/tasks/cleanup` | Nightly: expire stale previews, then check URL monitors for up to 100 s (Cloud Scheduler) |
+| | `POST /v1/tasks/monitors` | Check every URL monitor (up to 12 min) |
 | Public (site) | `POST /v1/forms/:name` | Website forms → Google Sheets |
 | Session cookie | `GET /`, `/s/:studio`, `/s/:studio/g/:game`, `/vault/…` | Studio and Vault admin UI (HTML) |
 | | `POST /portal/api/s/:studio/listings[/:slug][…]` | Listing CRUD, link, publish, unpublish, move studio, preview, makers |
 | | `POST /portal/api/s/:studio/g/:game/…` | `release`, `promote`, `withdraw`, `delete`, `freeze`, `request` |
 | | `POST /portal/api/requests/:id/…` | Release requests: `approve`, `reject`, `withdraw` |
+| | `POST /portal/api/s/:studio/uploads` + `/:id/finalize` | A zip uploaded in the portal: presigned PUTs per file, then record the test build |
+| | `POST /portal/api/s/:studio/monitors[/:id/check\|delete]` | URL monitors: register (and copy now), check now, stop |
 | | `POST /portal/api/s/:studio/members[?]` | Studio members add/remove, website URL |
 | | `POST /portal/api/vault/…` | Vault-admin: studios CRUD, a studio's `repositories` (add/remove), users/roles, listings import, featured |
 | | `GET /v1/listing-previews/:token` | Unsaved listing previews |
@@ -63,41 +69,41 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 Vault also runs a separate staging copy of all of this (site, portal, test builds, releases) on
 `vaultlearninggames-staging.org` for trying new versions. Studios never need it. See [docs/setup.md](docs/setup.md).
 
-## Set up a game
+## Upload builds
 
-1. Ask Vault to register your GitHub organization as a studio. (A game whose repository lives in someone else's
-   organization, such as the `hosted-*` repositories in VaultLearningGames, is registered by repository instead: Vault
-   assigns that one repository to your studio.)
-2. Make `VAULT_PUBLISHER_URL` = `https://portal.vaultlearninggames.org` available to the repo (organization or
-   repository variable).
-3. Add one workflow. Unity:
+Ask Vault to register your studio (your GitHub organization or, for a game whose repository lives in someone
+else's organization, that one repository), then get a web build (a folder with `index.html` at the top) onto Vault's test
+server by any of four paths. The portal's **Upload builds** page has the same steps with your studio's names filled
+in. Whatever the path, the build shows on the game's page as a **test build**, and reaches classrooms only when a
+maintainer asks for a release and Vault approves it.
+
+### 1. One GitHub Action step: every push becomes a test build
 
 ```yaml
 # .github/workflows/vault.yml
 name: Vault
-on: { push: {}, delete: {}, workflow_dispatch: {} }
+on: { push: {}, workflow_dispatch: {} }
 permissions: { contents: read, id-token: write }
 jobs:
-  build:
-    if: github.event_name != 'delete'
-    uses: VaultLearningGames/vault-publisher/.github/workflows/unity-build.yml@v1
-    secrets:                 # pass explicitly; `secrets: inherit` doesn't cross organizations
-      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
-  preview:
-    needs: build
-    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
-    with: { game: my-game, artifact: "${{ needs.build.outputs.artifact }}" }
-  remove-preview:
-    if: github.event_name == 'delete'
-    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
-    with: { game: my-game }
+  vault:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Your own build goes here. It must leave the web build in ./dist, with index.html at the top.
+      # - run: npm ci && npm run build
+
+      - uses: VaultLearningGames/vault-publisher/action@v1    # uploads this push as a test build
+        with:
+          game: my-game
+          path: dist
+          publisher-url: https://portal.vaultlearninggames.org
 ```
 
-Build committed to the repo: one job, `publish-preview.yml@v1` with `{ game: my-game, path: WebGL }`.
-Any other build: after it, `uses: VaultLearningGames/vault-publisher/action@v1` with `game`, `path` and
-`publisher-url: ${{ vars.VAULT_PUBLISHER_URL }}`.
+Every branch and tag goes to `https://builds.vaultlearninggames.org/STUDIO/my-game/BRANCH/` (`/` in a branch name
+becomes `_`). There are no secrets to add: the step proves which repository it runs in with GitHub's OIDC token, and
+the repository (or its organization) must be registered with Vault for the studio. The first repository to upload a game
+name owns it. Branch builds idle for 90 days are removed; tags are kept. **Publish** from the portal: on the game's
+page choose **Request release** on a test build; Vault reviews and approves it.
 
 **Which studio a build goes to.** The publisher reads the GitHub Actions OIDC token: a repository that Vault has
 assigned to a studio (matched by GitHub's numeric repository id) publishes for that studio; any other repository
@@ -107,15 +113,89 @@ several studios' games: VaultLearningGames' own repositories publish as `vault`,
 studio, so an assigned repository and its organization's studio can't touch each other's games, even with the same
 game name.
 
-The first repository to publish a game name owns it. Branch names with `/` become `_`. Deleting a branch removes its
-preview; previews idle for 90 days are removed.
+Options:
+
+* **The web build is committed to the repository:** drop the build comment and set `path` to its folder.
+* **Unity:** let Vault's shared workflow build it. Add a `build` job that
+  `uses: VaultLearningGames/vault-publisher/.github/workflows/unity-build.yml@v1` (pass the `UNITY_EMAIL`,
+  `UNITY_PASSWORD`, `UNITY_SERIAL` secrets explicitly; `secrets: inherit` doesn't cross organizations), then in the
+  `vault` job (`needs: build`) replace checkout with `actions/download-artifact@v8`
+  (`name: ${{ needs.build.outputs.artifact }}`, `path: build`) and upload `path: build`. The portal page writes this
+  file for you. `publish-preview.yml@v1` and `unity-webgl.yml@v1` wrap the same steps as reusable workflows.
+* **Remove a branch's test build when the branch is deleted:** add `delete: {}` to `on:`, put
+  `if: github.event_name != 'delete'` on the job above, and add a second job with
+  `if: github.event_name == 'delete'`, `permissions: { id-token: write }` and the action with `mode: delete`,
+  `ref: ${{ github.event.ref }}`.
+
+### 2. A second step: file the publish request automatically
+
+Add this after the upload step, and a push to your `production` branch, a published GitHub release, or both, asks
+Vault to publish the build that step just uploaded. Vault still reviews every request.
+
+```yaml
+      - uses: VaultLearningGames/vault-publisher/action@v1
+        if: github.ref == 'refs/heads/production' || github.event_name == 'release'
+        with:
+          mode: request-release
+          game: my-game
+          publisher-url: https://portal.vaultlearninggames.org
+```
+
+For GitHub releases also change the top of the file, so the release run and its tag's push run take turns:
+
+```yaml
+on:
+  push: {}
+  release: { types: [published] }
+  workflow_dispatch: {}
+concurrency: { group: "vault-${{ github.ref }}", cancel-in-progress: false }
+```
+
+The request is named after the tag (`v1.2`), or `BRANCH-SHORTSHA` (`production-4f7275b`) for a branch; pass
+`version:` to name it yourself (a version name can be used once per game) and `notes:` for the reviewer. It is filed
+only for the test build of the same commit, running it again changes nothing, and a newer push to the branch
+replaces a request Vault hasn't decided yet. It appears on the game's page and in Vault's queue as *Waiting for
+Vault*.
+
+### 3. No GitHub: upload a .zip
+
+On **Upload builds**, studio maintainers and admins (and Vault staff, for any studio) choose a zip of the web build:
+`index.html` at the top, or everything inside one top-level folder. It becomes a test build named
+`upload-YYYYMMDD-HHMM` (UTC), released like any other. Limits: 1 GB zipped, 2 GB unpacked, 5,000 files.
+
+The zip is never sent to Vault as a zip. The browser reads its file list, refuses the whole zip if any path leaves
+the folder (`..`, absolute paths, drive letters), if it holds a link (symlink), is password-protected, is Zip64 or
+names a file Vault reserves (`_releases/`, `_vault-assets/`, `current.json`); it then unpacks one file at a time
+(stopping if a file is bigger than the zip declared, and checking its CRC) and PUTs each to the builds bucket with a
+presigned URL: the same start → upload → finalize calls CI uses, so nothing is unpacked on the server and nothing
+passes through Cloud Run. The portal checks every path and size again before issuing the URLs, and finalize records
+the build only when every file has arrived at its declared size. The builds bucket needs a CORS rule for the portal
+([docs/setup.md](docs/setup.md#1-cloudflare-r2-vault-account)). A game first created by an upload has no repository;
+a repository of the studio's that later publishes the same name takes it over.
+
+### 4. No GitHub: monitor a web address
+
+A studio that already hosts the game registers its public address on **Upload builds**. Vault copies it into the
+test build `web-copy` at once, checks it daily, and copies it again when it changes; **Check now** does it on
+demand. The studio says how to find the files:
+
+* **a file list** it publishes on the same site: text with one relative path per line (`#` comments allowed), or
+  JSON (`["index.html", …]`, `[{ "path": … }]` or `{ "files": [...] }`). Make one with
+  `find . -type f | sed 's|^\./||' > files.txt`;
+* or **following links** from `index.html`: Vault reads it and the HTML and CSS files it leads to, and copies every
+  file they mention. Files a game loads from its code (Unity, Godot and most engine builds) can't be found this way,
+  so those games need a file list.
+
+Limits: 2,000 files, 1 GB, public `http(s)` addresses only, every file on the same site inside the game's folder.
+How it detects changes, what it refuses and what is left for later: [docs/url-monitor.md](docs/url-monitor.md).
 
 ## Release
 
-Push a version tag, test it on staging, then **Request release** in the portal. Vault copies that exact build to
+From the portal: test a build on staging, then **Request release** on it. Vault copies that exact build to
 production (kept at `STUDIO/GAME/_releases/VERSION/`) and makes it current: copied into `STUDIO/GAME/` itself, so
 bookmarks always get the current release. Studio maintainers can then switch between approved releases or roll back
-themselves, unless Vault has frozen the game (e.g. during a study) or withdrawn that release.
+themselves, unless Vault has frozen the game (e.g. during a study) or withdrawn that release. From GitHub, a version
+tag is the best thing to release, because a branch can change after it was tested.
 
 ## Games on the site and on the CDN
 

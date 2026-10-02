@@ -39,6 +39,22 @@ gcloud config set project $PROJECT
 - `builds.*` hosts: *Response header* `X-Robots-Tag: noindex, nofollow`, and a *Cache rule* with edge TTL 60 seconds;
 - `cdn.vaultlearninggames-staging.org`: `X-Robots-Tag: noindex, nofollow` (keep what's there).
 
+**CORS on the two builds buckets** (bucket → Settings → CORS policy). Studios upload a .zip from the portal's
+*Upload builds* page; the browser sends each file straight to the builds bucket with a presigned PUT, which the bucket
+must allow from its own system's portal. Without this rule zip uploads fail in the browser (CI uploads don't need it).
+For `builds-vaultlearninggames`:
+
+```json
+[{
+  "AllowedOrigins": ["https://portal.vaultlearninggames.org"],
+  "AllowedMethods": ["PUT"],
+  "AllowedHeaders": ["content-type", "cache-control", "content-encoding"],
+  "MaxAgeSeconds": 3600
+}]
+```
+
+and the same for `builds-vaultlearninggames-staging` with `https://portal.vaultlearninggames-staging.org`.
+
 **API tokens** (R2 → Manage API tokens → Create, *Object Read & Write*), one per bucket, so a system's key can't reach
 another bucket: four tokens. Keep each Access Key ID and Secret Access Key only until step 2 stores them. Also note
 the **Account ID**.
@@ -221,9 +237,10 @@ gcloud beta run domain-mappings create --region=$REGION --service=vault-site-sta
 # gcloud beta run domain-mappings create --region=$REGION --service=vault-site --domain=vaultlearninggames.org
 ```
 
-## 7. Nightly cleanup (production only)
+## 7. Scheduled tasks
 
-Already set up for production (skip if `gcloud scheduler jobs list --location=$REGION` shows it). Staging has too few builds to need it.
+**Nightly cleanup (production only).** Already set up for production (skip if
+`gcloud scheduler jobs list --location=$REGION` shows it). Staging has too few builds to need it.
 
 ```bash
 gcloud iam service-accounts create vault-publisher-scheduler --display-name "vault-publisher cleanup"
@@ -233,6 +250,26 @@ gcloud scheduler jobs create http vault-publisher-cleanup --location=$REGION \
   --oidc-service-account-email=vault-publisher-scheduler@$PROJECT.iam.gserviceaccount.com \
   --oidc-token-audience=vault-publisher-tasks
 ```
+
+**URL monitors.** The cleanup job also checks URL monitors (games copied from a studio's own site, *Upload builds*
+path 4) after its cleanup, for at most 100 seconds, the one checked longest ago first. That covers production while
+there are a few small games. For more of them, bigger ones, or more than one check a day, add a job for the
+monitors' own route, which may run for 12 minutes:
+
+```bash
+gcloud scheduler jobs create http vault-publisher-monitors --location=$REGION \
+  --schedule="30 */6 * * *" --http-method=POST --attempt-deadline=15m \
+  --uri=https://portal.vaultlearninggames.org/v1/tasks/monitors \
+  --oidc-service-account-email=vault-publisher-scheduler@$PROJECT.iam.gserviceaccount.com \
+  --oidc-token-audience=vault-publisher-tasks
+```
+
+and raise the service's request timeout to match (`--timeout=900` in the deploy workflow's `flags`; Cloud Run's
+default is 300 seconds, which also bounds one **Check now** in the portal at 4 minutes).
+
+**Staging has no Scheduler job**, so its monitors are only checked with **Check now**. To check them on a schedule,
+create the same job with `--uri=https://portal.vaultlearninggames-staging.org/v1/tasks/monitors` (staging's
+`TASK_INVOKER_EMAIL` is already the scheduler service account, and the audience is the same).
 
 ## 8. Website forms (Google Sheets)
 
@@ -271,6 +308,16 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
 - deleting the branch removes the preview.
 
 ## Operating notes
+
+- **Getting builds in:** the four paths studios have (a GitHub Action step, an automatic publish request, a .zip in
+  the portal, a monitored web address) are described in the [README](../README.md#upload-builds). Studios pin the
+  action at `@v1`, so a change to `action/` reaches them only when the `v1` tag is moved to a commit that has it:
+  `mode: request-release` (path 2) needs that once.
+- **URL monitors** fetch only public `http(s)` addresses (never private, loopback or link-local ones, also after
+  redirects; `src/net-guard.ts`) and identify themselves as `VaultLearningGames-url-monitor/1`. Each monitor's last
+  result is on the studio's *Upload builds* page; a failed check never changes the test build. A monitored test build
+  (`web-copy`) is exempt from the 90-day cleanup while its monitor exists. Design and limits:
+  [url-monitor.md](url-monitor.md).
 
 - **Restore test:** `litestream restore -o /tmp/check.db gcs://PROJECT-vault-publisher-db/publisher.db`, then
   `sqlite3 /tmp/check.db 'select * from audit_log order by id desc limit 5'`.

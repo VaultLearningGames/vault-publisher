@@ -120,6 +120,21 @@ if (mode === 'delete') {
     ['Commit', repoLink && commit ? `[\`${commit}\`](${repoLink}/commit/${env.GITHUB_SHA})` : commit || '?'],
     ['Files', `${files.length} (${(total / 1e6).toFixed(1)} MB)`],
   ]);
+} else if (mode === 'request-release') {
+  // Asks Vault to publish the test build this same commit just uploaded (run it after the publish step, e.g. only on
+  // a "production" branch or a published GitHub release). Vault reviews the request in the portal before anything
+  // reaches classrooms. Running it again for the same version changes nothing.
+  const res = await api(token, '/v1/release-requests', { game, version: env.INPUT_VERSION || undefined, notes: env.INPUT_NOTES || undefined });
+  output('url', res.url);
+  output('version', res.version);
+  const title = res.status === 'requested' ? '📨 Publish request sent to Vault'
+    : res.status === 'released' ? '✅ Already released' : '📨 Publish request already waiting for Vault';
+  announce(title, res.url, [
+    ['Game', `\`${game}\``],
+    ['Version', `\`${res.version}\``],
+    ['Build', `\`${env.GITHUB_REF_NAME || '?'}\` at ${repoLink && commit ? `[\`${commit}\`](${repoLink}/commit/${env.GITHUB_SHA})` : commit || '?'}`],
+    ['What happens next', res.status === 'released' ? 'Nothing: this version is already released.' : 'Vault reviews the request in the portal and approves it or sends it back.'],
+  ]);
 } else {
   die(`unknown mode "${mode}"`);
 }

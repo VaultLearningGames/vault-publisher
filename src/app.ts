@@ -24,6 +24,8 @@ import {
   sanitizeRefName,
 } from './paths.ts';
 import { requestHeaders, type Storage } from './storage.ts';
+import { guardedFetcher, type Fetcher } from './net-guard.ts';
+import { checkMonitors, monitoredBuilds } from './url-monitor.ts';
 
 export interface AppDeps {
   db: Db;
@@ -46,12 +48,18 @@ export interface AppDeps {
   previewSites?: PreviewSite[];
   // Injected in tests (image migration downloads).
   fetch?: typeof fetch;
+  // How URL monitors fetch a studio's hosted game (net-guard.ts: public addresses only). Injected in tests.
+  fetcher?: Fetcher;
 }
 
 const PRESIGN_SECONDS = 15 * 60;
 const UPLOAD_TTL_MS = 2 * 60 * 60 * 1000;
-// Events whose OIDC `ref` names the branch or tag being built.
-const PUBLISH_EVENTS = new Set(['push', 'workflow_dispatch']);
+// Events whose OIDC `ref` names the branch or tag being built (for a published GitHub release, its tag).
+const PUBLISH_EVENTS = new Set(['push', 'workflow_dispatch', 'release']);
+// Time the nightly cleanup may spend on URL monitors (Cloud Scheduler's default attempt deadline is 3 minutes), and
+// what the monitors' own task route may spend (give its Scheduler job a 15-minute deadline).
+const CLEANUP_MONITOR_BUDGET_MS = 100_000;
+const MONITOR_TASK_BUDGET_MS = 12 * 60_000;
 
 export function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 413 | 503, message: string, detail?: unknown): never {
   throw new HTTPException(status, { res: Response.json({ error: message, detail }, { status }) });
@@ -69,7 +77,7 @@ function previewPrefix(studio: Studio | string, game: Game | string, refName: st
   return `${s}/${g}/${refName}/`;
 }
 
-function parseManifest(value: unknown): ManifestFile[] {
+export function parseManifest(value: unknown): ManifestFile[] {
   if (!Array.isArray(value) || value.length === 0) fail(400, 'files must be a non-empty array');
   if (value.length > MAX_FILES) fail(400, `a build may contain at most ${MAX_FILES} files`);
   const seen = new Set<string>();
@@ -329,7 +337,7 @@ export function createApp(deps: AppDeps) {
   // Start a preview upload for the branch or tag in the caller's OIDC token.
   // Body: { game, files: [{ path, size }] }. Returns a presigned PUT URL and headers per file.
   // Presigned PUTs for a new build of `game` at `ref`; the caller uploads, then finalizes.
-  async function startUpload(studio: Studio, game: Game, ref: { type: 'branch' | 'tag'; name: string }, sha: string, actor: string, filesBody: unknown) {
+  async function startUpload(studio: Studio, game: Game, ref: { type: 'branch' | 'tag'; name: string }, sha: string, actor: string, filesBody: unknown, presignSeconds = PRESIGN_SECONDS) {
     const manifest = parseManifest(filesBody);
     const uploadId = randomUUID();
     const prefix = previewPrefix(studio, game, ref.name);
@@ -338,7 +346,7 @@ export function createApp(deps: AppDeps) {
         const headers = headersFor(f.path);
         return {
           path: f.path,
-          url: await staging.presignPut(prefix + f.path, headers, PRESIGN_SECONDS),
+          url: await staging.presignPut(prefix + f.path, headers, presignSeconds),
           headers: requestHeaders(headers),
         };
       }),
@@ -385,7 +393,7 @@ export function createApp(deps: AppDeps) {
   app.post('/v1/previews', async (c) => {
     const id = await github(c);
     const body = await jsonBody(c);
-    if (!PUBLISH_EVENTS.has(id.eventName)) fail(400, `previews publish on push, not ${id.eventName}`);
+    if (!PUBLISH_EVENTS.has(id.eventName)) fail(400, `previews publish on push or a published release, not ${id.eventName}`);
     const ref = parseGitRef(id.ref);
     if (!ref) fail(400, `cannot publish a preview for ref ${id.ref}`);
     const studio = studioFor(id);
@@ -465,8 +473,44 @@ export function createApp(deps: AppDeps) {
     return c.json({ deleted: keys.length });
   });
 
-  // Nightly, from Cloud Scheduler: remove branch previews with no push for previewRetentionDays.
-  app.post('/v1/tasks/cleanup', async (c) => {
+  // A publish request filed by the game's own workflow (the action's `mode: request-release`), so a push to a
+  // "production" branch or a published GitHub release asks Vault to publish without anyone opening the portal.
+  // It asks for the branch or tag in the caller's OIDC token, and only for the test build that same commit uploaded.
+  // Body: { game, version?, notes? }. version defaults to the tag name, or BRANCH-SHORTSHA for a branch.
+  // Running it again for the same version changes nothing. Vault still approves every release.
+  app.post('/v1/release-requests', async (c) => {
+    const id = await github(c);
+    const body = await jsonBody(c);
+    if (!PUBLISH_EVENTS.has(id.eventName)) fail(400, `publish requests come from a push or a published release, not ${id.eventName}`);
+    const ref = parseGitRef(id.ref);
+    if (!ref) fail(400, `cannot request a release for ref ${id.ref}`);
+    const studio = studioFor(id);
+    const game = gameFor(studio, id, body.game, { create: false });
+    const build = db.build(game.id, ref.name);
+    if (!build || build.status !== 'live') fail(409, `there is no test build "${ref.name}" for ${studio.slug}/${game.slug} yet; the upload step must run before the request step`);
+    if (build.commit_sha !== id.sha) fail(409, `the test build "${ref.name}" is from commit ${build.commit_sha.slice(0, 7)}, not this run's ${id.sha.slice(0, 7)}; upload this commit first`);
+    const version = body.version === undefined || body.version === '' ? (ref.type === 'tag' ? ref.name : `${ref.name}-${id.sha.slice(0, 7)}`) : body.version;
+    if (!isVersionName(version)) fail(400, 'version must look like "v1.2" or "m3.2" (letters, numbers, dots, dashes; at most 64 characters)');
+    const actor = `github:${id.actor}`;
+    const url = `${deps.portal.baseUrl.replace(/\/+$/, '')}/s/${studio.slug}/g/${game.slug}?tab=cdn`;
+    if (db.release(game.id, version)) return c.json({ ok: true, status: 'released', version, url });
+    const open = db.releaseRequests({ gameId: game.id, status: 'requested' });
+    const same = open.find((r) => r.version === version);
+    if (same) return c.json({ ok: true, status: 'already-requested', id: same.id, version, url });
+    // An earlier automatic request for this branch pointed at a build this push has just replaced.
+    for (const r of open.filter((x) => x.ref === ref.name && x.requested_by.startsWith('github:'))) {
+      db.decideReleaseRequest(r.id, 'withdrawn', actor, 'Replaced by a newer push.');
+      db.audit(actor, 'release.withdraw', `${studio.slug}/${game.slug}/${r.version}`, { replaced_by: version });
+    }
+    const notes = typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim().slice(0, 2000)
+      : `Requested automatically by ${id.eventName === 'release' ? 'a GitHub release' : `a push to ${ref.name}`} (commit ${id.sha.slice(0, 7)}).`;
+    const r = db.createReleaseRequest({ game_id: game.id, ref: ref.name, version, notes, requested_by: actor });
+    db.audit(actor, 'release.request', `${studio.slug}/${game.slug}/${version}`, { ref: ref.name, sha: id.sha, repository: id.repository, automatic: true });
+    return c.json({ ok: true, status: 'requested', id: r.id, version, url });
+  });
+
+  // Scheduled tasks come from Cloud Scheduler, signed as the task invoker service account.
+  async function scheduler(c: Context) {
     const token = bearerToken(c.req.header('Authorization'));
     if (!token) fail(401, 'missing bearer token');
     let email: string;
@@ -476,10 +520,25 @@ export function createApp(deps: AppDeps) {
       fail(401, `invalid Google ID token: ${(err as Error).message}`);
     }
     if (email !== deps.taskInvokerEmail) fail(403, `${email} may not run tasks`);
+  }
+  const monitorEnv = { db, staging, fetcher: deps.fetcher ?? guardedFetcher() };
+
+  // From Cloud Scheduler: check every URL monitor and update the test builds of hosted games that changed.
+  app.post('/v1/tasks/monitors', async (c) => {
+    await scheduler(c);
+    return c.json(await checkMonitors(monitorEnv, MONITOR_TASK_BUDGET_MS));
+  });
+
+  // Nightly, from Cloud Scheduler: remove branch previews with no push for previewRetentionDays, then check URL
+  // monitors for as long as the time budget allows (their own task route, above, has a longer one).
+  app.post('/v1/tasks/cleanup', async (c) => {
+    await scheduler(c);
 
     const cutoff = new Date(Date.now() - deps.previewRetentionDays * 24 * 60 * 60 * 1000).toISOString();
     const removed: string[] = [];
+    const monitored = monitoredBuilds(db); // a monitored game that hasn't changed in 90 days keeps its test build
     for (const b of db.staleBranchBuilds(cutoff)) {
+      if (monitored.has(`${b.studio_slug}/${b.game_slug}/${b.ref_name}`)) continue;
       const prefix = previewPrefix(b.studio_slug, b.game_slug, b.ref_name);
       const keys = (await staging.list(prefix)).map((o) => o.key);
       if (keys.length > 0) await staging.deleteKeys(keys);
@@ -488,11 +547,13 @@ export function createApp(deps: AppDeps) {
       removed.push(prefix);
     }
     const expiredUploads = db.deleteExpiredUploads();
-    return c.json({ removed, expired_uploads: expiredUploads });
+    const monitors = await checkMonitors(monitorEnv, CLEANUP_MONITOR_BUDGET_MS)
+      .catch((err) => { console.error('url monitors:', err); return { checked: [], left: -1 }; });
+    return c.json({ removed, expired_uploads: expiredUploads, monitors });
   });
 
   registerAdminTasks(app, deps, admin);
   registerForms(app, db, deps.forms);
-  registerPortal(app, { ...deps, approveRelease, promoteRelease, previewUrl: (studio: Studio, game: Game, ref: string) => `${deps.stagingPublicUrl}/${previewPrefix(studio, game, ref)}` });
+  registerPortal(app, { ...deps, approveRelease, promoteRelease, startUpload, finishUpload, linkSameNamedListing, monitorEnv, previewUrl: (studio: Studio, game: Game, ref: string) => `${deps.stagingPublicUrl}/${previewPrefix(studio, game, ref)}` });
   return app;
 }

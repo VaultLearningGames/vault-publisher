@@ -1,7 +1,8 @@
 name: Vault publish
 description: >
-  Upload a WebGL build to the Vault Learning Games staging CDN as a preview of the current branch or tag,
-  or delete a preview. Authenticates with the workflow's GitHub OIDC token; requires `permissions: id-token: write`.
+  Upload a web build to Vault Learning Games as a test build of the current branch or tag, delete a test build, or
+  ask Vault to publish the build that was just uploaded. Authenticates with the workflow's GitHub OIDC token;
+  requires `permissions: id-token: write`.
 
 inputs:
   game:
@@ -12,9 +13,19 @@ inputs:
     default: build/WebGL/WebGL
   mode:
     description: >
-      "publish" (default), "delete", or "vault-upload" (Vault only: from this repository's workflow in its production
+      "publish" (default), "delete", "request-release" (ask Vault to publish the test build this commit just uploaded;
+      use it as a second step, e.g. `if: github.ref == 'refs/heads/production' || github.event_name == 'release'`),
+      or "vault-upload" (Vault only: from this repository's workflow in its production
       environment, upload a build for any studio's game, e.g. its current version copied from its old host).
     default: publish
+  version:
+    description: >
+      For mode "request-release", the release name to ask for (used once per game). Default: the tag name, or
+      BRANCH-SHORTSHA for a branch.
+    default: ''
+  notes:
+    description: For mode "request-release", a note for Vault's reviewer (what changed, what to check).
+    default: ''
   ref:
     description: >
       For mode "delete", the branch or tag to remove (e.g. github.event.ref from a delete event).
@@ -38,8 +49,11 @@ inputs:
 
 outputs:
   url:
-    description: Public URL of the published preview.
+    description: Public URL of the published preview (for "request-release", the game's page in the portal).
     value: ${{ steps.run.outputs.url }}
+  version:
+    description: For mode "request-release", the release name that was requested.
+    value: ${{ steps.run.outputs.version }}
 
 runs:
   using: composite
@@ -55,5 +69,7 @@ runs:
         INPUT_REF_TYPE: ${{ inputs.ref-type }}
         INPUT_STUDIO: ${{ inputs.studio }}
         INPUT_LISTING: ${{ inputs.listing }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_NOTES: ${{ inputs.notes }}
         INPUT_PUBLISHER_URL: ${{ inputs.publisher-url }}
         INPUT_AUDIENCE: ${{ inputs.audience }}

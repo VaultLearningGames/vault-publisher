@@ -3,7 +3,8 @@
 import { serve } from '@hono/node-server';
 import type { Readable } from 'node:stream';
 import { createApp } from '../src/app.ts';
-import { Db } from '../src/db.ts';
+import { Db, type Upload } from '../src/db.ts';
+import { saveMonitor } from '../src/url-monitor.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import { browseKeys, type Storage } from '../src/storage.ts';
 import { existsSync, readFileSync } from 'node:fs';
@@ -14,7 +15,8 @@ import { countLevels, parseRun, type GameCheck } from '../src/game-checks.ts';
 
 class MemoryStorage implements Storage {
   objects = new Map<string, Uint8Array>();
-  async presignPut(key: string) { return `memory://${key}`; }
+  // Uploads from the browser (a .zip on the Upload builds page) go to /dev-r2/KEY on this server, below.
+  async presignPut(key: string) { return `/dev-r2/${key.split('/').map(encodeURIComponent).join('/')}`; }
   async list(prefix: string) { return [...this.objects].filter(([k]) => k.startsWith(prefix)).map(([key, v]) => ({ key, size: v.byteLength })); }
   async deleteKeys(keys: string[]) { for (const k of keys) this.objects.delete(k); }
   async browse(prefix: string) { return browseKeys([...this.objects].map(([k, v]) => [k, v.byteLength] as [string, number]), prefix); }
@@ -66,6 +68,16 @@ db.setMembership(fd.id, 'mia', 'maintainer', 'user:boss');
 db.setMembership(fd.id, 'vera', 'viewer', 'user:boss');
 db.setMembership(fd.id, 'ada', 'admin', 'user:boss');
 db.setMembership(fd.id, 'newhire', 'viewer', 'user:ada'); // invited: hasn't signed in yet
+
+// A game copied from the studio's own site by a URL monitor (Upload builds, path 4).
+{
+  const fm = db.createGame(fd.id, 'forevermine', '', 'vault:fieldday/forevermine');
+  const m = saveMonitor(db, { game_id: fm.id, url: 'https://fielddaylab.wisc.edu/play/forevermine/game/', files_from: 'list', list_url: 'https://fielddaylab.wisc.edu/play/forevermine/game/files.txt', by: 'user:ada' });
+  db.upsertBuild({ game_id: fm.id, ref_name: m.ref_name, ref_type: 'branch', commit_sha: 'url:3f9a1c2b7d4e5f60', actor: 'url-monitor' } as Upload, 88, 31_400_000);
+  staging.objects.set(`fieldday/forevermine/${m.ref_name}/index.html`, new TextEncoder().encode('<h1>forevermine</h1>'));
+  const hours = (n: number) => new Date(Date.now() - n * 3600_000).toISOString();
+  db.sqlite.prepare(`UPDATE url_monitors SET last_checked_at = ?, last_changed_at = ?, last_status = 'unchanged', last_message = 'No changes (88 files checked).' WHERE id = ?`).run(hours(5), hours(77), m.id);
+}
 
 // Site listings: import the Hugo prototype's games if github.com/fielddaylab/vault-rebuild is checked out next to
 // this repo (or at $VAULT_REBUILD), so /vault/listings and each studio's Site listings page have real content.
@@ -132,6 +144,10 @@ const app = createApp({
       exchange: async (code) => ({ github_id: `dev-${code}`, login: code, name: code[0].toUpperCase() + code.slice(1), avatar_url: null }),
     },
   },
+});
+app.put('/dev-r2/*', async (c) => {
+  staging.objects.set(decodeURIComponent(new URL(c.req.url).pathname.slice('/dev-r2/'.length)), new Uint8Array(await c.req.arrayBuffer()));
+  return c.body(null, 200);
 });
 app.get('/dev-login', (c) => c.html(`<form action="/auth/callback" style="font:16px system-ui;max-width:360px;margin:15vh auto;display:grid;gap:10px">
   <b>Dev sign-in</b><input type="hidden" name="state" value="${c.req.query('state')}">

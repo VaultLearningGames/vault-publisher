@@ -1,0 +1,39 @@
+/* The "Upload builds" page (src/portal/uploads.ts). Uses portal.css's tokens. */
+.paths-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.paths-nav a { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--ink); font-size: 12.5px; font-weight: 500; }
+.paths-nav a:hover { background: var(--hover); text-decoration: none; }
+.paths-nav b, .path .n { display: inline-grid; place-items: center; flex: none; border-radius: 50%; background: var(--ink); color: var(--paper); font: 600 12px/1 var(--body); }
+.paths-nav b { width: 20px; height: 20px; }
+.path { scroll-margin-top: 16px; }
+.path > h2 { font: 700 19px/1.25 var(--display); align-items: center; margin-bottom: 8px; }
+.path > h2 > span:first-child { display: inline-flex; align-items: center; gap: 10px; }
+.path .n { width: 26px; height: 26px; font-size: 13px; }
+.path .lede { margin: 0 0 16px; }
+.path .field { margin-bottom: 16px; }
+.path h3, .path h3.sub { font: 600 12.5px/1.3 var(--body); margin: 0 0 6px; }
+.path h3.sub { margin: 20px 0 10px; }
+.path .tbl-wrap { margin-top: 0; }
+.steps-list { margin: 0 0 14px; padding-left: 20px; }
+.steps-list > li { margin: 10px 0; padding-left: 2px; }
+.code-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 10px 0 0; padding: 6px 8px 6px 14px; background: var(--sunk); border: 1px solid var(--line); border-bottom: 0; border-radius: 9px 9px 0 0; }
+.code-head + pre.code { margin: 0 0 10px; border-radius: 0 0 9px 9px; }
+.next { border: 1px solid var(--line); border-left: 3px solid var(--slate); border-radius: 0 9px 9px 0; background: var(--paper); padding: 11px 14px 12px; font-size: 13px; }
+.next li:has(> span[hidden]) { display: none; }
+.inline-input { width: 150px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); font: .92em var(--mono); }
+.field .check .inline-input { width: 150px; }
+.zip-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; padding: 14px; border: 2px dashed var(--line); border-radius: 12px; background: var(--paper); }
+.zip-form input[type=file] { flex: 1 1 220px; min-width: 0; }
+.zip-form progress { flex: 1 1 100%; width: 100%; height: 8px; accent-color: var(--slate); }
+.zip-form .err { flex: 1 1 100%; }
+.monitor-form { display: grid; gap: 0; max-width: 640px; margin-bottom: 14px; }
+.monitor-form .err { margin-left: 8px; }
+.path details { margin: 0 0 12px; }
+.path details summary { cursor: pointer; color: var(--slate); }
+.path details p { margin: 8px 0 0; max-width: 78ch; }
+.path > p.small { max-width: 78ch; }
+@media (max-width: 860px) {
+  .path > h2 .tag { order: -1; }
+  .paths-nav a { flex: 1 1 100%; }
+}
+.path table td:nth-child(2) { min-width: 190px; }
+.path table td:nth-child(3) { min-width: 180px; }

@@ -231,6 +231,27 @@ const MIGRATIONS = [
   );
   CREATE INDEX studio_repositories_studio ON studio_repositories (studio_id);
   `,
+  // v15: URL monitors (url-monitor.ts). A studio registers the public address of a web build it already hosts; Vault
+  // copies it into the game's test build `ref_name` when it changes. files_from: 'list' (the studio publishes a file
+  // list at list_url) or 'crawl' (the files index.html links to). state_json remembers each copied file's size, hash,
+  // ETag and Last-Modified, so the next check only downloads what changed. One monitor per game.
+  `
+  CREATE TABLE url_monitors (
+    id              INTEGER PRIMARY KEY,
+    game_id         INTEGER NOT NULL UNIQUE REFERENCES games(id),
+    url             TEXT NOT NULL,
+    files_from      TEXT NOT NULL CHECK (files_from IN ('list', 'crawl')),
+    list_url        TEXT,
+    ref_name        TEXT NOT NULL,
+    state_json      TEXT NOT NULL,
+    last_checked_at TEXT,
+    last_changed_at TEXT,
+    last_status     TEXT CHECK (last_status IN ('changed', 'unchanged', 'error')),
+    last_message    TEXT,
+    created_by      TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+  );
+  `,
 ];
 
 export interface Listing {
@@ -814,14 +835,14 @@ export class Db {
       .run(by ? now() : null, by, by ? note : null, releaseId);
   }
 
-  // Removes a CDN game and everything recorded about it (test versions, releases, requests, uploads). Site listings
+  // Removes a CDN game and everything recorded about it (test versions, releases, requests, uploads, its URL monitor). Site listings
   // that played from it stay, unlinked. The caller deletes its files from the buckets first.
   deleteGame(gameId: number) {
     this.sqlite.exec('BEGIN');
     try {
       this.sqlite.prepare('UPDATE listings SET game_id = NULL WHERE game_id = ?').run(gameId);
       this.sqlite.prepare('UPDATE games SET current_release_id = NULL WHERE id = ?').run(gameId);
-      for (const table of ['release_requests', 'uploads', 'builds', 'releases']) this.sqlite.prepare(`DELETE FROM ${table} WHERE game_id = ?`).run(gameId);
+      for (const table of ['release_requests', 'uploads', 'builds', 'releases', 'url_monitors']) this.sqlite.prepare(`DELETE FROM ${table} WHERE game_id = ?`).run(gameId);
       this.sqlite.prepare('DELETE FROM games WHERE id = ?').run(gameId);
       this.sqlite.exec('COMMIT');
     } catch (err) {

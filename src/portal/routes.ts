@@ -19,6 +19,8 @@ import { registerListingPreview } from './listing-preview.ts';
 import { registerListingMakers } from './listing-makers.ts';
 import { registerImageMigration } from './image-migration.ts';
 import { githubAccount, githubRepository, registerPeople, type GitHubAccountLookup, type GitHubRepositoryLookup } from './people.ts';
+import { buildOrigin, registerUploads } from './uploads.ts';
+import type { MonitorEnv } from '../url-monitor.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -49,6 +51,12 @@ export interface PortalDeps extends AppDeps {
   approveRelease(studio: Studio, game: Game, version: string, ref: string | undefined, actor: string): Promise<ReleaseResult>;
   promoteRelease(studio: Studio, game: Game, version: string, actor: string): Promise<PromoteResult>;
   previewUrl(studio: Studio, game: Game, ref: string): string;
+  // Building a test build from the portal (uploads.ts): presigned PUTs, then finalize. Shared with the CI routes.
+  startUpload(studio: Studio, game: Game, ref: { type: 'branch' | 'tag'; name: string }, sha: string, actor: string, files: unknown, presignSeconds?: number):
+    Promise<{ upload_id: string; url: string; files: { path: string; url: string; headers: Record<string, string> }[] }>;
+  finishUpload(uploadId: string, allowed: (game: Game) => boolean, auditActor: string, auditDetail: Record<string, unknown>): Promise<{ url: string }>;
+  linkSameNamedListing(studio: Studio, game: Game): void;
+  monitorEnv: MonitorEnv;
 }
 
 function githubOAuth(clientId: string, clientSecret: string): OAuthClient {
@@ -114,7 +122,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
         ${cur ? html`
           <a href="/s/${cur.slug}" class="${active === 'studio' ? 'on' : ''}">Games</a>
           <a href="/s/${cur.slug}/files" class="${active === 'files' ? 'on' : ''}">Files</a>
-          <a href="/s/${cur.slug}/register" class="${active === 'register' ? 'on' : ''}">Register a game</a>
+          <a href="/s/${cur.slug}/register" class="${active === 'register' ? 'on' : ''}">Upload builds</a>
           <a href="/s/${cur.slug}/members" class="${active === 'members' ? 'on' : ''}">Members</a>` : ''}
         ${staff ? html`
           <div class="nav-sep">Vault</div>
@@ -142,50 +150,6 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
 export const head = (title: string | Html, sub?: string | Html, actions?: Html | string, crumbs?: Html) => html`
   ${crumbs ? html`<div class="crumbs">${crumbs}</div>` : ''}
   <div class="page-head"><div><h1>${title}</h1>${sub ? html`<p>${sub}</p>` : ''}</div>${actions ? html`<div class="actions">${actions}</div>` : ''}</div>`;
-
-// ---------- registration snippets ----------
-const SNIPPETS = {
-  unity: (builds: string, studio: string, game: string) => `# .github/workflows/vault.yml
-name: Vault
-on: { push: {}, delete: {}, workflow_dispatch: {} }
-permissions: { contents: read, id-token: write }
-jobs:
-  build:
-    if: github.event_name != 'delete'
-    uses: VaultLearningGames/vault-publisher/.github/workflows/unity-build.yml@v1
-    secrets:                  # explicit: \`secrets: inherit\` doesn't cross GitHub orgs
-      UNITY_EMAIL: "\${{ secrets.UNITY_EMAIL }}"
-      UNITY_PASSWORD: "\${{ secrets.UNITY_PASSWORD }}"
-      UNITY_SERIAL: "\${{ secrets.UNITY_SERIAL }}"
-  preview:
-    needs: build
-    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
-    with: { game: ${game}, artifact: "\${{ needs.build.outputs.artifact }}" }
-  remove-preview:
-    if: github.event_name == 'delete'
-    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
-    with: { game: ${game} }
-# Publishes every branch and tag to ${builds}/${studio}/${game}/<branch>/`,
-  committed: (builds: string, studio: string, game: string) => `# .github/workflows/vault.yml
-name: Vault
-on: { push: {}, delete: {}, workflow_dispatch: {} }
-permissions: { contents: read, id-token: write }
-jobs:
-  preview:
-    uses: VaultLearningGames/vault-publisher/.github/workflows/publish-preview.yml@v1
-    with: { game: ${game}, path: WebGL }   # the folder that contains index.html
-# Publishes every branch and tag to ${builds}/${studio}/${game}/<branch>/`,
-  action: (builds: string, studio: string, game: string) => `# In an existing workflow, after your own build step:
-    permissions: { contents: read, id-token: write }
-    steps:
-      # ... your build writes the web build to ./dist ...
-      - uses: VaultLearningGames/vault-publisher/action@v1
-        with:
-          game: ${game}
-          path: dist
-          publisher-url: \${{ vars.VAULT_PUBLISHER_URL }}
-# Publishes to ${builds}/${studio}/${game}/<branch>/`,
-};
 
 export function registerPortal(app: Hono, deps: PortalDeps) {
   const { db } = deps;
@@ -243,6 +207,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     denied: (c: Context, m: string, st?: number) => denied(c, m, st), signedIn: (c: Context) => signedIn(c), studioFor: (c: Context, u: User) => studioFor(c, u),
     apiUser: (c: Context) => apiUser(c), actor, isStaff, canRelease, isVaultAdmin, roleIn };
   const LP = listingPieces(listingHelpers);
+  // The "Upload builds" page (/s/:studio/register), zip uploads and URL monitors.
+  const UP = registerUploads(app, listingHelpers);
 
   function page(c: Context, title: string, body: Html, opts: { studio?: Studio; active?: string; status?: number } = {}) {
     const u = currentUser(c)!;
@@ -387,7 +353,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
         <td>${cur ? html`<span class="rel">${cur.version}</span> <span class="muted small">${ago(cur.approved_at)}</span>` : html`<span class="muted small">—</span>`}</td></tr>`;
     });
     const body = html`${head(s.name, html`Every ${s.name} game on Vault. Games are hosted at their <b>web address</b> until they move to the <b>Vault CDN</b>: staging is yours to test on, production is what classrooms play, released by Vault.`,
-      html`<a class="btn" href="/s/${s.slug}/register">Set up CDN builds</a>`)}
+      html`<a class="btn" href="/s/${s.slug}/register">Upload builds</a>`)}
       <div class="kpis four">
         <div class="kpi"><div class="v">${entries.length}</div><div class="l">Games</div></div>
         <div class="kpi"><div class="v">${onCdn}</div><div class="l">Hosted on the Vault CDN</div></div>
@@ -396,7 +362,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       </div>
       ${openRequests.length ? html`<p class="small">${pill('wait', `${openRequests.length} release request${openRequests.length > 1 ? 's' : ''} waiting for Vault`)}</p>` : ''}
       ${entries.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th>Status</th><th>Hosted by</th><th>Staging (testing)</th><th>Production</th></tr></thead><tbody>${rows}</tbody></table></div>`
-        : html`<div class="card"><p>No games yet. <a href="/s/${s.slug}/register">Set up CDN builds</a>, or ask Vault to add your games to the site.</p></div>`}
+        : html`<div class="card"><p>No games yet. <a href="/s/${s.slug}/register">Upload a build</a>, or ask Vault to add your games to the site.</p></div>`}
       ${LP.canEdit(u, s) ? html`<div class="card" style="margin-top:18px"><h2>Add a game to the site</h2><form data-api="/portal/api/s/${s.slug}/listings" data-then="reload" class="inline-form">
           <label class="field"><span class="lab">Title</span><input name="title" required autocomplete="off"></label>
           <label class="field"><span class="lab">Page address</span><input name="slug" required pattern="[a-z0-9][a-z0-9-]*" autocomplete="off" placeholder="my-game"></label>
@@ -460,15 +426,16 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const release = canRelease(u), request = canRequest(u, s);
     const stable = `${deps.prodPublicUrl}/${s.slug}/${g.slug}/`;
     const api = `/portal/api/s/${s.slug}/g/${g.slug}`;
-    const buildRows = builds.map((b: Build) => html`<tr>
-      <td><span class="mono">${b.ref_name}</span> <span class="tag">${b.ref_type}</span></td>
-      <td class="small">${g.repository ? html`<a class="mono" href="https://github.com/${g.repository}/commit/${b.commit_sha}">${b.commit_sha.slice(0, 7)}</a>` : html`<span class="muted">uploaded by Vault</span>`}</td>
+    // A build that didn't come from a push (a .zip uploaded here, or a copy of a monitored web address) has no commit.
+    const buildRows = builds.map((b: Build) => { const origin = buildOrigin(b.commit_sha); const type = origin === 'upload' ? 'upload' : b.ref_type; return html`<tr>
+      <td><span class="mono">${b.ref_name}</span> <span class="tag">${origin ?? b.ref_type}</span></td>
+      <td class="small">${origin ? html`<span class="muted">${origin === 'upload' ? 'a .zip uploaded here' : 'copied from its web address'}</span>` : g.repository ? html`<a class="mono" href="https://github.com/${g.repository}/commit/${b.commit_sha}">${b.commit_sha.slice(0, 7)}</a>` : html`<span class="muted">uploaded by Vault</span>`}</td>
       <td class="small num">${b.file_count} files · ${mb(b.total_bytes)}</td>
       <td class="small">${ago(b.updated_at)}<br><span class="muted">by ${b.actor}</span></td>
       <td class="small"><a href="${deps.previewUrl(s, g, b.ref_name)}" target="_blank" rel="noopener">Play ↗</a></td>
       <td class="r">${release
-        ? html`<button class="btn sm brass" data-open="release" data-ref="${b.ref_name}" data-type="${b.ref_type}">Release…</button>`
-        : request ? html`<button class="btn sm" data-open="request" data-ref="${b.ref_name}" data-type="${b.ref_type}">Request release…</button>` : ''}</td></tr>`);
+        ? html`<button class="btn sm brass" data-open="release" data-ref="${b.ref_name}" data-type="${type}">Release…</button>`
+        : request ? html`<button class="btn sm" data-open="request" data-ref="${b.ref_name}" data-type="${type}">Request release…</button>` : ''}</td></tr>`; });
     const switcher = canSwitch(u, s, g);
     const relRows = releases.map((r) => {
       const isCur = cur?.id === r.id;
@@ -482,7 +449,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       return html`<tr>
         <td class="mono">${r.version}</td>
         <td>${status}${r.withdrawn_at && r.withdrawn_note ? html`<br><span class="small muted">“${r.withdrawn_note}”</span>` : ''}</td>
-        <td class="small">from <span class="mono">${r.source_ref}</span>${r.commit_sha && g.repository ? html` · <a class="mono" href="https://github.com/${g.repository}/commit/${r.commit_sha}">${r.commit_sha.slice(0, 7)}</a>` : ''}</td>
+        <td class="small">from <span class="mono">${r.source_ref}</span>${r.commit_sha && g.repository && !buildOrigin(r.commit_sha) ? html` · <a class="mono" href="https://github.com/${g.repository}/commit/${r.commit_sha}">${r.commit_sha.slice(0, 7)}</a>` : ''}</td>
         <td class="small">${r.approved_at.slice(0, 10)} · ${who(r.approved_by)}</td>
         <td class="small"><a href="${deps.prodPublicUrl}/${s.slug}/${g.slug}/_releases/${r.version}/" target="_blank" rel="noopener">Play ↗</a></td>
         <td class="r"><div class="row-actions">${actions}</div></td></tr>`;
@@ -494,9 +461,9 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       <td class="r">${r.status === 'requested' && release ? html`<a class="btn sm" href="/vault#req-${r.id}">Review</a>` : ''}
         ${r.status === 'requested' && (r.requested_by === actor(u) || canManageMembers(u, s)) ? html`<form data-api="/portal/api/requests/${r.id}/withdraw" data-confirm="Withdraw this request?"><button class="btn sm">Withdraw</button><span class="err" role="status" aria-live="polite"></span></form>` : ''}</td></tr>`);
     const main = html`<div class="grid">
-          <div class="card"><h2>Staging · test versions <small>every branch and tag your builds publish · kept 90 days after the last push</small></h2>
+          <div class="card"><h2>Staging · test versions <small>every build you upload · branches and uploads are kept 90 days after their last change</small></h2>
             ${builds.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Version</th><th>Commit</th><th>Size</th><th>Published</th><th>Preview</th><th></th></tr></thead><tbody>${buildRows}</tbody></table></div>`
-              : html`<p class="muted">Nothing on staging yet. Push to a branch once the workflow is in place (<a href="/s/${s.slug}/register">instructions</a>).</p>`}</div>
+              : html`<p class="muted">Nothing on staging yet. <a href="/s/${s.slug}/register">Upload a build</a>: from GitHub, as a .zip, or from a web address.</p>`}${UP.monitorNote(s, g)}</div>
           <div class="card"><h2>Production · released versions <small>immutable; only Vault releases new versions${g.frozen_at ? '; frozen by Vault' : '; maintainers choose which approved version is current'}</small></h2>
             ${releases.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Release</th><th>Status</th><th>Built from</th><th>Approved</th><th>Link</th><th></th></tr></thead><tbody>${relRows}</tbody></table></div>`
               : html`<p class="muted">Nothing released yet.${request ? ' Choose “Request release” on a test version above.' : ''}</p>`}</div>
@@ -516,7 +483,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
               <label class="field"><span class="lab">Type <b class="mono">${g.slug}</b> to confirm</span><input name="confirm" required autocomplete="off" spellcheck="false" aria-label="Type ${g.slug} to confirm"></label>
               <button class="btn danger">Delete game</button><span class="err" role="status" aria-live="polite"></span></form></div>` : ''}
           <div class="card small"><h2>How releasing works</h2><ol class="tight">
-            <li>Push a version tag (e.g. <code>v1.2</code>); it appears above as a test version.</li>
+            <li><a href="/s/${s.slug}/register">Upload a build</a> (a push from GitHub, a .zip, or a monitored web address); it appears above as a test version. From GitHub, a version tag like <code>v1.2</code> is best.</li>
             <li>Test it on staging, then ${release ? html`choose <b>Release…</b>` : request ? html`choose <b>Request release…</b>` : 'a maintainer requests a release'}.</li>
             <li>Vault copies that exact build to production and makes it current. Earlier releases stay available for rollback.</li>
             <li>Maintainers can switch between approved releases or roll back at any time, unless Vault has frozen the game or withdrawn a release.</li></ol></div>
@@ -592,45 +559,6 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       ${LP.playCard(u, s, l ?? null, g)}
       ${tabs}${content}${dialogs}`;
     return page(c, title, body, { studio: s, active: 'studio' });
-  });
-
-  // ---------- register instructions ----------
-  app.get('/s/:studio/register', (c) => {
-    const u = signedIn(c); if (u instanceof Response) return u;
-    const s = studioFor(c, u); if (s instanceof Response) return s;
-    const snippets = JSON.stringify({ unity: SNIPPETS.unity(deps.stagingPublicUrl, s.slug, 'GAME'), committed: SNIPPETS.committed(deps.stagingPublicUrl, s.slug, 'GAME'), action: SNIPPETS.action(deps.stagingPublicUrl, s.slug, 'GAME') });
-    const body = html`${head('Register a game', html`A game registers itself the first time its repository publishes to Vault. Pick how it builds, name it, and add one workflow file.`, '', html`<a href="/s/${s.slug}">${s.name}</a> / Register`)}
-      <div class="grid g-main"><div class="grid">
-        <div class="card">
-          <h2>1. Name it and choose how it builds</h2>
-          <div class="fields">
-            <label class="field"><span class="lab">Game name (web address)</span><input id="reg-game" value="my-game" autocomplete="off" pattern="[a-z0-9-]+"><span class="hint">Lowercase letters, numbers and dashes. Becomes <span class="mono">…/${s.slug}/<b id="reg-echo">my-game</b>/</span>. The first repository to publish it owns it.</span></label>
-            <div class="field"><span class="lab">How it builds</span>
-              <label class="check"><input type="radio" name="reg-kind" value="unity" checked> Unity, built in GitHub Actions</label>
-              <label class="check"><input type="radio" name="reg-kind" value="committed"> The web build is committed to the repo</label>
-              <label class="check"><input type="radio" name="reg-kind" value="action"> Our own build (npm, etc.) in GitHub Actions</label></div>
-          </div>
-        </div>
-        <div class="card"><h2>2. Add this file to the repository <button class="btn sm" id="reg-copy" type="button">Copy</button></h2>
-          <pre class="code" id="reg-snippet"></pre>
-          <ul class="small tight">
-            <li><b>Unity:</b> add the Unity licence as repository or organization secrets <code>UNITY_EMAIL</code>, <code>UNITY_PASSWORD</code>, <code>UNITY_SERIAL</code>.</li>
-            <li>The organization variable <code>VAULT_PUBLISHER_URL</code> must be visible to the repository (public repositories on free GitHub plans).</li>
-            ${s.slug === 'fieldday' ? html`<li><b>Field Day framework:</b> don’t use “preview” or “milestone” in branch names yet; they select a build configuration that currently fails to compile.</li>` : ''}
-            <li>Your GitHub organization must be registered with Vault. ${s.github_owner ? html`This studio publishes from <b>github.com/${s.github_owner}</b>.` : html`<b>This studio has no GitHub organization registered yet; ask Vault.</b>`}</li>
-          </ul></div>
-        <div class="card"><h2>3. Push</h2>
-          <p>Every push to a branch or tag builds and publishes a test version to <span class="mono">${deps.stagingPublicUrl}/${s.slug}/GAME/BRANCH/</span>. The game then appears under <a href="/s/${s.slug}">Games</a>. Deleting a branch removes its test version.</p>
-          <p>When a version is ready for classrooms, push a version tag, test it on staging, and choose <b>Request release</b> on the game’s page.</p></div>
-      </div>
-      <div class="grid" style="align-content:start">
-        <div class="card small"><h2>No GitHub?</h2><p>Zip upload is coming. Until then, Vault can import a build for you: ask your Vault contact.</p></div>
-        <div class="card small"><h2>What’s where</h2><ul class="tight">
-          <li><b>Staging</b>: every branch and tag, for your team and playtesters. Not indexed by search engines.</li>
-          <li><b>Production</b>: <span class="mono">cdn.vaultlearninggames.org/${s.slug}/GAME/</span>, only builds Vault has released.</li></ul></div>
-      </div></div>
-      <script type="application/json" id="reg-data">${raw(snippets.replace(/</g, '\\u003c'))}</script>`;
-    return page(c, 'Register a game', body, { studio: s, active: 'register' });
   });
 
   // ---------- Vault staff ----------

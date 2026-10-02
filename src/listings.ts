@@ -11,7 +11,7 @@ export interface ListingFields {
   title: string;
   short_description: string;
   about: string;
-  makers: string[];            // shown as "Made by"; the studio's name when empty
+  makers: string[];            // shown as "Made by": names, usually studios' (the site links those); the studio's name when empty
   grades: string[];
   subjects: string[];
   topics: string[];
@@ -60,11 +60,15 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
   // Grades may also come from checkboxes named "grades:Grades 3-5".
   const gradeBoxes = Object.keys(input).filter((k) => k.startsWith('grades:'));
   const grades = gradeBoxes.length ? gradeBoxes.filter((k) => input[k] === true || input[k] === 'on').map((k) => k.slice(7)) : null;
+  // "Made by" may also come from the editor's chooser: checkboxes named "makers:Field Day Lab", in the order they are on
+  // the page (so a name can contain a comma, which the comma-separated text can't).
+  const makerBoxes = Object.keys(input).filter((k) => k.startsWith('makers:'));
+  const makers = makerBoxes.length ? list(makerBoxes.filter((k) => input[k] === true || input[k] === 'on').map((k) => k.slice(7)), false) : null;
   return {
     title: pick('title', str(input.title, 200)),
     short_description: pick('short_description', str(input.short_description, 600)),
     about: pick('about', str(input.about, MAX_TEXT)),
-    makers: pick('makers', list(input.makers, true)),
+    makers: makers ?? pick('makers', list(input.makers, true)),
     grades: grades ?? pick('grades', list(input.grades, true)),
     subjects: pick('subjects', list(input.subjects, true)),
     topics: pick('topics', list(input.topics, true)),

@@ -312,15 +312,15 @@ export function createApp(deps: AppDeps) {
   // Public: every published site listing, which the Vault website is built from, and the home page's featured
   // games. A listing hosted on the Vault CDN gets its game's current release URL here, so releasing or rolling
   // back a game changes what the site serves on the next site build without anyone editing the listing.
-  // `studios` is every studio with a game on the site and its website, so the site can link any maker name that
-  // matches a studio (a game can list several makers).
+  // `studios` is every studio with a game on the site, or named as a maker of one, and its website, so the site can
+  // link any maker name that matches a studio (a game can list several makers).
   app.get('/v1/catalog', (c) => {
     const published = db.listings({ published: true });
     const games = published.map((l) => catalogGame(db, deps.prodPublicUrl, l, l.published!));
     // The home page's Featured Games, in ascending sequence, ties by title (only games that are on the site).
     const titles = new Map(games.map((g) => [g.slug, g.title]));
     const featured = catalogFeatured(readFeatured(db), (slug) => titles.get(slug));
-    const studios = catalogStudios(published);
+    const studios = catalogStudios(published, db.studios(), games);
     c.header('Access-Control-Allow-Origin', '*');
     c.header('Cache-Control', 'public, max-age=60');
     return c.json({ version: 1, generated_at: new Date().toISOString(), featured, studios, games });

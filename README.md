@@ -29,7 +29,7 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | `src/auth.ts` | OIDC/Google token verification (`jose`) |
 | `src/db.ts` | Schema, migrations, all SQL access |
 | `src/portal/routes.ts` | Portal HTML pages + `/portal/api/*` routes |
-| `src/portal/{listings,people,featured,listing-preview,image-migration,availability}.ts` | Portal features by domain |
+| `src/portal/{listings,listing-makers,people,featured,listing-preview,image-migration,availability}.ts` | Portal features by domain |
 | `src/{releases,storage,paths,config,forms,catalog,game-checks}.ts` | Domain logic |
 | `src/studios-file.ts` | `studios.json` at startup: studios and the repositories assigned to them |
 
@@ -51,7 +51,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | Google ID token | `POST /v1/tasks/cleanup` | Nightly: expire stale previews (Cloud Scheduler) |
 | Public (site) | `POST /v1/forms/:name` | Website forms → Google Sheets |
 | Session cookie | `GET /`, `/s/:studio`, `/s/:studio/g/:game`, `/vault/…` | Studio and Vault admin UI (HTML) |
-| | `POST /portal/api/s/:studio/listings[/:slug][…]` | Listing CRUD, link, publish, unpublish, move studio, preview |
+| | `POST /portal/api/s/:studio/listings[/:slug][…]` | Listing CRUD, link, publish, unpublish, move studio, preview, makers |
 | | `POST /portal/api/s/:studio/g/:game/…` | `release`, `promote`, `withdraw`, `delete`, `freeze`, `request` |
 | | `POST /portal/api/requests/:id/…` | Release requests: `approve`, `reject`, `withdraw` |
 | | `POST /portal/api/s/:studio/members[?]` | Studio members add/remove, website URL |
@@ -131,6 +131,13 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
 
 **Site listing edits** (title, descriptions, grades, subjects, topics, standards, images, play settings) are drafts:
 * Studio maintainers submit them for review.
+* **Made by** is a chooser over the portal's studios: tick one or more (the listing's own studio by default), in the
+  order the site shows them. The listing still stores names (`makers` in the catalog), so a maker typed earlier that
+  matches no studio keeps working and shows as "not a studio yet"; Vault staff make a studio of it with **Create
+  studio**. **Add a new studio…** takes a name and a website: from Vault staff it creates a Vault-managed studio at
+  once (no GitHub organization, short name made from the name; the rules of **Vault → Studios**). Studio members
+  can't create studios, so theirs is kept with the listing as a proposal: Vault sees it in the review queue, and
+  publishing the listing creates the studio.
 * **Images** (hero image, thumbnail, screenshots) are a path on the site or an https link, or uploaded from the editor
   (PNG, JPEG or WebP, type checked by content; 5 MB for the hero image, 2 MB for the others). An upload is stored at
   once in the release bucket at `STUDIO/GAME/_vault-assets/KIND-HASH.EXT` (GAME is the listing's page slug; immutable,
@@ -155,8 +162,9 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
 * The public **`GET /v1/catalog`** lists published games with their play URL resolved. That's either the web address or
   `cdn.vaultlearninggames.org/STUDIO/GAME/` plus an optional folder, so one CDN game can hold a collection (The Yard).
   The site ([vault-rebuild](https://github.com/fielddaylab/vault-rebuild)) is built from it. Each game's `studio`
-  carries the studio's website as `url`, and `studios` lists every studio with a game on the site (`slug`, `name`,
-  `url`) so the site can link maker names. Studio admins set the website on their **Members** page.
+  carries the studio's website as `url`, and `studios` lists every studio with a game on the site or named as a
+  maker of one (`slug`, `name`, `url`) so the site can link maker names. Studio admins set the website on their
+  **Members** page.
 * **Vault → Game Catalog** is one table of every site listing: its site status, where it plays from, whether it's
   featured, and whether it still loads.
   * **Availability** columns show the latest daily check by `check-games.yml` (see

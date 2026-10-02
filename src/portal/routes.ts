@@ -16,6 +16,7 @@ import { listingPieces, registerListingPages, type ListingRow } from './listings
 import { registerFeaturedApi } from './featured.ts';
 import { registerListingAssetsApi } from './listing-assets.ts';
 import { registerListingPreview } from './listing-preview.ts';
+import { registerListingMakers } from './listing-makers.ts';
 import { registerImageMigration } from './image-migration.ts';
 import { githubAccount, githubRepository, registerPeople, type GitHubAccountLookup, type GitHubRepositoryLookup } from './people.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
@@ -833,6 +834,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   registerFeaturedApi(app, listingHelpers);
   registerListingAssetsApi(app, listingHelpers);
   registerListingPreview(app, listingHelpers);
+  registerListingMakers(app, listingHelpers);
   registerImageMigration(app, listingHelpers);
   registerPeople(app, { ...listingHelpers, canManageMembers, vaultAdmins: cfg.vaultAdmins, githubAccount: cfg.githubAccount ?? githubAccount, githubRepository: cfg.githubRepository ?? githubRepository });
 }

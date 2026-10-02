@@ -17,6 +17,7 @@ import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '..
 import type { PortalDeps } from './routes.ts';
 import { imageField } from './listing-assets.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
+import { addMaker, createProposedStudios, makersField, proposedLine, pruneMakerProposals } from './listing-makers.ts';
 
 export interface ListingHelpers {
   db: Db;
@@ -114,7 +115,7 @@ export function listingPieces(h: ListingHelpers) {
       <h2>Site listing <small>vaultlearninggames.org/games/${l.slug}/</small></h2>
       <div class="fields">
         ${txt('title', 'Title', '', 'required')}
-        ${txt('makers', 'Made by', `Comma-separated if several; defaults to ${s.name}.`)}
+        ${makersField(db, { api, edit, staff: h.isStaff(u), studio: s, listing: l })}
         ${area('short_description', 'Short description', 'One or two sentences, shown on the game card.', 2)}
         ${area('about', 'About this game', '', 6)}
         <div class="field full"><span class="lab">Grades</span><div class="chips">${GRADES.map((gr) => html`<label><input type="checkbox" name="grades:${gr}" ${f.grades.includes(gr) ? 'checked' : ''} ${dis}> ${gr.replace('Grades ', '')}</label>`)}</div></div>
@@ -200,6 +201,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const link = (l: ListingRow) => `/s/${l.studio_slug}/g/${l.slug}`;
     const queue = waiting.map((l) => html`<div class="card"><div class="card-h"><a href="${link(l)}"><b>${l.draft.title || l.slug}</b></a> <small>${l.studio_name} · submitted ${ago(l.submitted_at)} by ${who(l.submitted_by ?? '')}</small></div>
       <p class="small">Changes: ${changedFields(l.published, l.draft).map((k) => FIELD_LABEL[k]).join(', ') || 'none'}</p>
+      ${proposedLine(db, l)}
       <div class="req-actions">
         <form data-api="/portal/api/s/${l.studio_slug}/listings/${l.slug}/publish" data-then="reload" data-confirm="Publish ${l.draft.title || l.slug} to the site?"><button class="btn brass">Publish</button>${err}</form>
         <form data-api="/portal/api/s/${l.studio_slug}/listings/${l.slug}/return" data-then="reload" class="inline-form"><input name="note" placeholder="Why it’s being sent back" aria-label="Why it’s being sent back"><button class="btn sm">Send back</button>${err}</form>
@@ -317,6 +319,13 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const wantsSubmit = !wantsPublish && !P.canPublish(u);
     const bad = draftProblems(db, l, draft, wantsPublish || wantsSubmit);
     if (bad.length) fail(400, bad.join(' '));
+    // A name left in "Made by"’s "Add a new studio…" fields is added with the save (listing-makers.ts).
+    if (typeof b.maker_new_name === 'string' && b.maker_new_name.trim()) {
+      const added = addMaker(h, u, s, l, b.maker_new_name, b.maker_new_website).name;
+      if (!draft.makers.includes(added)) draft.makers.push(added);
+    }
+    pruneMakerProposals(db, l.slug, draft.makers);
+    if (wantsPublish) createProposedStudios(db, h.actor(u), l.slug, draft.makers);
     saveListing(db, l, draft, h.actor(u), wantsPublish ? 'publish' : wantsSubmit ? 'submit' : 'save');
     return c.json({ ok: true });
   });
@@ -342,7 +351,11 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
   app.post('/portal/api/s/:studio/listings/:slug/publish', async (c) => {
     const u = h.apiUser(c);
     if (!P.canPublish(u)) fail(403, 'Only Vault release managers can publish to the site.');
-    publishListing(db, apiListing(c, u).l, h.actor(u));
+    const { l } = apiListing(c, u);
+    const bad = draftProblems(db, l, l.draft, true);
+    if (bad.length) fail(400, bad.join(' '));
+    createProposedStudios(db, h.actor(u), l.slug, l.draft.makers);
+    publishListing(db, l, h.actor(u));
     return c.json({ ok: true });
   });
 

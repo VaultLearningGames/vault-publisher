@@ -5,6 +5,7 @@
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
 import { REPOSITORY_ID, REPOSITORY_NAME, studioWebsite, StudioNotEmptyError, type Db, type Studio, type StudioRole, type StudioSource, type User, type VaultRole } from '../db.ts';
+import { slugify } from '../listings-import.ts';
 import { isSlug } from '../paths.ts';
 import { html, type Html } from './html.ts';
 import { ago, head, pill, ROLE_LABEL, VAULT_LABEL, who } from './routes.ts';
@@ -75,13 +76,13 @@ function roleOf(v: unknown): StudioRole {
   if (!ROLES.includes(v as StudioRole)) fail(400, 'Choose a role.');
   return v as StudioRole;
 }
-function nameOf(v: unknown): string {
+export function nameOf(v: unknown): string {
   const name = typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : '';
   if (!name) fail(400, 'Give the studio a name.');
   if (name.length > MAX_NAME) fail(400, `The name is too long (at most ${MAX_NAME} characters).`);
   return name;
 }
-function websiteOf(v: unknown): string | null {
+export function websiteOf(v: unknown): string | null {
   try { return studioWebsite(v); } catch (err) { fail(400, (err as Error).message); }
 }
 // "fielddaylab", "@fielddaylab" or "https://github.com/fielddaylab" → "fielddaylab"; '' for none.
@@ -100,6 +101,20 @@ function repositoryNameOf(v: unknown): string {
 function repositoryIdOf(v: unknown): string {
   const s = typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : '';
   if (s && !REPOSITORY_ID.test(s)) fail(400, 'The repository id is a number (gh api repos/OWNER/NAME --jq .id).');
+  return s;
+}
+
+// A studio made from a game's "Made by" chooser (listing-makers.ts): a name and a website, as on Vault → Studios'
+// "New studio" form with the GitHub organization left empty, so Vault manages it (owner id "vault:SLUG"). Its short
+// name is made from its name, as the listing import does. The caller decides who may do this.
+export function createManagedStudio(db: Db, actor: string, input: { name: unknown; website: unknown }, detail: Record<string, unknown> = {}): Studio {
+  const name = nameOf(input.name);
+  if (db.studios().some((s) => s.name.toLowerCase() === name.toLowerCase())) fail(409, `There’s already a studio named ${name}.`);
+  const website = websiteOf(input.website);
+  let slug = slugify(name).replace(/-+$/, '') || 'studio';
+  while (db.studioBySlug(slug) || db.studioByOwnerId(`vault:${slug}`)) slug = `${slug.slice(0, 61).replace(/-+$/, '')}-2`;
+  const s = db.createStudio({ slug, name, github_owner: '', github_owner_id: `vault:${slug}`, website });
+  db.audit(actor, 'studio.create', slug, { name, github: null, github_owner_id: s.github_owner_id, website, via: 'made by', ...detail });
   return s;
 }
 

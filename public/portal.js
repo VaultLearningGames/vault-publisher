@@ -170,6 +170,136 @@
     }
   });
 
+  // The listing editor's "Made by" chooser (data-makers="its API"). The makers are checkboxes named makers:NAME, saved
+  // in page order: the ticked ones, then every other studio. Here the unticked studios move into the "Add a studio…"
+  // dropdown; choosing one ticks it and puts it last, and unticking a studio puts it back. "Add a new studio…" opens the
+  // name and website fields ("Add studio" posts them), and "Create studio" (data-maker-create, click twice) makes a
+  // studio of a maker that isn't one.
+  document.querySelectorAll('[data-makers]').forEach((box) => {
+    const chips = box.querySelector('.maker-chips');
+    const select = box.querySelector('.maker-add select');
+    if (!select) return; // read-only
+    const fresh = box.querySelector('.maker-new');
+    const [name, website] = fresh.querySelectorAll('input');
+    const err = box.querySelector(':scope > .err');
+    const say = (msg, status) => { err.style.color = ''; err.classList.toggle('status', !!status); err.textContent = msg; };
+    const boxOf = (item) => item.querySelector('input');
+    const nameOf = (item) => boxOf(item).name.slice('makers:'.length);
+    const find = (n) => [...chips.children].find((item) => nameOf(item).trim().toLowerCase() === n.trim().toLowerCase());
+    const refill = () => {
+      select.querySelectorAll('option[data-studio]').forEach((o) => o.remove());
+      for (const n of [...chips.children].filter((item) => item.hidden).map(nameOf).sort((a, b) => a.localeCompare(b))) {
+        const o = new Option(n, n);
+        o.dataset.studio = '';
+        select.insertBefore(o, select.lastElementChild);
+      }
+      select.value = '';
+    };
+    const choose = (item) => { boxOf(item).checked = true; item.hidden = false; chips.append(item); refill(); };
+    const close = () => { fresh.open = false; name.value = ''; website.value = ''; };
+    // What follows a name that isn't a studio's ("not a studio yet"…); nothing once it is one.
+    const note = (item, text) => {
+      item.querySelectorAll('.maker-note, [data-maker-create]').forEach((el) => el.remove());
+      item.toggleAttribute('data-studio', !text);
+      if (!text) return;
+      const span = document.createElement('span');
+      span.className = 'maker-note';
+      span.textContent = text;
+      boxOf(item).parentElement.append(' ', span);
+    };
+    const post = async (fields) => {
+      busy++;
+      try {
+        const res = await fetch(box.dataset.makers, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
+          body: JSON.stringify(fields),
+          credentials: 'same-origin',
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `Something went wrong (HTTP ${res.status}).`);
+        return body;
+      } finally {
+        busy--;
+      }
+    };
+    for (const item of chips.children) item.hidden = !boxOf(item).checked;
+    box.classList.add('js');
+    refill();
+
+    select.addEventListener('change', () => {
+      const picked = select.value;
+      if (picked === '+') { select.value = ''; fresh.open = true; name.focus(); return; }
+      const item = picked && find(picked);
+      if (item) { choose(item); say(`${picked} added. Save to keep it.`, true); }
+    });
+    chips.addEventListener('change', (e) => {
+      const item = e.target.closest('.maker');
+      if (e.target.checked || !item.hasAttribute('data-studio')) return;
+      item.hidden = true;
+      refill();
+      say(`${nameOf(item)} taken off; it’s back in the list. Save to keep it off.`, true);
+      select.focus();
+    });
+    box.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-maker-cancel]')) { close(); say(''); select.focus(); return; }
+      const add = e.target.closest('[data-maker-add]');
+      const create = e.target.closest('[data-maker-create]');
+      if (add) {
+        if (!name.value.trim()) { say('Give the studio a name.'); name.focus(); return; }
+        if (!website.reportValidity()) return;
+        add.disabled = true;
+        try {
+          const made = await post({ name: name.value, website: website.value });
+          let item = find(made.name);
+          if (!item) {
+            item = document.createElement('span');
+            item.className = 'maker';
+            const label = document.createElement('label');
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.name = `makers:${made.name}`;
+            label.append(input, ` ${made.name}`);
+            item.append(label);
+          }
+          note(item, made.note);
+          choose(item);
+          close();
+          say(made.studio ? `${made.name} added. Save to keep it.` : `${made.name} added: ${made.note}. Save to send it to Vault.`, true);
+          select.focus();
+        } catch (ex) {
+          say(ex.message);
+        } finally {
+          add.disabled = false;
+        }
+      } else if (create) {
+        if (create.dataset.armed !== '1') {
+          create.dataset.armed = '1';
+          create.dataset.label = create.textContent;
+          create.textContent = 'Confirm';
+          say(`Create the studio ${create.dataset.makerCreate}${create.dataset.website ? ` (${create.dataset.website})` : ''}?`, true);
+          setTimeout(() => { if (create.dataset.armed === '1') { create.dataset.armed = ''; create.textContent = create.dataset.label; say(''); } }, 6000);
+          return;
+        }
+        create.dataset.armed = '';
+        create.disabled = true;
+        try {
+          const made = await post({ name: create.dataset.makerCreate, website: create.dataset.website });
+          note(create.closest('.maker'), made.note);
+          say(`${made.name} is a studio now.`, true);
+        } catch (ex) {
+          create.disabled = false;
+          create.textContent = create.dataset.label;
+          say(ex.message);
+        }
+      }
+    });
+    // Enter in the new studio's fields adds the studio; it doesn't save the whole listing.
+    fresh.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); fresh.querySelector('[data-maker-add]').click(); }
+    });
+  });
+
   // Listing preview buttons (data-preview): post the editor's current, unsaved fields and show the result on the
   // site. The tab is opened during the click (so popup blockers allow it) and pointed at the preview once it exists.
   document.addEventListener('click', async (e) => {

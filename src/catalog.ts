@@ -1,6 +1,6 @@
 // Building the public catalog's pieces (GET /v1/catalog), shared with listing previews (listing-preview.ts), so a
 // preview shows a game exactly as the site build would.
-import type { Db, Listing } from './db.ts';
+import type { Db, Listing, Studio } from './db.ts';
 import { catalogEntry, type ListingFields } from './listings.ts';
 
 type Row = Listing & { studio_slug: string; studio_name: string; studio_website?: string | null };
@@ -17,8 +17,12 @@ export function catalogGame(db: Db, prodPublicUrl: string, l: Row, f: ListingFie
   return catalogEntry(l, f, cdn);
 }
 
-// Every studio of these listings with its website, by name.
-export function catalogStudios(rows: Row[]) {
-  return [...new Map(rows.map((l) => [l.studio_slug, { slug: l.studio_slug, name: l.studio_name, url: l.studio_website || null }])).values()]
-    .sort((a, b) => a.name.localeCompare(b.name));
+// Every studio of these listings with its website, by name; and, from `all`, every other studio that one of `games`
+// names as a maker (matched like the site does: trimmed, any capitalization), so the site can link that name too.
+export function catalogStudios(rows: Row[], all: Studio[] = [], games: { makers: string[] }[] = []) {
+  const key = (name: string) => name.trim().toLowerCase();
+  const named = new Set(games.flatMap((g) => g.makers.map(key)));
+  const out = new Map(rows.map((l) => [l.studio_slug, { slug: l.studio_slug, name: l.studio_name, url: l.studio_website || null }]));
+  for (const s of all) if (!out.has(s.slug) && named.has(key(s.name))) out.set(s.slug, { slug: s.slug, name: s.name, url: s.website || null });
+  return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

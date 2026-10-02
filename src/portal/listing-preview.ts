@@ -73,8 +73,9 @@ export function registerListingPreview(app: Hono, h: ListingHelpers, store = new
     const cdnReady = !!(l.game_id && db.currentRelease(l.game_id));
     const draft = formToDraft(await jsonBody(c), l.draft, P.canPublish(u), cdnReady);
     const game = catalogGame(db, h.deps.prodPublicUrl, l, draft);
-    // The catalog's studios, plus this game's studio when it has nothing on the site yet.
-    const studios = catalogStudios([...db.listings({ published: true }), l]);
+    // The catalog's studios, plus this game's studio when it has nothing on the site yet, and its makers' studios.
+    const published = db.listings({ published: true });
+    const studios = catalogStudios([...published, l], db.studios(), [...published.map((x) => x.published!), draft]);
     const { token, expires } = store.put({ version: 1, game, studios });
     return c.json({ ok: true, token, expires_at: new Date(expires).toISOString(), urls: sites.map((site) => ({ label: site.label, url: `${site.url}/_preview/${token}/` })) });
   });

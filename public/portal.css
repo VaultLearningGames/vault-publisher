@@ -433,6 +433,17 @@ tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
 .img-up { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .field .img-up input[type=file] { font-size: 12px; max-width: 240px; width: auto; border: 0; padding: 1px; background: none; }
 
+/* Listing editor: the "Made by" chooser. The makers are ticked chips in the site's order; the other studios are
+   unticked chips until portal.js (which adds .js) moves them into the "Add a studio…" dropdown. */
+.maker { display: inline-flex; align-items: center; gap: 6px; }
+.maker[hidden] { display: none; }
+.maker-note { color: var(--ink-3); font-size: 11.5px; font-weight: 400; }
+.maker-add select { width: auto; max-width: 100%; }
+.maker-new > summary { cursor: pointer; color: var(--slate); font-size: 12.5px; width: fit-content; }
+.maker-new-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 14px; margin-top: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--sunk); }
+.maker-new-foot { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.makers.js .maker-new > summary, .makers:not(.js) .maker-add, .makers:not(.js) .maker-new-foot .btn, .makers:not(.js) [data-maker-create] { display: none; }
+
 /* Vault → People: each person's studio memberships, one row each */
 .mem-list { display: flex; flex-direction: column; gap: 6px; }
 .mem { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

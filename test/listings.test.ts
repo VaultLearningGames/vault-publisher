@@ -320,15 +320,17 @@ describe('Vault → Site games: one table with featured games and availability',
     const page = await (await boss.get('/vault/listings')).text();
     const row = (slug: string) => page.slice(page.indexOf(`id="game-${slug}"`), page.indexOf('</tr>', page.indexOf(`id="game-${slug}"`)));
     for (const slug of ['wake', 'bloom', 'draft-only']) assert.ok(page.includes(`id="game-${slug}"`), slug);
-    assert.ok(page.indexOf('id="game-wake"') < page.indexOf('id="game-bloom"'), 'featured games come first');
+    // this card's severity ordering (Failure first) supersedes featured-first in the
+    // merged table; bloom is a failure, so it renders before wake (passing) even though wake is featured
+    assert.ok(page.indexOf('id="game-bloom"') < page.indexOf('id="game-wake"'), 'severity order: failures first');
     assert.match(row('wake'), /name="featured" checked/);
     assert.match(row('wake'), /#1/);
     assert.doesNotMatch(row('bloom'), /name="featured" checked/);
     assert.match(row('draft-only'), /name="featured"\s+disabled/, 'only games on the site can be featured');
     assert.match(page, /name="sequence" value="1"/, 'a featured game has its editor');
     assert.equal((page.match(/name="sequence"/g) ?? []).length, 1);
-    assert.match(row('wake'), /title="The play address loaded"[^]*Loads[^]*0\.2 s[^]*actions\/runs\/42/);
-    assert.match(row('bloom'), /title="HTTP 404 Not Found"[^]*Failing/);
+    assert.match(row('wake'), /title="The play address loaded"[^]*Passing[^]*0\.2 s[^]*actions\/runs\/42/);
+    assert.match(row('bloom'), /title="HTTP 404 Not Found"[^]*Failure/);
     assert.match(row('draft-only'), /<td class="muted">—<\/td>/, 'no result: dashes');
     assert.match(page, /Waiting for Vault|No site changes are waiting/);
     assert.match(page, /Import from the Hugo site prototype/);

@@ -44,3 +44,14 @@ disableKinds = ['taxonomy', 'term', 'rss']
 
 [sitemap]
   changeFreq = 'monthly'
+
+# card-redirects.json, next to the home page: the /game-cards/<card id> addresses and where each redirects
+# (themes/vault-squarespace/layouts/index.cardredirects.json). For the hosting's _redirects; not published.
+[outputFormats.cardredirects]
+  mediaType = 'application/json'
+  baseName = 'card-redirects'
+  isPlainText = true
+  notAlternative = true
+
+[outputs]
+  home = ['html', 'cardredirects']

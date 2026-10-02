@@ -20,9 +20,9 @@
     "directory": "../../site/public",
     // The nearest 404.html up the tree (the build has one, at the root), with status 404.
     "not_found_handling": "404-page",
-    // /wake/ is wake/index.html; /wake and /wake/index.html redirect to /wake/. (The build's _redirects answers
-    // /wake first, with a 301.)
-    "html_handling": "auto-trailing-slash"
+    // /wake is wake/index.html: the address Squarespace had, with no trailing slash. /wake/ and /wake/index.html
+    // redirect to /wake. (The build's _redirects answers /wake/ first, with a 301.)
+    "html_handling": "drop-trailing-slash"
   },
   "env": {
     "staging": { "name": "vault-site-staging" },

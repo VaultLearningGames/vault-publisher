@@ -1,20 +1,13 @@
 {{/*
   The rest of the Squarespace /game-cards collection:
-    /game-cards/<card id>              each game's Game Card (Squarespace linked the card straight to the game page):
-                                       a redirect to the game page. Card ids come from data/squarespace/games.json.
+    /game-cards/<card id>              each game's Game Card: not a page here but a 301 to the game's page, listed
+                                       in card-redirects.json (layouts/index.cardredirects.json) for the hosting.
     /game-cards/category/<Grades X>    the collection filtered by grade band or by studio ("Dev: <maker>"), and
     /game-cards/tag/<Subject: X>       by subject or topic ("Topic: X"), as in Squarespace's sitemap.
   Filter pages are generated from the catalog, so new values get pages too.
 */}}
 {{- $cats := slice }}{{ $tags := slice -}}
 {{- range hugo.Data.catalog.games -}}
-  {{- $slug := .slug -}}
-  {{- $lg := index (hugo.Data.squarespace.games.games | default dict) .slug -}}
-  {{- $target := .slug }}{{ with $lg }}{{ with .path }}{{ $target = . }}{{ end }}{{ end -}}
-  {{- $id := "" }}{{ with $lg }}{{ $id = .card_id | default "" }}{{ end -}}
-  {{- if $id -}}
-    {{- $.AddPage (dict "path" (printf "card-%s" $id) "title" .title "kind" "page" "params" (dict "redirect" (printf "/%s" $target) "sitemap" (dict "disable" true)) "slug" $id "type" "redirect") -}}
-  {{- end -}}
   {{- range .grades }}{{ $cats = $cats | append . }}{{ end -}}
   {{- range .makers }}{{ $cats = $cats | append (printf "Dev: %s" .) }}{{ end -}}
   {{- range .subjects }}{{ if and . (ne . "null") }}{{ $tags = $tags | append (printf "Subject: %s" .) }}{{ end }}{{ end -}}
@@ -24,8 +17,8 @@
 {{- range $kind, $vals := dict "category" ($cats | uniq) "tag" ($tags | uniq) -}}
   {{- range $vals -}}
     {{- /* Hugo can't write "Dev:+Field+Day+Lab" as a folder name, so these are built under /game-cards/_filters/ and
-           scripts/squarespace-paths.mjs (run by `npm run build`) moves each to the folder nginx looks up for the
-           Squarespace URL (it decodes %3A to ":" and %2F to "/", and keeps "+"). */ -}}
+           scripts/squarespace-paths.mjs (run by `npm run site:build`) moves each to the folder named after its
+           Squarespace address with %3A as ":" and %2F as "/", "+" kept. */ -}}
     {{- $seg := replace . " " "+" -}}
     {{- $n := printf "%s-%s" $kind (md5 . | truncate 10 "") -}}
     {{- $.AddPage (dict "path" $n "title" . "kind" "page" "type" "game-cards" "url" (printf "/game-cards/_filters/%s/" $n)

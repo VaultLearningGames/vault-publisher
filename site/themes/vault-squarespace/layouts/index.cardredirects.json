@@ -1,0 +1,11 @@
+{{- /* card-redirects.json: Squarespace's /game-cards/<card id> addresses (each game's Game Card, an indexed page there)
+       and the game page each one now redirects to with a 301. Read by src/site-hosting.ts, which writes the hosting's
+       _redirects; the file itself is not published. Card ids come from data/squarespace/games.json. */ -}}
+{{- $out := slice -}}
+{{- range (hugo.Data.catalog.games | default slice) -}}
+  {{- $id := "" }}{{ with index (hugo.Data.squarespace.games.games | default dict) .slug }}{{ $id = .card_id | default "" }}{{ end -}}
+  {{- with site.GetPage (printf "/games/%s" .slug) -}}
+    {{- if $id }}{{ $out = $out | append (dict "from" (printf "/game-cards/%s" $id) "to" (strings.TrimSuffix "/" .RelPermalink)) }}{{ end -}}
+  {{- end -}}
+{{- end -}}
+{{- $out | jsonify -}}

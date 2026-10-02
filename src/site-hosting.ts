@@ -4,9 +4,14 @@
 // served. Nothing else is configured anywhere: no zone rule, no script.
 //
 //   _headers    cache lifetimes, X-Robots-Tag, and the CORS header listing previews need
-//   _redirects  /s/keys-to-the-vault.pdf, the "/wake" → "/wake/" redirects (301), and the /game-cards filter
-//               addresses with a "+" in them, which the hosting would otherwise answer with a redirect to "%2B"
-import { readdir, writeFile } from 'node:fs/promises';
+//   _redirects  /s/keys-to-the-vault.pdf, the /game-cards/<card> addresses (301 to the game's page), "/wake/" →
+//               "/wake" (301), and the /game-cards filter addresses with "+" or "%2F" in them, which the hosting
+//               would otherwise answer with a redirect to its own spelling
+//   robots.txt  everything may be crawled; production's also names the sitemap
+//
+// Every page is served at its Squarespace address, which has no trailing slash (html_handling: drop-trailing-slash
+// serves wake/index.html at /wake): the address Google has indexed, the canonical link and the site's own links.
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // Pages and feeds change when listings do: a minute. Snapshot images (named NAME-<6 hex of their source address>) and
@@ -36,10 +41,14 @@ export function canonicalPath(key: string): string {
   return key.split('/').map(encodeURIComponent).join('/');
 }
 
-// The same path as the site's own links, the sitemap and Squarespace's addresses spell it: "+" stays "+"
-// (site/scripts/squarespace-paths.mjs), ":" is "%3A".
+// The same path as Squarespace's addresses, the sitemap, the canonical link and the site's own links spell it
+// (Hugo's urlquery of a filter's value: partials/sq/canonical.html): "+" stays "+", ":" is "%3A"; and a "/" inside a
+// filter's value ("Subject: Family/Consumer Science", which site/scripts/squarespace-paths.mjs makes two folders) is
+// "%2F".
 export function linkedPath(key: string): string {
-  return canonicalPath(key).replace(/%2B/g, '+');
+  const filter = key.match(/^(game-cards\/(?:category|tag))\/(.+)$/);
+  const enc = (s: string) => encodeURIComponent(s).replace(/%2B/g, '+').replace(/[!'()*~]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  return filter ? `${filter[1]}/${enc(filter[2])}` : key.split('/').map(enc).join('/');
 }
 
 interface Dir { files: string[]; dirs: Map<string, Dir> }
@@ -107,33 +116,57 @@ export function headersFile(files: string[], opts: HostingOptions = {}): string 
 
 export const PDF_REDIRECT = '/s/keys-to-the-vault.pdf /files/keys-to-the-vault.pdf 301';
 
-export interface Redirects { text: string; rewrites: number; slashes: number; skippedSlashes: boolean }
+// A Squarespace address that is now another page's: "/game-cards/addition-blocks" → "/addition-blocks".
+export interface CardRedirect { from: string; to: string }
 
-export function redirectsFile(files: string[]): Redirects {
+export interface Redirects { text: string; cards: number; rewrites: number; slashes: number; skippedSlashes: boolean }
+
+export function redirectsFile(files: string[], cards: CardRedirect[] = []): Redirects {
   const pages = files.filter((k) => k.endsWith('/index.html')).map((k) => k.slice(0, -'/index.html'.length)).sort();
   // A line is "FROM TO STATUS"; "*" and ":name" in FROM are placeholders. An address that can't be written safely
-  // gets no line: the hosting still serves it, after its own redirect.
+  // gets no line: the hosting still serves it, after its own redirect (a 307).
   const plain = (p: string) => !/[\s*:]/.test(p) && p.length < 480;
-  // Served at once (200) at the address the site links to, instead of a redirect to the "%2B" spelling.
+  const served = new Set(pages.map((p) => `/${linkedPath(p)}`));
+  // Squarespace's Game Card addresses: permanent redirects to the game's page, so what the card earned passes to it.
+  const cardLines: string[] = [];
+  for (const { from, to } of [...cards].sort((a, b) => a.from.localeCompare(b.from))) {
+    if (!/^\/game-cards\/[A-Za-z0-9._-]+$/.test(from)) throw new Error(`card redirect from "${from}": not a /game-cards/<card> address`);
+    if (!served.has(to)) throw new Error(`card redirect ${from} → ${to}: the build has no such page`);
+    if (served.has(from)) throw new Error(`card redirect ${from}: the build has a page at that address`);
+    cardLines.push(`${from} ${to} 301`);
+  }
+  // Served at once (200) at the address everything links to, instead of a redirect to the hosting's spelling.
   const rewrites = pages.filter((p) => linkedPath(p) !== canonicalPath(p) && plain(linkedPath(p)))
-    .map((p) => `/${linkedPath(p)}/ /${canonicalPath(p)}/ 200`);
-  // "/wake" → "/wake/", permanent, as nginx and the R2 rule answered (the hosting's own answer is a 307). The site's
-  // links and canonical addresses have no trailing slash, so this is the redirect most visits go through.
-  const slashes = pages.filter((p) => plain(linkedPath(p))).map((p) => `/${linkedPath(p)} /${linkedPath(p)}/ 301`);
-  const fits = 1 + rewrites.length + slashes.length <= MAX_STATIC_REDIRECTS;
-  if (1 + rewrites.length > MAX_STATIC_REDIRECTS) throw new Error(`_redirects would need ${1 + rewrites.length} lines; Cloudflare allows ${MAX_STATIC_REDIRECTS}`);
+    .map((p) => `/${linkedPath(p)} /${canonicalPath(p)} 200`);
+  // "/wake/" → "/wake", permanent (the hosting's own answer is a 307); the same for a card's address.
+  const slashes = [...pages.filter((p) => plain(linkedPath(p))).map((p) => `/${linkedPath(p)}/ /${linkedPath(p)} 301`),
+    ...cardLines.map((l) => l.replace(' ', '/ '))];
+  const must = 1 + cardLines.length + rewrites.length;
+  if (must > MAX_STATIC_REDIRECTS) throw new Error(`_redirects would need ${must} lines; Cloudflare allows ${MAX_STATIC_REDIRECTS}`);
+  const fits = must + slashes.length <= MAX_STATIC_REDIRECTS;
   const out = [
     '# Written by scripts/site-hosting.ts (src/site-hosting.ts) at every build: not edited by hand.',
     PDF_REDIRECT,
+    ...cardLines,
     ...rewrites,
     ...(fits ? slashes : []),
   ];
-  return { text: out.join('\n') + '\n', rewrites: rewrites.length, slashes: fits ? slashes.length : 0, skippedSlashes: !fits };
+  return { text: out.join('\n') + '\n', cards: cardLines.length, rewrites: rewrites.length, slashes: fits ? slashes.length : 0, skippedSlashes: !fits };
+}
+
+// robots.txt. Squarespace's file kept crawlers out of its own machinery only (/config, /api, ?format=json, ...), none
+// of which exists here, and named the sitemap: so everything may be crawled. A build that is not to be indexed
+// (staging, a test address) says so with X-Robots-Tag: noindex (_headers), which a crawler only sees if it may fetch
+// the page: such a build must not disallow anything either, and names no sitemap.
+export function robotsFile(opts: HostingOptions = {}): string {
+  const host = opts.indexHost?.trim().toLowerCase();
+  return `User-agent: *\nDisallow:\n${host ? `\nSitemap: https://${host}/sitemap.xml\n` : ''}`;
 }
 
 // Every file under `dir`, as paths from it ("game-cards/category/Dev:+Field+Day+Lab/index.html"), without the
 // hosting's own files.
-export const HOSTING_FILES = ['_headers', '_redirects', '.assetsignore'];
+export const CARD_REDIRECTS = 'card-redirects.json';
+export const HOSTING_FILES = ['_headers', '_redirects', '.assetsignore', CARD_REDIRECTS];
 export async function listFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
   const base = dir.replace(/\/+$/, '');
@@ -146,18 +179,21 @@ export async function listFiles(dir: string): Promise<string[]> {
   return out.sort();
 }
 
-export interface HostingResult { files: number; headerRules: number; rewrites: number; slashes: number; skippedSlashes: boolean }
+export interface HostingResult { files: number; headerRules: number; cards: number; rewrites: number; slashes: number; skippedSlashes: boolean }
 
 // Write the hosting files into a build. A build without a home page and a 404 page isn't the site: refuse it, so it
 // is never published.
 export async function writeHostingFiles(dir: string, opts: HostingOptions = {}): Promise<HostingResult> {
+  await writeFile(join(dir, 'robots.txt'), robotsFile(opts));
   const files = await listFiles(dir);
   for (const need of ['index.html', '404.html']) if (!files.includes(need)) throw new Error(`the build has no ${need}: not a site to publish`);
+  // Hugo's list of the Game Card addresses (layouts/index.cardredirects.json); a build without it has none.
+  const cards = await readFile(join(dir, CARD_REDIRECTS), 'utf8').then((t) => JSON.parse(t) as CardRedirect[] | null, () => null) ?? [];
   const headers = headersFile(files, opts);
-  const redirects = redirectsFile(files);
+  const redirects = redirectsFile(files, cards);
   await writeFile(join(dir, '_headers'), headers);
   await writeFile(join(dir, '_redirects'), redirects.text);
-  // Never published, whatever machine the build was made on.
-  await writeFile(join(dir, '.assetsignore'), '.DS_Store\n');
-  return { files: files.length, headerRules: headers.split('\n').filter((l) => /^(\/|https:)/.test(l)).length, rewrites: redirects.rewrites, slashes: redirects.slashes, skippedSlashes: redirects.skippedSlashes };
+  // Never published: the list the redirects were made from, and a Mac's folder files.
+  await writeFile(join(dir, '.assetsignore'), `${CARD_REDIRECTS}\n.DS_Store\n`);
+  return { files: files.length, headerRules: headers.split('\n').filter((l) => /^(\/|https:)/.test(l)).length, cards: redirects.cards, rewrites: redirects.rewrites, slashes: redirects.slashes, skippedSlashes: redirects.skippedSlashes };
 }

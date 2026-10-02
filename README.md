@@ -42,9 +42,9 @@ Studios manage games, members and release requests at **https://portal.vaultlear
 | `src/{releases,storage,paths,config,forms,catalog,game-checks}.ts` | Domain logic |
 | `src/studios-file.ts` | `studios.json` at startup: studios and the repositories assigned to them |
 | `src/portal/site-preview.ts` | Listing previews: runs Hugo on `site/` with the previewed game in the catalog, and returns its page |
-| `src/site-hosting.ts`, `scripts/site-hosting.ts` | The static hosting's `_headers` and `_redirects`, written into the built site (`site/public`) |
+| `src/site-hosting.ts`, `scripts/site-hosting.ts` | The static hosting's `_headers`, `_redirects` and `robots.txt`, written into the built site (`site/public`) |
 | `cloudflare/site/` | The site's hosting: `wrangler.jsonc` (one Worker per system, files only), the pinned wrangler, `check.sh` |
-| `scripts/site-check.ts` | Checks a served copy of the site against its build: every address, redirects, 404 page, headers |
+| `scripts/site-check.ts` | Checks a served copy of the site against its build: every address, redirects, 404 page, headers, and each page's canonical address, title and structured data |
 | `site/` | The website: `hugo.toml`, `content/`, `data/`, `themes/vault-squarespace/`, `static/` ([site/README.md](site/README.md)) |
 | `scripts/cloudflare-site-hosts.sh` | Admin, once per hostname: attach it to the site's Worker, detach it, remove its R2-era setup |
 | `scripts/cloudflare-site-rules.sh` | R2-era: the five zone rules a bucket's hostname needed. Kept to remove them (and for a rollback) |

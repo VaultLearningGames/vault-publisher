@@ -16,7 +16,7 @@
         {{- /* An uploaded image's absolute URL as is, a site path from the site root, else the game's own image. */}}
         {{- $src := $f.image | default $g.Params.hero_image | default $g.Params.thumb_image }}
         {{- if not (or (hasPrefix $src "https://") (hasPrefix $src "http://")) }}{{ $src = strings.TrimPrefix "/" $src | printf "/%s" }}{{ end }}
-        {{- if eq $b.type "image" }}{{ $b = merge $b (dict "src" $src "alt" $g.Title "href" $g.RelPermalink) }}
+        {{- if eq $b.type "image" }}{{ $b = merge $b (dict "src" $src "alt" $g.Title "href" (strings.TrimSuffix "/" $g.RelPermalink)) }}
         {{- else if eq $b.type "text" }}
           {{- $blurb := $f.blurb | default (partial "sq/game-desc.html" $g) }}
           {{- $b = merge $b (dict "html" (printf "<h4>%s</h4><p>%s</p>" ($g.Title | htmlEscape) ($blurb | markdownify))) }}

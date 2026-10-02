@@ -1,23 +1,43 @@
 {{- $siteTitle := site.Title -}}
 {{- $title := .Title -}}
 {{- with .Params.legacy }}{{ with .seo_title }}{{ $title = . }}{{ end }}{{ end -}}
+{{- with .Params.seo_title }}{{ $title = . }}{{ end -}}
+{{- /* A filter page is the collection, filtered: Squarespace titled it "<value> — <the collection's title>". */ -}}
+{{- with .Params.filter_kind }}{{ with site.GetPage "/game-cards" }}{{ $title = printf "%s — %s" $title .Title }}{{ end }}{{ end -}}
+{{- /* The description: the one written for search engines where there is one (Squarespace's "SEO description"), or
+       else a game's short description as its page shows it (partials/sq/game-desc.html), as plain text. */ -}}
 {{- $desc := .Params.seo_description | default "" -}}
 {{- with .Params.legacy }}{{ with .seo_description }}{{ $desc = . }}{{ end }}{{ end -}}
-{{- if .IsHome }}{{ $desc = site.Params.description }}{{ end -}}
+{{- if and (not $desc) (eq .Type "games") }}{{ $desc = partial "sq/game-desc.html" . | plainify | htmlUnescape | strings.TrimSpace }}{{ end -}}
+{{- if or .IsHome (eq .Layout "home") }}{{ $desc = site.Params.description }}{{ end -}}
+{{- $fullTitle := printf "%s — %s" $title $siteTitle }}{{ if or .IsHome (eq .Layout "home") }}{{ $fullTitle = $siteTitle }}{{ end -}}
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ if or .IsHome (eq .Layout "home") }}{{ $siteTitle }}{{ else }}{{ $title }} &mdash; {{ $siteTitle }}{{ end }}</title>
-<meta name="description" content="{{ $desc }}">
-{{- $canon := .Permalink | strings.TrimSuffix "/" }}{{ if .IsHome }}{{ $canon = site.BaseURL | strings.TrimSuffix "/" }}{{ end }}
-{{- if eq .Layout "home" }}{{ $canon = site.BaseURL | strings.TrimSuffix "/" }}{{ end }}
-{{- with .Params.sq_path }}{{ $canon = printf "%s/%s" (site.BaseURL | strings.TrimSuffix "/") (replace (replace . ":" "%3A") "/" "/") }}{{ end }}
+<title>{{ $fullTitle }}</title>
+{{- with $desc }}
+<meta name="description" content="{{ . }}">{{ end }}
+{{- $canon := partial "sq/canonical.html" . }}
 <link rel="canonical" href="{{ $canon }}">
 <meta property="og:site_name" content="{{ $siteTitle }}">
-<meta property="og:title" content="{{ if .IsHome }}{{ $siteTitle }}{{ else }}{{ $title }} &mdash; {{ $siteTitle }}{{ end }}">
+<meta property="og:title" content="{{ $fullTitle }}">
 <meta property="og:url" content="{{ $canon }}">
 <meta property="og:type" content="website">
 {{- with $desc }}<meta property="og:description" content="{{ . }}">{{ end }}
 <meta property="og:image" content="{{ "sq/img/site/og-vault-kids.jpg" | absURL }}">
+{{- /* Structured data, as Squarespace gave every page: the site and who publishes it; on a game's page also the page
+       itself, with nothing the page doesn't show (its name, description, address and cover image). */}}
+{{- $base := site.BaseURL | strings.TrimSuffix "/" }}
+{{- $logo := "sq/img/site/vault-game-library.png" | absURL }}
+{{- $graph := slice
+      (dict "@type" "WebSite" "@id" (printf "%s/#website" $base) "url" $base "name" $siteTitle "description" site.Params.description "publisher" (dict "@id" (printf "%s/#organization" $base)))
+      (dict "@type" "Organization" "@id" (printf "%s/#organization" $base) "name" $siteTitle "url" $base "logo" $logo) }}
+{{- if eq .Type "games" }}
+  {{- $pg := dict "@type" "WebPage" "@id" $canon "url" $canon "name" $title "isPartOf" (dict "@id" (printf "%s/#website" $base)) }}
+  {{- with $desc }}{{ $pg = merge $pg (dict "description" .) }}{{ end }}
+  {{- with $.Params.hero_image }}{{ $pg = merge $pg (dict "image" (. | absURL)) }}{{ end }}
+  {{- $graph = $graph | append $pg }}
+{{- end }}
+<script type="application/ld+json">{{ dict "@context" "https://schema.org" "@graph" $graph | jsonify | safeJS }}</script>
 <link rel="icon" type="image/x-icon" media="(prefers-color-scheme: light)" href="{{ "favicon.ico" | relURL }}">
 <link rel="icon" type="image/x-icon" media="(prefers-color-scheme: dark)" href="{{ "favicon-dark.ico" | relURL }}">
 {{- /* Base 9 Sans, the heading font, is an Adobe Fonts typeface: it loads from Field Day's own Adobe Fonts web project

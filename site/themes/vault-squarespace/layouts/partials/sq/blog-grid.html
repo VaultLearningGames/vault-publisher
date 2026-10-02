@@ -20,7 +20,7 @@
     <article class="blog-item" data-offset="{{ mul .date.Unix 1000 }}">
       <a class="blog-img" href="{{ $href }}">{{ with $img }}<img src="{{ . }}" alt="{{ $p.Title }}" loading="lazy" decoding="async">{{ end }}</a>
       <div class="blog-meta">
-        <span class="blog-cats">{{ range $i, $c := $cats }}{{ if $i }}, {{ end }}<a href="/game-cards/category/{{ replace (replace $c " " "+") ":" "%3A" }}">{{ $c }}</a>{{ end }}</span>
+        <span class="blog-cats">{{ range $i, $c := $cats }}{{ if $i }}, {{ end }}<a href="{{ printf "/game-cards/category/%s" (urlquery $c) | safeURL }}">{{ $c }}</a>{{ end }}</span>
         <span class="blog-delim" aria-hidden="true"></span>
         <time class="blog-date" datetime="{{ .date.Format "2006-01-02" }}">{{ .date.Format "1/2/06" }}</time>
       </div>

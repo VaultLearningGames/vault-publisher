@@ -324,9 +324,12 @@ the [staging cutover](#cutover-vaultlearninggames-stagingorg-from-r2-to-the-work
 
 | The site needs | How |
 | --- | --- |
-| `/lakeland/` → `lakeland/index.html` | `html_handling: auto-trailing-slash` |
-| `/lakeland` → 301 `/lakeland/`, query string kept (`/game-cards?offset=20`). The site's own links and canonical addresses have no trailing slash, as on Squarespace, so most visits go through this | A line per page in `_redirects` (`/lakeland /lakeland/ 301`). Without the line the hosting redirects too, with a 307 |
-| `/game-cards/category/Dev%3A+Field+Day+Lab/` (68 filter pages; the folder is `Dev:+Field+Day+Lab`) | The hosting serves a file only at the spelling `encodeURIComponent` gives (`Dev%3A%2BField%2BDay%2BLab`) and redirects any other spelling there. A `200` line in `_redirects` per filter page serves the `+` spelling at once: `/…/Dev%3A+Field+Day+Lab/ /…/Dev%3A%2BField%2BDay%2BLab/ 200` |
+| Every page at its Squarespace address, which has no trailing slash: `/lakeland` is `lakeland/index.html`, answered 200 at once. It is the address Google has indexed, the page's canonical link, its sitemap entry and what the site's own links say | `html_handling: drop-trailing-slash`; `partials/sq/canonical.html` and `layouts/sitemap.xml` in the theme |
+| `/lakeland/` → 301 `/lakeland`, query string kept | A line per page in `_redirects` (`/lakeland/ /lakeland 301`). Without the line the hosting redirects too, with a 307 |
+| `/game-cards/category/Dev%3A+Field+Day+Lab`, `/game-cards/tag/Subject%3A+Family%2FConsumer+Science` (68 filter pages, spelled as Squarespace spelled them; the folders are `Dev:+Field+Day+Lab` and `Subject:+Family/Consumer+Science`) | The hosting serves a file only at the spelling `encodeURIComponent` gives each folder (`Dev%3A%2BField%2BDay%2BLab`) and redirects any other spelling there. A `200` line in `_redirects` per filter page serves Squarespace's spelling at once: `/…/Dev%3A+Field+Day+Lab /…/Dev%3A%2BField%2BDay%2BLab 200` |
+| `/game-cards/<card>` (99 on Squarespace: each game's Game Card, an indexed page of its own, some with ids like `blog-post-title-one-kma9a`) → 301 to the game's page | Hugo writes the list (`card-redirects.json`, from `data/squarespace/games.json`; not published), `src/site-hosting.ts` turns it into `_redirects` lines and refuses a target that isn't a page |
+| `robots.txt` | Written by `src/site-hosting.ts`: nothing disallowed (Squarespace's file only kept crawlers out of its own machinery); production's names `https://vaultlearninggames.org/sitemap.xml`, other builds name none. Without a file of the site's, Cloudflare answers `/robots.txt` with its own comment-only "content signals" text; with one, the site's is served unchanged (checked on staging), as long as the zone's *managed robots.txt* (AI Crawl Control) stays off |
+| Title, description, canonical, Open Graph and structured data (JSON-LD: WebSite and Organization; on a game's page also the WebPage) | `partials/sq/head.html`. Titles and descriptions are Squarespace's where it had them (`seo_title`, `seo_description`); a game without one gets its short description |
 | `/s/keys-to-the-vault.pdf` → 301 `/files/keys-to-the-vault.pdf` | `_redirects` |
 | The site's 404 page with status 404, at any depth | `not_found_handling: 404-page` serves the build's `/404.html` |
 | Cache lifetimes: pages and `sitemap.xml` 60 s; snapshot images (`name-<6 hex>.ext`) and fonts 30 days; everything else 1 hour (the stylesheet and script are requested as `?v=<hash>`) | `_headers`: `/*` is the page lifetime, then a rule per folder or file that differs, worked out from the files of the build (9 rules today; Cloudflare allows 100, and the build fails beyond that) |
@@ -346,10 +349,12 @@ stand-in heading font.
 - A missing address is the site's 404 page (the reason for the move). `/nope` is a 404 at once; it was a 301 to
   `/nope/` and then a 404. A missing file under `/sq/img` or `/sq/fonts` is the 404 page with that folder's 30-day
   lifetime: lifetimes go by address, not by answer.
-- Redirects have a relative `Location` (`/wake/`, was `https://HOST/wake/`) and carry `Cache-Control: max-age=60`.
-- A page of the build that is not a page folder gets a 307 where it got a 200: `/wake/index.html` → `/wake/`,
-  `/404.html` → `/404`, and a filter address typed with a literal `:` (`/game-cards/category/Dev:+Field+Day+Lab/`) →
-  `/game-cards/category/Dev%3A%2BField%2BDay%2BLab/`, which is then served. The addresses the site links to and
+- Redirects have a relative `Location` (`/wake`, was `https://HOST/wake/`) and carry `Cache-Control: max-age=60`.
+- Since the move to Squarespace's own addresses (no trailing slash; the bucket served `/wake/` and redirected
+  `/wake` to it): `/wake` is the page and `/wake/` the 301.
+- A page of the build that is not a page folder gets a 307 where it got a 200: `/wake/index.html` → `/wake`,
+  `/404.html` → `/404`, and a filter address typed with a literal `:` (`/game-cards/category/Dev:+Field+Day+Lab`) →
+  `/game-cards/category/Dev%3A%2BField%2BDay%2BLab`, which is then served. The addresses the site links to and
   lists in its sitemap are all served at once.
 - `Range` requests get the whole file (200, not 206): only the PDF (6.6 MB) could notice; a browser's viewer loads
   it whole.
@@ -441,8 +446,10 @@ node scripts/site-check.ts https://static.vaultlearninggames-staging.org     # a
 ```
 
 It fetches every file and sitemap address (200 at once, the build's bytes, type, lifetime, robots, CORS), every
-page without its slash (301), the `/game-cards/<game>` stubs and their targets, missing addresses (404 with the
-site's page), the PDF's old address, and every address the pages link to. `--compare OTHER` lists what differs from
+page with a trailing slash (301 to the page), every line of `_redirects` (the `/game-cards/<card>` addresses and
+their targets, the PDF's old address), missing addresses (404 with the site's page), and every address the pages
+link to (200 at once); and it reads each page of the build: its canonical address is the one it is served at, it
+has no `noindex` tag, it has a title, Open Graph tags and structured data, and the sitemap lists exactly the pages. `--compare OTHER` lists what differs from
 another copy. A listing published between the deploy and the check shows as pages whose bytes differ.
 
 ### Cutover: `vaultlearninggames-staging.org` from R2 to the Worker
@@ -520,6 +527,43 @@ and the same for `www.`; it prints the records it deletes.
 **Rollback:** Domains & Routes → remove both custom domains (or `detach … --apply`), then re-create the four `A`
 records and the `www` `CNAME` above, *DNS only*. Nothing on Squarespace's side changes at launch, so it answers
 again as soon as the records are back; keep the Squarespace site until the move is settled.
+
+### Search engines, around the launch
+
+The aim is that nothing changes for a search engine except who answers. Compared on 2026-10-02, for the 266
+addresses of Squarespace's sitemap: the 167 pages answer 200 at once at the same address, with the same `<title>`
+and canonical link (one exception: `/docduck-rock-cycle`, a 404 on Squarespace, is a page here); the 14 pages that
+had a description keep it and 85 game pages gain one; the 99 `/game-cards/<card>` addresses answer 301 to their
+game's page. Not carried over: `/cart` and `/search` (Squarespace's own pages; 404 here), the RSS feed
+(`/game-cards?format=rss` answers the page), and the images' addresses (they were on Squarespace's CDN, and go
+when the Squarespace site does).
+
+Before the DNS records move:
+
+1. Production is deployed from a commit with these addresses, and `scripts/site-check.ts
+   https://static.vaultlearninggames.org` passes. `https://static.vaultlearninggames.org/robots.txt` is the site's
+   file (three lines and the `Sitemap:` line), with nothing of Cloudflare's before it. If there is: zone
+   `vaultlearninggames.org` → AI Crawl Control (or Security → Settings → Bot traffic) → turn *Managed robots.txt*
+   off.
+2. Zone `vaultlearninggames.org` → SSL/TLS → Edge Certificates → **Always Use HTTPS: on** (it is off; Squarespace
+   redirects `http://` to `https://` with a 301, and without this the Worker answers `http://` with the page). It
+   applies to the zone's other hostnames too (`cdn.`, `builds.`, `portal.`), which are only ever linked as https.
+3. In Search Console (the property is verified by the `google-site-verification` TXT record, which stays): export
+   Performance (pages and queries) and the Pages report, to compare with later.
+
+After the move:
+
+1. Search Console → URL inspection → *Test live URL* for `/`, `/game-cards`, a game page and a filter page: 200,
+   "Indexing allowed", user-declared canonical = the address. A page that says *Excluded by noindex* means the
+   request did not reach the build made for `vaultlearninggames.org` (check `curl -sI https://vaultlearninggames.org/wake
+   | grep -i x-robots-tag`: `all`).
+2. Sitemaps → submit `https://vaultlearninggames.org/sitemap.xml` again (same address as before; it now lists the
+   pages only: the card addresses are redirects). Settings → robots.txt → request a recrawl.
+3. No *Change of address*: the domain is the same.
+4. Over the next weeks, Pages report: about 99 more *Page with redirect* (the cards) and a few *Not found* (`/cart`,
+   `/search`) are expected; real pages under *Excluded by noindex*, *Duplicate* or *Not found* are not.
+5. Keep the Squarespace site (not its domain connection) until the report has settled: it is the rollback, and its
+   CDN still serves the images Google Images has indexed.
 
 ### The 404 page
 

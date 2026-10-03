@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { Analytics, AnalyticsError, classify, httpTransport, TtlCache, type GaMethod } from '../src/analytics/ga.ts';
 import { googleTokenSource } from '../src/analytics/google-auth.ts';
 import {
-  averageSeconds, basicPlaysRequest, localNow, periods, playersRequest, playsRequest, rangeOf, readPairs, readPlaces, readPlays,
-  readSeries, realtimePlayersRequest, seriesRequest, siteRequest, type GaRequest, type GaResponse,
+  averageSeconds, basicPlaysRequest, localNow, pagesRequest, periods, playersRequest, playsRequest, rangeOf, readPages, readPairs,
+  readPlaces, readPlays, readSeries, readTopPages, realtimePlayersRequest, seriesRequest, siteRequest, topPagesRequest,
+  type GaRequest, type GaResponse,
 } from '../src/analytics/reports.ts';
+import { loadLegacy, pagePaths } from '../src/analytics/pages.ts';
 import { parseGaPropertyId } from '../src/config.ts';
 import { EMPTY_LISTING } from '../src/listings.ts';
-import { chart, delta, duration, realtimeBody } from '../src/portal/analytics.ts';
+import { chart, delta, duration, realtimeBody, view } from '../src/portal/analytics.ts';
 import { fakeGa } from '../scripts/fake-ga.ts';
 import { portalHarness } from './portal-harness.ts';
 
@@ -36,18 +38,40 @@ describe('periods and requests', () => {
     assert.deepEqual(localNow('UTC', at), { today: '2026-10-03', hour: 3 });
   });
 
-  test('the chart asks for play_start over both periods, by hour for a day', () => {
+  test('the chart asks for play_start and page_view over both periods, by hour for a day; a game by its page', () => {
     assert.deepEqual(seriesRequest('week', TODAY, {}), {
-      dateRanges: [{ startDate: '2026-09-20', endDate: TODAY }], dimensions: [{ name: 'date' }], metrics: [{ name: 'eventCount' }],
-      dimensionFilter: { filter: { fieldName: 'eventName', stringFilter: { matchType: 'EXACT', value: 'play_start' } } }, limit: 10000,
+      dateRanges: [{ startDate: '2026-09-20', endDate: TODAY }], dimensions: [{ name: 'date' }, { name: 'eventName' }], metrics: [{ name: 'eventCount' }],
+      dimensionFilter: { filter: { fieldName: 'eventName', inListFilter: { values: ['play_start', 'page_view'] } } }, limit: 10000,
     });
-    const day = seriesRequest('day', TODAY, { game: 'wake' });
-    assert.deepEqual(day.dimensions, [{ name: 'dateHour' }]);
+    const day = seriesRequest('day', TODAY, { game: 'wake', pages: ['/wake', '/wake/'] });
+    assert.deepEqual(day.dimensions, [{ name: 'dateHour' }, { name: 'eventName' }]);
     assert.deepEqual(day.dateRanges, [{ startDate: '2026-10-02', endDate: TODAY }]);
+    // The page, not game_slug: no custom definitions needed, and the years before the play events have page views.
     assert.deepEqual(day.dimensionFilter, { andGroup: { expressions: [
-      { filter: { fieldName: 'eventName', stringFilter: { matchType: 'EXACT', value: 'play_start' } } },
-      { filter: { fieldName: 'customEvent:game_slug', stringFilter: { matchType: 'EXACT', value: 'wake' } } },
+      { filter: { fieldName: 'eventName', inListFilter: { values: ['play_start', 'page_view'] } } },
+      { filter: { fieldName: 'pagePath', inListFilter: { values: ['/wake', '/wake/'] } } },
     ] } });
+    assert.match(JSON.stringify(seriesRequest('week', TODAY, { game: 'wake' })), /"customEvent:game_slug".*"value":"wake"/);   // no pages known
+  });
+
+  test('a game’s page: its addresses old and new, page views, visitors and outbound clicks, in standard fields only', () => {
+    const legacy = loadLegacy();
+    assert.deepEqual(pagePaths('wake-tales-from-the-aqualab', legacy), ['/wake', '/wake/', '/game-cards/blog-post-title-one-kma9a', '/game-cards/blog-post-title-one-kma9a/']);
+    assert.deepEqual(pagePaths('a-new-game', legacy), ['/a-new-game', '/a-new-game/']);
+    assert.deepEqual(pagePaths('x', { x: { path: 'jowilder' } }), ['/jowilder', '/jowilder/']);
+    const r = pagesRequest('month', TODAY, ['/wake', '/wake/']);
+    assert.deepEqual(r.dateRanges, [{ startDate: '2026-09-04', endDate: TODAY, name: 'current' }, { startDate: '2026-08-05', endDate: '2026-09-03', name: 'previous' }]);
+    assert.deepEqual(r.dimensions, [{ name: 'eventName' }]);
+    assert.deepEqual(r.metrics, [{ name: 'screenPageViews' }, { name: 'totalUsers' }, { name: 'eventCount' }]);
+    assert.deepEqual(r.dimensionFilter, { andGroup: { expressions: [
+      { filter: { fieldName: 'eventName', inListFilter: { values: ['page_view', 'click'] } } },
+      { filter: { fieldName: 'pagePath', inListFilter: { values: ['/wake', '/wake/'] } } },
+    ] } });
+    const t = topPagesRequest('year', TODAY, ['/wake', '/wake/', '/bloom/', '/wake']);
+    assert.deepEqual(t.dateRanges, [{ startDate: '2025-10-05', endDate: TODAY }]);
+    assert.deepEqual(t.dimensions, [{ name: 'pagePath' }, { name: 'eventName' }]);
+    assert.match(JSON.stringify(t.dimensionFilter), /"pagePath","inListFilter":\{"values":\["\/wake","\/wake\/","\/bloom\/"\]\}/);
+    for (const q of [r, t]) assert.doesNotMatch(JSON.stringify(q), /custom/);
   });
 
   test('plays, players and the site compare two named periods; a game filters on game_slug', () => {
@@ -120,6 +144,26 @@ describe('reading answers', () => {
     assert.equal(averageSeconds(p.games[0]), 150);
     assert.equal(averageSeconds({ plays: 5, timedPlays: 0, seconds: 0 }), null);   // only new-tab plays: unknown, not 0
     assert.equal(p.timed, true);
+  });
+
+  test('the series of page views comes from the same answer as the plays', () => {
+    const r = res(['date', 'eventName'], ['eventCount'], [[['20261003', 'play_start'], [2]], [['20261003', 'page_view'], [30]], [['20260920', 'page_view'], [11]]]);
+    assert.deepEqual(readSeries(r, 'week', TODAY, 12).totals, { current: 2, previous: 0 });
+    assert.deepEqual(readSeries(r, 'week', TODAY, 12, 'page_view').totals, { current: 30, previous: 11 });
+  });
+
+  test('a game page’s views, visitors and play clicks; top games by page views', () => {
+    const p = readPages(res(['eventName', 'dateRange'], ['screenPageViews', 'totalUsers', 'eventCount'], [
+      [['page_view', 'current'], [120, 80, 120]], [['click', 'current'], [0, 20, 31]],
+      [['page_view', 'previous'], [90, 70, 90]],
+    ]));
+    assert.deepEqual(p, { views: { current: 120, previous: 90 }, visitors: { current: 80, previous: 70 }, clicks: { current: 31, previous: 0 } });
+    assert.deepEqual(readPages({}), { views: { current: 0, previous: 0 }, visitors: { current: 0, previous: 0 }, clicks: { current: 0, previous: 0 } });
+    const top = readTopPages(res(['pagePath', 'eventName'], ['screenPageViews', 'eventCount'], [
+      [['/wake', 'page_view'], [50, 50]], [['/wake/', 'page_view'], [25, 25]], [['/wake', 'click'], [0, 9]],
+      [['/bloom/', 'page_view'], [100, 100]], [['/about', 'page_view'], [999, 999]],
+    ]), { 'wake-tales-from-the-aqualab': ['/wake', '/wake/'], bloom: ['/bloom', '/bloom/'], quiet: ['/quiet', '/quiet/'] });
+    assert.deepEqual(top, [{ slug: 'bloom', views: 100, clicks: 0 }, { slug: 'wake-tales-from-the-aqualab', views: 75, clicks: 9 }]);
   });
 
   test('totals per period, and places', () => {
@@ -201,8 +245,47 @@ describe('the Google Analytics client', () => {
     now += 61_000;
     await a.realtime({});
     assert.equal(log.length, 8);
-    await a.overview('week', { game: 'wake' });
-    assert.equal(log.length, 11);  // no site report for a game
+    await a.overview('week', { game: 'wake', pages: ['/wake', '/wake/'] });
+    assert.equal(log.length, 12);  // no site report for a game; its page's report instead
+  });
+
+  test('before any play events: the chart and the top games fall back to page views', async () => {
+    const log: { method: GaMethod; body: GaRequest }[] = [];
+    const a = new Analytics({ transport: fakeGa(['wake', 'bloom'], { log, plays: false }), now: () => new Date('2026-10-03T17:00:00Z') });
+    const catalog = { wake: ['/wake', '/wake/'], bloom: ['/bloom', '/bloom/'] };
+    const ov = await a.overview('year', {}, catalog);
+    assert.ok(ov.series.ok && ov.series.value.totals.current === 0);
+    assert.ok(ov.views.ok && ov.views.value.totals.current > 0);
+    assert.ok(ov.topPages?.ok && ov.topPages.value.map((g) => g.slug).sort().join() === 'bloom,wake');
+    assert.equal(log.length, 5);   // series, plays, players, site, then top pages because no game had plays
+    const page = String(view(ov, { places: { ok: true, value: [] }, visitors: null, who: 'players' }, {
+      timeZone: 'America/Chicago', scope: {}, range: 'year', staff: true, base: '/vault/analytics', realtimeUrl: '/rt', assets: { css: '', js: '', land: '' },
+      titleOf: (slug) => ({ title: slug.toUpperCase(), href: null }),
+    }));
+    assert.match(page, /Page views <small>Last 52 weeks/);
+    assert.match(page, /No plays recorded in this range/);
+    assert.match(page, /Top games <small>by page views, last 52 weeks/);
+    assert.match(page, /<b>WAKE<\/b>/);
+    assert.match(page, /Play-button clicks/);
+    const game = await a.overview('year', { game: 'wake', pages: catalog.wake }, catalog);
+    assert.ok(game.pages?.ok && game.pages.value.views.current > 0 && game.pages.value.clicks.current > 0);
+    const gp = String(view(game, { places: { ok: true, value: [] }, visitors: null, who: 'players' }, {
+      timeZone: 'America/Chicago', scope: { game: 'wake', pages: catalog.wake }, range: 'year', staff: false, base: '/s/x/g/wake?tab=analytics', realtimeUrl: '/rt', assets: { css: '', js: '', land: '' },
+      titleOf: (slug) => ({ title: slug, href: null }),
+    }));
+    assert.match(gp, /Page views <small>Last 52 weeks/);
+    assert.match(gp, /The game’s page/);
+    assert.match(gp, /Visitors/);
+    assert.match(gp, /Play-button clicks/);
+    assert.match(gp, /outbound clicks from the game’s page/);
+  });
+
+  test('a property without click events: play clicks are just 0', async () => {
+    const t = async (_m: GaMethod, body: GaRequest): Promise<GaResponse> =>
+      (JSON.stringify(body).includes('"click"') ? res(['eventName', 'dateRange'], ['screenPageViews', 'totalUsers', 'eventCount'], [[['page_view', 'current'], [5, 3, 5]]]) : {});
+    const ov = await new Analytics({ transport: t }).overview('week', { game: 'wake', pages: ['/wake', '/wake/'] });
+    assert.ok(ov.pages?.ok);
+    assert.deepEqual(ov.pages.value.clicks, { current: 0, previous: 0 });
   });
 
   test('not connected without a property id; the site falls back to plain counts before the custom definitions exist', async () => {
@@ -218,6 +301,10 @@ describe('the Google Analytics client', () => {
     assert.deepEqual(site.plays.value.current, { plays: 8, timedPlays: 0, seconds: 0 });
     const game = await new Analytics({ transport: t }).overview('week', { game: 'wake' });
     assert.ok(!game.plays.ok && game.plays.error.kind === 'setup');
+    // A game whose pages are known is counted on them: no custom definitions needed.
+    const byPage = await new Analytics({ transport: t }).overview('week', { game: 'wake', pages: ['/wake', '/wake/'] });
+    assert.ok(byPage.plays.ok && byPage.plays.value.current.plays === 8 && byPage.players.ok);
+    assert.match(JSON.stringify(playersRequest('week', TODAY, { game: 'wake', pages: ['/wake'] })), /"pagePath","inListFilter":\{"values":\["\/wake"\]/);
   });
 
   test('before vault_game is registered the realtime map shows everyone on the site', async () => {
@@ -283,6 +370,7 @@ describe('portal pages', () => {
     assert.match(page, /Page views/);
     assert.match(page, /Top games/);
     assert.match(page, /href="\/s\/ucalgary\/g\/transformations-quest\?tab=analytics"><b>Transformations Quest<\/b>/);
+    assert.match(page, /Top games <small>by plays/);
     assert.match(page, /<circle cx=/);
     assert.match(page, /href="\/vault\/analytics" class="on">Analytics/);
     assert.equal((await h.as('mia', 'none', 'maintainer').get('/vault/analytics')).status, 403);
@@ -295,7 +383,9 @@ describe('portal pages', () => {
     assert.match(mine, /class="on">Analytics<\/a>/);
     assert.match(mine, /Today/);
     assert.match(mine, /data-realtime="\/portal\/analytics\/realtime\?game=wake"/);
-    assert.doesNotMatch(mine, /Top games|Page views/);
+    assert.doesNotMatch(mine, /Top games|Sessions/);
+    assert.match(mine, /The game’s page/);
+    assert.match(mine, /Play-button clicks/);
     assert.equal((await h.as('mia', 'none', 'viewer').get('/s/ucalgary/g/transformations-quest?tab=analytics')).status, 404);
     assert.equal((await h.as('rm', 'release_manager').get('/s/ucalgary/g/transformations-quest?tab=analytics')).status, 200);
     // The realtime card refresh follows the same rule.

@@ -2,6 +2,8 @@
 // site (Vault → Analytics, /vault/analytics); a game's page has an Analytics tab with the same view for that game,
 // which its studio's members see too. Each view: plays over time with the previous period, plays / players / average
 // play time, a realtime map of where people are playing, and for the site its page views, sessions and top games.
+// The play events are new; the years before them are page views (and outbound clicks) of the game pages, which have
+// had the same addresses since the Squarespace site: the chart and top games fall back to those when there are no plays.
 import type { Hono } from 'hono';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -9,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { Analytics, AnalyticsError, type Overview, type Realtime, type Result } from '../analytics/ga.ts';
 import { COUNTRY_POINTS } from '../analytics/countries.ts';
 import { MAP_HEIGHT, MAP_WIDTH } from '../analytics/projection.ts';
+import { loadLegacy, pagePaths } from '../analytics/pages.ts';
 import { averageSeconds, RANGE_KEYS, RANGES, rangeOf, type Pair, type Place, type RangeKey, type Scope, type Series } from '../analytics/reports.ts';
 import type { Studio, User } from '../db.ts';
 import { html, raw, type Html } from './html.ts';
@@ -44,7 +47,7 @@ function niceMax(v: number): number {
   for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
   return 10 * p;
 }
-export function chart(s: Series): Html {
+export function chart(s: Series, what = 'plays'): Html {
   const n = s.labels.length;
   const top = niceMax(Math.max(1, ...s.previous, ...s.current.map((v) => v ?? 0)));
   const y = (v: number) => +(100 - (v / top) * 100).toFixed(2);
@@ -61,7 +64,7 @@ export function chart(s: Series): Html {
   const xl = s.labels.map((l, i) => ({ l, i })).filter(({ i }) => i % every === 0);
   const def = RANGES[s.range];
   const unit = def.hourly ? 'hour' : def.bucketDays === 7 ? 'week' : 'day';
-  return html`<div class="ga-chart" role="img" aria-label="Plays per ${unit}: ${num(s.totals.current)} in ${def.long.toLowerCase()}, ${num(s.totals.previous)} in ${def.previous}.">
+  return html`<div class="ga-chart" role="img" aria-label="${what[0].toUpperCase()}${what.slice(1)} per ${unit}: ${num(s.totals.current)} in ${def.long.toLowerCase()}, ${num(s.totals.previous)} in ${def.previous}.">
     <div class="ga-plot">
       ${ticks.filter((t) => Number.isInteger(t)).map((t) => html`<span class="ga-yl" style="bottom:${(t / top) * 100}%">${num(t)}</span>`)}
       <svg viewBox="0 0 ${n} 100" preserveAspectRatio="none" aria-hidden="true">
@@ -69,7 +72,7 @@ export function chart(s: Series): Html {
         <path class="ga-prev" d="${line(s.previous)}" vector-effect="non-scaling-stroke"/>
         ${area ? html`<path class="ga-area" d="${area}"/>` : ''}
         <path class="ga-cur" d="${line(s.current)}" vector-effect="non-scaling-stroke"/>
-        ${s.labels.map((l, i) => html`<rect class="ga-hit" x="${i}" y="0" width="1" height="100"><title>${l}: ${s.current[i] === null ? 'later today' : `${num(s.current[i]!)} plays`} (${def.previous}: ${num(s.previous[i])})</title></rect>`)}
+        ${s.labels.map((l, i) => html`<rect class="ga-hit" x="${i}" y="0" width="1" height="100"><title>${l}: ${s.current[i] === null ? 'later today' : `${num(s.current[i]!)} ${what}`} (${def.previous}: ${num(s.previous[i])})</title></rect>`)}
       </svg>
     </div>
     <div class="ga-x" aria-hidden="true">${xl.map(({ l, i }) => html`<span style="left:${(x(i) / n) * 100}%">${l.replace(/^Week of /, '')}</span>`)}</div>
@@ -148,11 +151,15 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   const conn = [ov.series, ov.plays, ov.players].every((r) => !r.ok && CONNECTION.has(r.error.kind)) ? firstError(ov.series) : null;
   if (conn) return html`${assets}<div class="card ga-off">${problem(conn, o.staff)}${o.staff ? '' : html`<p class="small muted">Ask Vault about it.</p>`}</div>`;
 
-  const s = ov.series;
+  // No plays in either period (before the play events): the chart shows page views instead, if there are any.
+  const noPlays = ov.series.ok && !ov.series.value.totals.current && !ov.series.value.totals.previous;
+  const byViews = noPlays && ov.views.ok && (ov.views.value.totals.current > 0 || ov.views.value.totals.previous > 0);
+  const s = byViews ? ov.views : ov.series;
   const chartCard = html`<div class="card ga-top">
-    <h2><span>Plays <small>${def.long} · ${s.ok ? html`<b class="ga-tot">${num(s.value.totals.current)}</b>, ${def.previous} ${num(s.value.totals.previous)}` : ''}</small></span>${bar}</h2>
-    ${s.ok ? html`${chart(s.value)}<div class="ga-legend small"><span class="k cur"></span>${def.long}<span class="k prev"></span>${def.previous[0].toUpperCase()}${def.previous.slice(1)}</div>`
-      : problem(s.error, o.staff, o.scope.game ? 'plays of one game can’t be counted (the dimension game_slug)' : 'the chart')}
+    <h2><span>${byViews ? 'Page views' : 'Plays'} <small>${def.long} · ${s.ok ? html`<b class="ga-tot">${num(s.value.totals.current)}</b>, ${def.previous} ${num(s.value.totals.previous)}` : ''}</small></span>${bar}</h2>
+    ${s.ok ? html`${chart(s.value, byViews ? 'page views' : 'plays')}<div class="ga-legend small"><span class="k cur"></span>${def.long}<span class="k prev"></span>${def.previous[0].toUpperCase()}${def.previous.slice(1)}</div>
+      ${byViews ? html`<p class="small muted">No plays recorded in this range: the site has only just begun sending play events, so this is page views of ${o.scope.game ? 'the game’s page' : 'the site'}, which go back years (the Squarespace site had the same addresses).</p>` : ''}`
+      : problem(s.error, o.staff, 'the chart')}
   </div>`;
 
   const p = ov.plays.ok ? ov.plays.value : null;
@@ -168,6 +175,17 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
     ${!ov.plays.ok ? problem(ov.plays.error, o.staff, o.scope.game ? 'this game’s plays can’t be counted' : 'plays') : ''}
     ${!ov.players.ok && ov.plays.ok ? problem(ov.players.error, o.staff, 'players') : ''}`;
 
+  // A game's page: its views, visitors and outbound clicks, back through the Squarespace years.
+  let page: Html | string = '';
+  if (ov.pages) {
+    const pv = ov.pages.ok ? ov.pages.value : null;
+    const k = (label: string, v: Pair | null, title: string) => kpi(label, v ? num(v.current) : '—', v ? delta(v.current, v.previous, ov.range) : html`<div class="d"></div>`, title);
+    page = html`<h3 class="sec">The game’s page <small class="muted small">${def.long} · counted since the Squarespace site, before the play events</small></h3>
+      <div class="kpis ga-k3">${k('Page views', pv?.views ?? null, 'Views of the game’s page on vaultlearninggames.org (its address on the Squarespace site too)')}${k('Visitors', pv?.visitors ?? null, 'People (browsers) who viewed the game’s page')}${k('Play-button clicks', pv?.clicks ?? null, 'Outbound link clicks on the game’s page (Google Analytics enhanced measurement). The old site’s Play button linked out to the game, so before the play events these are mostly plays; they also count other links out, such as curriculum.')}</div>
+      <p class="small muted">Play-button clicks: outbound clicks from the game’s page.</p>
+      ${!ov.pages.ok ? problem(ov.pages.error, o.staff, 'the game’s page') : ''}`;
+  }
+
   let site: Html | string = '';
   if (ov.site) {
     const sv = ov.site.ok ? ov.site.value : null;
@@ -182,18 +200,25 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
     <div data-realtime="${o.realtimeUrl}">${realtimeBody(rt, { staff: o.staff, land: o.assets.land, game: !!o.scope.game })}</div></div>`;
 
   let top: Html | string = '';
-  if (!o.scope.game && p) {
-    const rows = p.games.slice(0, 10).map((g) => {
-      const t = o.titleOf(g.slug);
-      return html`<tr><td class="proj">${t.href ? html`<a href="${t.href}"><b>${t.title}</b></a>` : html`<b>${t.title}</b>`}<span>${g.slug}</span></td><td class="r num">${num(g.plays)}</td><td class="r num">${duration(averageSeconds(g))}</td></tr>`;
-    });
+  const name = (slug: string) => { const t = o.titleOf(slug); return html`<td class="proj">${t.href ? html`<a href="${t.href}"><b>${t.title}</b></a>` : html`<b>${t.title}</b>`}<span>${slug}</span></td>`; };
+  const tp = ov.topPages;
+  if (!o.scope.game && tp && (!p || !p.games.length)) {
+    // No game has plays (yet): the games whose pages were viewed most.
+    const rows = tp.ok ? tp.value.slice(0, 10).map((g) => html`<tr>${name(g.slug)}<td class="r num">${num(g.views)}</td><td class="r num">${num(g.clicks)}</td></tr>`) : [];
+    top = html`<div class="card ga-games"><h2>Top games <small>by page views, ${def.long.toLowerCase()}</small></h2>
+      ${!tp.ok ? problem(tp.error, o.staff, 'the game pages')
+        : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Page views</th><th class="r" title="Outbound link clicks from the game’s page: the old site’s Play button linked out to the game">Play-button clicks</th></tr></thead><tbody>${rows}</tbody></table></div>
+          <p class="small muted">No plays by game yet${p && !p.timed ? ' (Google Analytics doesn’t know the custom dimension game_slug yet)' : ''}, so these are views of each game’s page. Play-button clicks: outbound clicks from the game’s page.</p>`
+        : html`<p class="small muted">No views of game pages in this range.</p>`}</div>`;
+  } else if (!o.scope.game && p) {
+    const rows = p.games.slice(0, 10).map((g) => html`<tr>${name(g.slug)}<td class="r num">${num(g.plays)}</td><td class="r num">${duration(averageSeconds(g))}</td></tr>`);
     top = html`<div class="card ga-games"><h2>Top games <small>by plays, ${def.long.toLowerCase()}</small></h2>
       ${!p.timed ? html`<p class="small muted">Games can be told apart once the custom dimension game_slug is registered in Google Analytics.</p>`
         : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Plays</th><th class="r">Avg time</th></tr></thead><tbody>${rows}</tbody></table></div>`
         : html`<p class="small muted">No plays in this range yet.</p>`}</div>`;
   }
 
-  return html`${assets}<div class="ga">${chartCard}${kpis}
+  return html`${assets}<div class="ga">${chartCard}${kpis}${page}
     <div class="grid ${top ? 'ga-split' : ''}">${realtime}${top}</div>${site}
     <p class="small muted ga-foot">From Google Analytics (the site’s ${p && !p.timed ? 'page views and play counts' : 'play events'}; days are ${o.timeZone.replace(/_/g, ' ')} days). Figures are cached for up to 10 minutes; the realtime map for a minute.</p></div>`;
 }
@@ -212,6 +237,9 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
 
   // Which listings a person may see analytics for: Vault staff any; studio members their own studio's.
   const canSeeGame = (u: User, l: ListingRow) => h.isStaff(u) || !!h.roleIn(u, db.studioById(l.studio_id)!);
+  // Each game's page paths on the site, for its page views (the Squarespace addresses come from the site's data).
+  const legacy = loadLegacy();
+  const catalog = () => Object.fromEntries((db.listings({ published: true }) as ListingRow[]).map((l) => [l.slug, pagePaths(l.slug, legacy)]));
   const titleOf = (u: User) => (slug: string) => {
     const l = db.listing(slug) as ListingRow | undefined;
     return l ? { title: l.published?.title || l.draft.title || slug, href: canSeeGame(u, l) ? `/s/${l.studio_slug}/g/${slug}?tab=analytics` : null } : { title: slug, href: null };
@@ -219,7 +247,8 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
 
   async function render(u: User, scope: Scope, range: RangeKey, base: string) {
     const realtimeUrl = `/portal/analytics/realtime${scope.game ? `?game=${encodeURIComponent(scope.game)}` : ''}`;
-    const [ov, rt] = await Promise.all([analytics.overview(range, scope), analytics.realtime(scope)]);
+    const all = catalog();
+    const [ov, rt] = await Promise.all([analytics.overview(range, scope.game ? { ...scope, pages: all[scope.game] ?? pagePaths(scope.game, legacy) } : scope, all), analytics.realtime(scope)]);
     return view(ov, rt, { timeZone: analytics.timeZone, scope, range, staff: h.isStaff(u), base, realtimeUrl, assets, titleOf: titleOf(u) });
   }
 

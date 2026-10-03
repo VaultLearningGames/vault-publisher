@@ -10,7 +10,8 @@ Each view has a chart of plays over time with the previous period dashed (Day, W
 the last 7, 30 and 90 days, and the last 52 weeks in weekly points, each against the same length just before), the
 plays, unique players and average play time for that range with the change from the previous period, and a map of
 where people are playing now (the last 30 minutes, refreshed every minute). The site view also has the top games
-and the site's page views, sessions and visitors.
+and the site's page views, sessions and visitors; a game's view has its page's views, visitors and Play-button
+clicks (see [History](#history-before-the-play-events)).
 
 ## The play events
 
@@ -83,24 +84,52 @@ Until then the pages say what's missing: *not connected* (no `GA_PROPERTY_ID`, o
 view then still shows play counts, without play time or games; game views and the per-game realtime map need them).
 Average play time shows "—" until there are timed plays in the range.
 
+## History (before the play events)
+
+The play events are new, but the property has years of page views from the Squarespace site, which had the same
+domain and the same game page addresses. So, with standard fields only (no custom definitions):
+
+* **A game's pages** (`src/analytics/pages.ts`): the site puts a listing's page at `/<path>/`, where `path` is its
+  old Squarespace address from `site/data/squarespace/games.json` (keyed by catalog slug; e.g. `wake`, `jowilder`)
+  or else the listing's slug (`site/content/games/_content.gotmpl`). The portal matches `pagePath` against `/<path>`,
+  `/<path>/` and the game's old Game Card, `/game-cards/<card id>` (now a 301 to the page).
+* **The chart** asks for `play_start` and `page_view` together; with no plays in either period it shows page views
+  (of the game's page, or the whole site) and says so. A game's chart, plays and unique players filter on its
+  `pagePath` (the play events are sent from its page), so they work without `game_slug` too; only play time and
+  telling games apart in the site view need the custom definitions.
+* **The game's page** (game view): `screenPageViews`, `totalUsers` of its `page_view` events (visitors) and
+  `eventCount` of `click` events on it, in both periods. `click` is GA's enhanced-measurement outbound link click;
+  the old site's Play button linked out to the game, so these are shown as **Play-button clicks (outbound clicks
+  from the game's page)**: mostly plays before the play events, but any link out counts (curriculum, studio sites).
+  A property without click events shows 0.
+* **Top games by page views** (site view): when no game has plays in the range (always, until `game_slug` is
+  registered), the top-games card ranks the games by their pages' views this period, with their Play-button
+  clicks. Pages that aren't a published listing's are left out.
+
+The Year range (52 weeks against the 52 before) is the longest; the Data API's reports aren't limited by the property's data-retention setting (only explorations are), so
+it reaches back into the Squarespace years as far as the property has data. Locally, `GA_FAKE=history node scripts/dev-portal.ts` shows a property with page
+views and no play events.
+
 ## How the portal reads it
 
 `src/analytics/`: `reports.ts` builds the Data API v1beta request bodies and reads the answers (pure; dates are the
 property's days, `GA_TIMEZONE`, default `America/Chicago`); `ga.ts` sends them (`runReport`, `runRealtimeReport` on
 `properties/GA_PROPERTY_ID`), caches answers (reports 10 minutes, realtime 60 s, failures 1 minute; one call for
 identical requests in flight) and turns errors into what the page explains; `google-auth.ts` gets the token (Cloud
-Run: the metadata server; elsewhere application default credentials). One page view is at most four reports and two
+Run: the metadata server; elsewhere application default credentials). One page view is at most five reports and two
 realtime reports, well inside GA's free quota.
 
 | Report | Request |
 | --- | --- |
-| Chart | `play_start` `eventCount` by `date` (`dateHour` for Day), over both periods |
+| Chart | `eventCount` of `play_start` and `page_view` by `date` (`dateHour` for Day) and `eventName`, over both periods |
 | Plays, play time, top games | `eventCount` and `customEvent:play_seconds` by `eventName`, `customEvent:play_mode`, `customEvent:game_slug`; periods `current` and `previous` |
 | Unique players | `totalUsers` of `play_start`, both periods |
+| The game's page (game view) | `screenPageViews`, `totalUsers`, `eventCount` by `eventName` (`page_view`, `click`), its `pagePath`s, both periods |
+| Top games by page views (site view, when no game has plays) | `screenPageViews`, `eventCount` by `pagePath` and `eventName`, every game's paths, this period |
 | The website (site view) | `screenPageViews`, `sessions`, `totalUsers`, both periods |
 | Playing now | realtime `activeUsers` with play events by `countryId`, `country`, `city` (a game: `customUser:vault_game`); site view also all active users |
 
-A game is filtered on `customEvent:game_slug` = its listing slug. The map places one circle per country at Natural
+A game is filtered on its page paths (`pagePath`), and on `customEvent:game_slug` = its listing slug for play time. The map places one circle per country at Natural
 Earth's label point for it (`src/analytics/countries.ts`, from `scripts/world-map.ts`; public domain), sized by the
 number playing; cities are listed under the map (GA gives no coordinates).
 

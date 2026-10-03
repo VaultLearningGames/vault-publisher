@@ -160,10 +160,10 @@ const app = createApp({
   }),
   // Analytics: a made-up property, or the real one with GA_PROPERTY_ID (read with your gcloud application default
   // credentials: `gcloud auth application-default login --scopes=openid,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/analytics.readonly`).
-  // GA_FAKE=off: neither, to see the pages' "not connected" state.
+  // GA_FAKE=off: neither, to see the pages' "not connected" state; GA_FAKE=history: page views only, no play events.
   analytics: new Analytics(parseGaPropertyId(process.env.GA_PROPERTY_ID)
     ? { propertyId: parseGaPropertyId(process.env.GA_PROPERTY_ID) }
-    : process.env.GA_FAKE === 'off' ? {} : { transport: fakeGa(db.listings({ published: true }).map((l) => l.slug).slice(0, 40).concat(['wake', 'bloom'])) }),
+    : process.env.GA_FAKE === 'off' ? {} : { transport: fakeGa(db.listings({ published: true }).map((l) => l.slug).slice(0, 40).concat(['wake', 'bloom']), { plays: process.env.GA_FAKE !== 'history' }) }),
   portal: {
     baseUrl: `http://localhost:${PORT}`, sessionSecret: 'dev-only-secret', vaultAdmins: ['boss'],
     oauth: {

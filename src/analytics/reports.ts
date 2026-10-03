@@ -26,7 +26,8 @@ export const MET_SECONDS = 'customEvent:play_seconds';
 export const DIM_RT_GAME = 'customUser:vault_game';
 
 export interface Period { start: string; end: string }   // YYYY-MM-DD, inclusive
-export interface Scope { game?: string }                // a game's slug; none: the whole site
+// A game's slug and its page paths on the site (pages.ts); none: the whole site.
+export interface Scope { game?: string; pages?: string[] }
 
 // ---------- dates ----------
 const DAY = 86_400_000;
@@ -55,6 +56,7 @@ const eventIn = (names: string[]): Expr => names.length === 1
 const exact = (fieldName: string, value: string): Expr => ({ filter: { fieldName, stringFilter: { matchType: 'EXACT', value } } });
 const all = (...e: Expr[]): Expr => (e.length === 1 ? e[0] : { andGroup: { expressions: e } });
 const withGame = (scope: Scope, field: string, ...e: Expr[]) => all(...e, ...(scope.game ? [exact(field, scope.game)] : []));
+const pathIn = (paths: string[]): Expr => ({ filter: { fieldName: 'pagePath', inListFilter: { values: [...new Set(paths)] } } });
 const twoRanges = (range: RangeKey, today: string) => {
   const p = periods(range, today);
   return [{ startDate: p.current.start, endDate: p.current.end, name: 'current' }, { startDate: p.previous.start, endDate: p.previous.end, name: 'previous' }];
@@ -62,14 +64,16 @@ const twoRanges = (range: RangeKey, today: string) => {
 
 export type GaRequest = Record<string, unknown>;
 
-// Plays (play_start) over both periods, by hour (day) or by day, in one range: split into the two periods when read.
+// Plays (play_start) and page views over both periods, by hour (day) or by day, in one range: split into the two
+// periods and the two events when read. A game is its page (play events are sent from it), so no custom definitions
+// are needed and the years of page views before the play events are there too.
 export function seriesRequest(range: RangeKey, today: string, scope: Scope): GaRequest {
   const p = periods(range, today);
   return {
     dateRanges: [{ startDate: p.previous.start, endDate: p.current.end }],
-    dimensions: [{ name: RANGES[range].hourly ? 'dateHour' : 'date' }],
+    dimensions: [{ name: RANGES[range].hourly ? 'dateHour' : 'date' }, { name: 'eventName' }],
     metrics: [{ name: 'eventCount' }],
-    dimensionFilter: withGame(scope, DIM_GAME, eventIn(['play_start'])),
+    dimensionFilter: byGame(scope, eventIn(['play_start', 'page_view'])),
     limit: 10000,
   };
 }
@@ -85,19 +89,41 @@ export function playsRequest(range: RangeKey, today: string, scope: Scope): GaRe
   };
 }
 
-// The site's plays without the custom definitions (before they're registered): play_start counts only.
-export function basicPlaysRequest(range: RangeKey, today: string): GaRequest {
-  return { dateRanges: twoRanges(range, today), dimensions: [{ name: 'eventName' }], metrics: [{ name: 'eventCount' }], dimensionFilter: eventIn(['play_start']) };
+// A game by its pages when they're known, else by game_slug.
+const byGame = (scope: Scope, ...e: Expr[]) => (scope.pages?.length ? all(...e, pathIn(scope.pages)) : withGame(scope, DIM_GAME, ...e));
+
+// Plays without the custom definitions (before they're registered): play_start counts only (a game: on its page).
+export function basicPlaysRequest(range: RangeKey, today: string, scope: Scope = {}): GaRequest {
+  return { dateRanges: twoRanges(range, today), dimensions: [{ name: 'eventName' }], metrics: [{ name: 'eventCount' }], dimensionFilter: byGame(scope, eventIn(['play_start'])) };
 }
 
 // People who started a play, in each period (users can't be added up across rows, so this is its own report).
 export function playersRequest(range: RangeKey, today: string, scope: Scope): GaRequest {
-  return { dateRanges: twoRanges(range, today), metrics: [{ name: 'totalUsers' }], dimensionFilter: withGame(scope, DIM_GAME, eventIn(['play_start'])) };
+  return { dateRanges: twoRanges(range, today), metrics: [{ name: 'totalUsers' }], dimensionFilter: byGame(scope, eventIn(['play_start'])) };
 }
 
 // The whole site: page views, sessions and visitors in each period.
 export function siteRequest(range: RangeKey, today: string): GaRequest {
   return { dateRanges: twoRanges(range, today), metrics: [{ name: 'screenPageViews' }, { name: 'sessions' }, { name: 'totalUsers' }] };
+}
+
+// A game's page in each period: page views, visitors (users of its page_view rows) and outbound link clicks from it
+// (enhanced measurement's "click" event, outbound links only: the old site's Play button linked out to the game).
+export function pagesRequest(range: RangeKey, today: string, paths: string[]): GaRequest {
+  return {
+    dateRanges: twoRanges(range, today), dimensions: [{ name: 'eventName' }],
+    metrics: [{ name: 'screenPageViews' }, { name: 'totalUsers' }, { name: 'eventCount' }],
+    dimensionFilter: all(eventIn(['page_view', 'click']), pathIn(paths)),
+  };
+}
+// Every game page's views and outbound clicks this period: the site's top games before there are plays by game.
+export function topPagesRequest(range: RangeKey, today: string, paths: string[]): GaRequest {
+  const p = periods(range, today).current;
+  return {
+    dateRanges: [{ startDate: p.start, endDate: p.end }], dimensions: [{ name: 'pagePath' }, { name: 'eventName' }],
+    metrics: [{ name: 'screenPageViews' }, { name: 'eventCount' }],
+    dimensionFilter: all(eventIn(['page_view', 'click']), pathIn(paths)), limit: 10000,
+  };
 }
 
 // Realtime (the last 30 minutes), by country and city. Realtime reports can't see event parameters and refuse eventName
@@ -153,10 +179,12 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const dayLabel = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`;
 const compact = (d: string) => d.replaceAll('-', '');
 
-export function readSeries(res: GaResponse, range: RangeKey, today: string, hourNow: number): Series {
+// event: which event's counts (rows without eventName count as it).
+export function readSeries(res: GaResponse, range: RangeKey, today: string, hourNow: number, event = 'play_start'): Series {
   const def = RANGES[range];
   const counts = new Map<string, number>();
   for (const r of rowsOf(res)) {
+    if ((r.dims.eventName ?? event) !== event) continue;
     const k = r.dims.dateHour ?? r.dims.date ?? '';
     counts.set(k, (counts.get(k) ?? 0) + (r.mets.eventCount ?? 0));
   }
@@ -226,6 +254,34 @@ export function readPairs(res: GaResponse, metrics: string[]): Record<string, Pa
   const out: Record<string, Pair> = Object.fromEntries(metrics.map((m) => [m, { current: 0, previous: 0 }]));
   for (const r of rowsOf(res)) { const p = periodOf(r); if (p) for (const m of metrics) out[m][p] += r.mets[m] ?? 0; }
   return out;
+}
+
+export interface PageStats { views: Pair; visitors: Pair; clicks: Pair }
+export function readPages(res: GaResponse): PageStats {
+  const out: PageStats = { views: { current: 0, previous: 0 }, visitors: { current: 0, previous: 0 }, clicks: { current: 0, previous: 0 } };
+  for (const r of rowsOf(res)) {
+    const p = periodOf(r);
+    if (!p) continue;
+    out.views[p] += r.mets.screenPageViews ?? 0;
+    if (r.dims.eventName === 'page_view') out.visitors[p] += r.mets.totalUsers ?? 0;
+    if (r.dims.eventName === 'click') out.clicks[p] += r.mets.eventCount ?? 0;
+  }
+  return out;
+}
+export interface GamePages { slug: string; views: number; clicks: number }
+// Rows by page path, added up per game (catalog: each game's paths); other pages are left out. Most views first.
+export function readTopPages(res: GaResponse, catalog: Record<string, string[]>): GamePages[] {
+  const slugOf = new Map(Object.entries(catalog).flatMap(([slug, paths]) => paths.map((p) => [p, slug] as const)));
+  const games = new Map<string, GamePages>();
+  for (const r of rowsOf(res)) {
+    const slug = slugOf.get(r.dims.pagePath ?? '');
+    if (!slug) continue;
+    const g = games.get(slug) ?? { slug, views: 0, clicks: 0 };
+    g.views += r.mets.screenPageViews ?? 0;
+    if (r.dims.eventName === 'click') g.clicks += r.mets.eventCount ?? 0;
+    games.set(slug, g);
+  }
+  return [...games.values()].filter((g) => g.views > 0 || g.clicks > 0).sort((a, b) => b.views - a.views || a.slug.localeCompare(b.slug));
 }
 
 // Average seconds per timed play (player plays), or null when there were none: then the length is unknown, not zero.

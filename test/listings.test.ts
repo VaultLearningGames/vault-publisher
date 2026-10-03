@@ -4,7 +4,7 @@ import type { Readable } from 'node:stream';
 import { createApp } from '../src/app.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db } from '../src/db.ts';
-import { fieldsFromPage } from '../src/listings-import.ts';
+import { fieldsFromPage, shortText } from '../src/listings-import.ts';
 import { changedFields, normalize, problems } from '../src/listings.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import { signSession } from '../src/portal/session.ts';
@@ -109,6 +109,15 @@ describe('listing fields', () => {
     assert.deepEqual(f.standards, []);
     assert.equal(f.play_url, 'https://new/');
     assert.equal(f.embed, false);
+  });
+  test('a heading is never imported as the short description (the "## Trailer" leftover)', () => {
+    const page = (short_description: unknown) => fieldsFromPage({ slug: 'pearl-diver', title: 'Pearl Diver', params: { short_description, makers: ['NMSU'] } });
+    assert.equal(page('## Trailer').short_description, '');
+    assert.equal(page('## Trailer\n\nDive for pearls.').short_description, 'Dive for pearls.');
+    assert.equal(page('# About\nDive for pearls.\n\nMore.').short_description, 'Dive for pearls.');
+    assert.equal(page('Dive for pearls. #1 on the number line.').short_description, 'Dive for pearls. #1 on the number line.');
+    assert.equal(page(undefined).short_description, '');
+    assert.equal(shortText('#hashtag games'), '#hashtag games', 'a # without a space is text, not a heading');
   });
 });
 

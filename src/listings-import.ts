@@ -17,12 +17,21 @@ export interface ImportResult {
 export const slugify = (s: string) => s.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
 const asList = (v: unknown) => (Array.isArray(v) ? v.map(String) : typeof v === 'string' && v.trim() ? [v] : []);
 
+// A page's short description as prose. Some of the prototype's pages carried the first block of their Squarespace
+// page there, a Markdown heading ("## Trailer"), which then showed as the game's description (card 1877913176838767862).
+// Heading lines are dropped; what's left is the first paragraph, or '' (a draft without one says so).
+export function shortText(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  const paragraphs = v.split(/\n\s*\n/).map((p) => p.split('\n').filter((l) => !/^\s{0,3}#{1,6}(\s|$)/.test(l)).join('\n').trim());
+  return paragraphs.find(Boolean) ?? '';
+}
+
 // Hugo front matter → listing fields.
 export function fieldsFromPage(p: ExportedPage, o: Override = {}): ListingFields {
   const q = p.params;
   return normalize({
     title: p.title,
-    short_description: q.short_description,
+    short_description: shortText(q.short_description),
     about: q.about_this_game,
     makers: asList(q.makers),
     grades: asList(q.grades),

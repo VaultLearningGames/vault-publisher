@@ -1,7 +1,7 @@
 # Site checks
 
 A battery of tests run against the live Vault website: every page is opened in a headless Chromium, every link is
-followed, every game is opened the way a visitor opens it. Six checks, each of which can run by itself. A run produces
+followed, every game is opened the way a visitor opens it, and the services the games depend on are asked for. Seven checks, each of which can run by itself. A run produces
 **findings**, each a **failure** (visitors hit it) or a **warning** (worth a look, or couldn't be verified).
 
 The GitHub Actions runner does the looking. The `check-site` workflow starts a browser on the runner, runs the checks,
@@ -85,6 +85,19 @@ one timing finding per page is reported (load, then paint, then first byte).
   icon links smaller than `tapTargetPx` 24 px either way (a text link is as tall as its line, so it only counts when
   it is also under 24 px wide; a link inside a sentence never does). One finding per kind of element.
 
+**Game services** (`services`). The services Field Day's games call while they are played, which live outside Vault:
+the player codes service (`fieldday-web.wcer.wisc.edu/wsgi-bin/opengamedata.wsgi/player/`) and the Open Game Data
+logger (`ogdlogger.fielddaylab.wisc.edu/logger/log.php`). A game whose service is down still opens, so the games check
+can't see it. Each is asked for with one plain GET per run, no browser; only a request that gets no answer is tried
+again (2 s later), because the player codes service makes up a new code for every request. The logger is asked with no
+game data, which it answers with "No session_id": nothing is logged. The list is `SERVICES` in `src/site-checks.ts`
+(an address, and what a healthy answer has in it); another host of a service is one more entry. It runs before
+anything else and doesn't need the site, so a run of only this check (`--checks services`) starts no browser.
+* Failure: the service doesn't answer (DNS, HTTPS certificate, timeout, refused connection), answers 4xx/5xx, or
+  answers with something else (the player codes service without `"status": "SUCCESS"`, the logger without
+  "No session_id").
+* Warning: it takes more than `serviceWarnMs` 3 s to answer.
+
 ## Starting a run
 
 * **On a schedule.** `check-site.yml` runs daily at 11:47 UTC for staging and production.
@@ -96,7 +109,7 @@ one timing finding per page is reported (load, then paint, then first byte).
   gh run watch
   ```
 
-  `checks` is `all` or a list of `games`, `assets`, `links`, `spelling`, `performance`, `responsive`. `limit` visits
+  `checks` is `all` or a list of `games`, `assets`, `links`, `spelling`, `performance`, `responsive`, `services`. `limit` visits
   that many pages. `fail_on` is `fail` (the default: a failing finding fails the job), `warn` (warnings do too) or
   `never` (only a run that couldn't finish does). Another workflow can call it (`uses: ./.github/workflows/check-site.yml`
   with the same inputs), for example after a deploy.
@@ -128,7 +141,7 @@ The portal checks the body and keeps what it can trust; anything unusable is a 4
 without the feature answers 404 (the workflow says so in a notice and carries on). What is validated:
 
 * `site` is an http(s) address (reduced to its origin); `status` is `done` or `error`; `checks` is a non-empty list of
-  the six names (kept in their usual order); `started_at` and `finished_at` are dates (stored as ISO times); `source`
+  the seven names (kept in their usual order); `started_at` and `finished_at` are dates (stored as ISO times); `source`
   is empty or an https link of at most 500 characters; `pages` and `games` are whole numbers, 0 or more; `error` is
   text of at most 1000 characters, or null.
 * `summaries` has at most one entry for each listed check: a valid `check`, `status` (`done`, `skipped` or `error`),
@@ -147,7 +160,7 @@ run's address. A full run is about 300 KB; `check-site.ts --out` writes it on on
 
 ## Where results appear
 
-* **The job summary** of the workflow run: a table of the six checks and each check's findings, worst first.
+* **The job summary** of the workflow run: a table of the seven checks and each check's findings, worst first.
 * **Annotations** on the run: an error for each failure and a warning for each warning, up to GitHub's ten of each,
   then one line for the rest.
 * **A tracking issue** per system, *Site checks (staging)* / *(production)*, label `site-checks`: it lists the failing
@@ -167,7 +180,7 @@ issue are done, so GitHub notifies the people watching the repository. A post th
 
 ## The dashboard
 
-The README opens with a table of badges, one column per system: the latest run, when it ran, and each of the six
+The README opens with a table of badges, one column per system: the latest run, when it ran, and each of the seven
 checks. They are [shields.io endpoint badges](https://shields.io/badges/endpoint-badge) reading
 `GET PORTAL/v1/site-checks/badge/NAME` (`all`, `when`, or a check's name), which the portal answers from the latest
 run it was sent. The endpoint is public and gives counts only ("3 failing · 12 to look at", "passing", "no runs

@@ -1,5 +1,5 @@
 // Runs the site checks (games load, missing assets, broken links, spelling, large files and slow loading,
-// responsive design) against a Vault site, here, in headless Chromium, and reports what they found.
+// responsive design, game services) against a Vault site, here, in headless Chromium, and reports what they found.
 //
 //   node scripts/check-site.ts --site https://vaultlearninggames-staging.org [--checks games,links] [--limit N] [--paths /a/,/b/]
 //     [--catalog PORTAL] [--words a,b] [--guard] [--source RUN_URL] [--portal-page URL] [--fail-on fail|warn|never]

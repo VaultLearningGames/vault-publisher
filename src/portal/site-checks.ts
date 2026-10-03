@@ -1,5 +1,5 @@
 // Vault → Site checks: the battery of tests run against the live website (games load, missing assets, broken links,
-// spelling, large files and slow loading, responsive design; see site-checks.ts). The check-site workflow runs them
+// spelling, large files and slow loading, responsive design, game services; see site-checks.ts). The check-site workflow runs them
 // on a GitHub runner and posts each finished run (POST /v1/admin/site-checks); this shows the latest run and the
 // recent ones. Each check's row opens a table of what it found in that run (one row per problem, with the columns
 // that make it actionable for that check: a missing file, its answer, the element that asks for it and the pages
@@ -20,7 +20,7 @@ const statusPill = (s: SiteCheckRun['status']) => (s === 'done' ? pill('ok', 'Do
 const when = (iso: string) => html`<span title="${iso.slice(0, 16).replace('T', ' ')} UTC">${ago(iso)}</span>`;
 const number = (n: number, kind: 'bad' | 'wait') => (n ? html`<b class="n-${kind}">${n}</b>` : html`<span class="muted">0</span>`);
 const startedBy = (r: { started_by: string }) => (r.started_by === 'cli' ? 'a command line' : who(r.started_by));
-const checksText = (checks: CheckName[]) => (checks.length === CHECKS.length ? 'All six' : checks.map((c) => CHECK_LABEL[c]).join(', '));
+const checksText = (checks: CheckName[]) => (checks.length === CHECKS.length ? 'All seven' : checks.map((c) => CHECK_LABEL[c]).join(', '));
 
 // ---------- the findings tables ----------
 // One cell: what a person reads (html), what CSV and the filter get (text), and what it sorts by when that isn't the
@@ -117,6 +117,15 @@ const COLUMNS: Record<CheckName, Column[]> = {
     PROBLEM,
     WHERE('Page'),
   ],
+  services: [
+    LEVEL,
+    { label: 'Service', cls: 'name', get: (f) => plain(str(f, 'service')) },
+    PROBLEM,
+    { label: 'Answer', get: answer },
+    { label: 'Time', cls: 'r', get: (f) => { const ms = num(f, 'ms'); return ms === null ? { ...NONE, sort: -1 } : { text: String(ms), html: html`<span class="nowrap">${secs(ms)}</span>`, sort: ms }; } },
+    { label: 'It said', get: (f) => plain(str(f, 'body'), 'mono small') },
+    TARGET('Address'),
+  ],
 };
 
 export function findingsCsv(run: SiteCheckRun, check: CheckName): string {
@@ -201,7 +210,7 @@ export function registerSiteChecks(app: Hono, h: ListingHelpers) {
       <tbody>${rows.length ? rows : html`<tr><td colspan="8" class="muted">Nothing has run yet.</td></tr>`}</tbody></table></div>`;
 
     const actions = html`<a class="btn brass" href="https://github.com/${h.deps.adminRepository}/actions/workflows/check-site.yml" target="_blank" rel="noopener">Run the checks ↗</a>`;
-    const sub = 'Tests of the live website in a browser: games load, missing files, broken links, spelling, large files and slow loading, and phone, tablet and laptop layouts. They run in GitHub each day, and can be started there. Open a check for the list of what it found.';
+    const sub = 'Tests of the live website in a browser: games load, missing files, broken links, spelling, large files and slow loading, phone, tablet and laptop layouts, and whether the services games depend on (player codes, the Open Game Data logger) answer. They run in GitHub each day, and can be started there. Open a check for the list of what it found.';
     return h.page(c, 'Site checks', html`${head('Site checks', sub, actions)}${lastCard}${table}`, { active: 'site-checks' });
   });
 

@@ -9,7 +9,7 @@ import { deflateSync, crc32 } from 'node:zlib';
 import { parseSitemap } from '../src/site-checks/discover.ts';
 import { runSiteChecks } from '../src/site-checks/run.ts';
 import { isFlat, isPageUrl, normalisePath, oembedUrl, pagePathOf, youtubeWatchUrl } from '../src/site-checks/util.ts';
-import type { Finding, SiteCheckRun } from '../src/site-checks.ts';
+import type { Finding, Service, SiteCheckRun } from '../src/site-checks.ts';
 
 // ---------- pure helpers ----------
 describe('site-checks helpers', () => {
@@ -82,6 +82,42 @@ function bigPng(): Buffer {
 }
 
 const listen = (server: http.Server) => new Promise<number>((resolve) => server.listen(0, '127.0.0.1', () => resolve((server.address() as AddressInfo).port)));
+
+// ---------- game services ----------
+// Plain HTTP, no browser: runs everywhere. The site itself isn't asked for when only this check runs.
+describe('the services check', () => {
+  let server: http.Server, base = '';
+  const asked: string[] = [];
+  before(async () => {
+    server = http.createServer((req, res) => {
+      asked.push(req.url ?? '');
+      if (req.url === '/player/') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"val": ["MeltedHit"], "status": "SUCCESS"}'); return; }
+      if (req.url === '/log.php') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('No session_id'); return; }
+      if (req.url === '/broken/') { res.writeHead(500); res.end('Internal Server Error'); return; }
+      res.writeHead(404); res.end('no');
+    });
+    base = `http://127.0.0.1:${await listen(server)}`;
+  });
+  after(() => { server.close(); });
+
+  test('each service is asked once; what is wrong is a finding; no site, no browser', async () => {
+    const services: Service[] = [
+      { name: 'Player codes', url: `${base}/player/`, expect: /"status"\s*:\s*"SUCCESS"/, expected: 'a player code' },
+      { name: 'Logger', url: `${base}/log.php`, expect: /No session_id/, expected: '"No session_id"' },
+      { name: 'Broken', url: `${base}/broken/`, expect: /ok/, expected: 'ok' },
+      { name: 'Gone', url: 'http://127.0.0.1:1/', expect: /ok/, expected: 'ok' },
+    ];
+    // Port 1 on 127.0.0.1: nothing answers, so a run that asked the site first would have stopped.
+    const run = await runSiteChecks({ site: 'http://127.0.0.1:1', checks: ['services'], services, guard: false });
+    assert.equal(run.status, 'done');
+    assert.equal(run.error, null);
+    assert.deepEqual(run.checks, ['services']);
+    assert.deepEqual(run.summaries.map((s) => [s.check, s.status, s.checked, s.fail, s.warn]), [['services', 'done', 4, 2, 0]]);
+    assert.deepEqual(run.findings.map((f) => `${f.code} ${f.target}`).sort(), [`service.down ${base}/broken/`, 'service.down http://127.0.0.1:1/'].sort());
+    assert.deepEqual(asked, ['/player/', '/log.php', '/broken/']);   // an answer, even a 500, is never asked again
+    assert.equal(run.pages, 0);
+  });
+});
 
 describe('site checks engine', { skip: chromium ? false : 'Chromium is not installed (npx playwright install chromium-headless-shell)' }, () => {
   let site: http.Server, games: http.Server, origin = '', gamePort = 0;

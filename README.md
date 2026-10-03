@@ -35,6 +35,7 @@ which lists every finding; the badge above opens the workflow's runs, where a ru
 | Spelling | [![Spelling, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fspelling)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Spelling, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fspelling)](https://portal.vaultlearninggames.org/vault/site-checks) |
 | Large files and slow loading | [![Large files and slow loading, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fperformance)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Large files and slow loading, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fperformance)](https://portal.vaultlearninggames.org/vault/site-checks) |
 | Responsive design | [![Responsive design, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fresponsive)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Responsive design, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fresponsive)](https://portal.vaultlearninggames.org/vault/site-checks) |
+| Game services | [![Game services, staging](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames-staging.org%2Fv1%2Fsite-checks%2Fbadge%2Fservices)](https://portal.vaultlearninggames-staging.org/vault/site-checks) | [![Game services, production](https://img.shields.io/endpoint?url=https%3A%2F%2Fportal.vaultlearninggames.org%2Fv1%2Fsite-checks%2Fbadge%2Fservices)](https://portal.vaultlearninggames.org/vault/site-checks) |
 
 Badges refresh within about ten minutes of a run. A portal that doesn't have the site checks yet (production, until
 this version reaches the `production` branch) shows its badges as not found.
@@ -468,7 +469,8 @@ own previews from this portal's JSON.
 ## Site checks
 
 The live website is tested in a headless Chromium: every game opens, no missing images or scripts, no broken links,
-spelling, large files and slow pages, and the layout at phone, tablet, laptop and wide widths.
+spelling, large files and slow pages, the layout at phone, tablet, laptop and wide widths, and whether the services
+the games depend on (player codes, the Open Game Data logger) answer.
 `.github/workflows/check-site.yml` does the looking on a GitHub runner, daily for both systems, and posts each finished
 run to that system's portal; **Vault → Site checks** shows them. A failure fails the job, annotates the run and opens or
 updates the issue *Site checks (staging)* / *(production)*. By hand: `gh workflow run check-site.yml -f environment=staging -f checks=links,spelling`,

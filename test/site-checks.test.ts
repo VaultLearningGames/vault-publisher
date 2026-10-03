@@ -2,8 +2,8 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   allowList, annotations, assetFindings, checkBadge, CHECKS, runBadge, whenBadge, finishRun, fingerprint, gameFindings, groupFindings, hrefProblem, issueMarkdown,
-  DETAIL_VERSION, elementFor, fitRun, LIMITS, linkFinding, MAX_FINDINGS, MAX_PAGES_LISTED, MAX_PER_CHECK, parseRun, parseStart, performanceFindings, responsiveFindings, runFails, runMarkdown, spellingFindings, wordsOf,
-  type CheckSummary, type Dictionary, type GameLoad, type LinkProbe, type LinkSeen, type PageLoad, type RawFinding, type ResourceSeen, type SiteCheckRun, type ViewSeen,
+  DETAIL_VERSION, elementFor, fitRun, LIMITS, linkFinding, MAX_FINDINGS, MAX_PAGES_LISTED, MAX_PER_CHECK, parseRun, parseStart, performanceFindings, responsiveFindings, runFails, serviceFindings, SERVICES, runMarkdown, spellingFindings, wordsOf,
+  type CheckSummary, type Dictionary, type GameLoad, type LinkProbe, type LinkSeen, type PageLoad, type RawFinding, type ResourceSeen, type ServiceSeen, type SiteCheckRun, type ViewSeen,
 } from '../src/site-checks.ts';
 
 const SITE = 'https://vaultlearninggames.org';
@@ -250,6 +250,35 @@ describe('games', () => {
     assert.match(f[1].message, /80\.0 MB/);
     assert.deepEqual(codes(gameFindings(game({ ms: null }))), ['warn:game.slow']);
     assert.equal(gameFindings(game({ resources: [res({ bytes: 250_000_000 })] }))[0].level, 'fail');
+  });
+});
+
+describe('game services', () => {
+  const [playerCodes, logger] = SERVICES;
+  const seen = (s: Partial<ServiceSeen> = {}): ServiceSeen => ({ status: 200, error: null, ms: 120, body: '{"type": "GET", "val": ["BoilingRoar"], "msg": "SUCCESS: Loaded player from database.", "status": "SUCCESS"}', ...s });
+
+  test('both services are listed, and a healthy answer passes', () => {
+    assert.deepEqual(SERVICES.map((s) => s.url), ['https://fieldday-web.wcer.wisc.edu/wsgi-bin/opengamedata.wsgi/player/', 'https://ogdlogger.fielddaylab.wisc.edu/logger/log.php']);
+    assert.deepEqual(serviceFindings(playerCodes, seen()), []);
+    assert.deepEqual(serviceFindings(logger, seen({ body: 'No session_id' })), []);
+  });
+
+  test('no answer, an error status or the wrong answer fails; for the site as a whole', () => {
+    assert.deepEqual(codes(serviceFindings(playerCodes, seen({ status: null, ms: null, body: '', error: { code: 'ENOTFOUND', message: 'getaddrinfo ENOTFOUND' } }))), ['fail:service.down']);
+    assert.match(serviceFindings(playerCodes, seen({ status: null, ms: null, body: '', error: { code: 'TimeoutError', message: 'timed out' } }))[0].message, /^Player codes didn't answer \(TimeoutError\)/);
+    assert.match(serviceFindings(logger, seen({ status: 503, body: 'Service Unavailable' }))[0].message, /Open Game Data logger answers HTTP 503/);
+    assert.deepEqual(codes(serviceFindings(playerCodes, seen({ body: '{"status": "FAILURE", "msg": "database"}' }))), ['fail:service.wrong-answer']);
+    assert.deepEqual(codes(serviceFindings(logger, seen({ body: '<h1>Maintenance</h1>' }))), ['fail:service.wrong-answer']);
+    const [f] = serviceFindings(logger, seen({ status: 500, body: 'Fatal   error:\n  db' }));
+    assert.equal(f.check, 'services');
+    assert.equal(f.page, '');
+    assert.equal(f.target, logger.url);
+    assert.deepEqual(f.detail, { service: 'Open Game Data logger', status: 500, ms: 120, error: null, body: 'Fatal error: db' });
+  });
+
+  test('a slow answer is worth a look', () => {
+    assert.deepEqual(codes(serviceFindings(playerCodes, seen({ ms: LIMITS.serviceWarnMs + 1 }))), ['warn:service.slow']);
+    assert.deepEqual(serviceFindings(playerCodes, seen({ ms: LIMITS.serviceWarnMs })), []);
   });
 });
 

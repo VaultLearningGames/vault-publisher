@@ -1,5 +1,5 @@
 // Site checks: a battery of tests the portal runs against the Vault website, in a headless browser and with plain
-// requests. Six checks, each of which can run by itself:
+// requests. Seven checks, each of which can run by itself:
 //
 //   games        every game opens in the site's player (or its own tab) and actually shows something
 //   assets       no page asks for a file that doesn't arrive (images, stylesheets, scripts, fonts), no broken images
@@ -7,21 +7,22 @@
 //   spelling     words on the site that no dictionary knows
 //   performance  large files, heavy or slow pages, images far bigger than they are shown, heavy or slow games
 //   responsive   every page at phone, tablet, laptop and wide-screen widths: no sideways scrolling, readable text
+//   services     the services games depend on (player codes, the Open Game Data logger) answer as they should
 //
 // Who runs what: the engine (src/site-checks/) does the looking, on a GitHub Actions runner (the check-site workflow,
 // through scripts/check-site.ts) or on a developer's machine. It loads pages and reports what it saw as the plain
-// records below (PageLoad, ViewSeen, LinkSeen + LinkProbe, GameLoad, PageText). This module decides what those mean,
+// records below (PageLoad, ViewSeen, LinkSeen + LinkProbe, GameLoad, PageText, ServiceSeen). This module decides what those mean,
 // so it can be tested without a browser or a network. The portal never looks at the site: it receives a finished run
 // (POST /v1/admin/site-checks, checked by parseRun below), stores it and shows it on Vault → Site checks.
 //
 // warn: worth a look, or couldn't be verified. fail: visitors hit it.
 import { errorKind } from './game-checks.ts';
 
-export const CHECKS = ['games', 'assets', 'links', 'spelling', 'performance', 'responsive'] as const;
+export const CHECKS = ['games', 'assets', 'links', 'spelling', 'performance', 'responsive', 'services'] as const;
 export type CheckName = (typeof CHECKS)[number];
 export const CHECK_LABEL: Record<CheckName, string> = {
   games: 'Games load', assets: 'Missing assets', links: 'Broken links', spelling: 'Spelling',
-  performance: 'Large files and slow loading', responsive: 'Responsive design',
+  performance: 'Large files and slow loading', responsive: 'Responsive design', services: 'Game services',
 };
 
 export type FindingLevel = 'warn' | 'fail';
@@ -88,6 +89,7 @@ export interface RunOptions {
   limit?: number;                     // visit at most this many pages (a quick run)
   paths?: string[];                   // visit only these site paths instead of discovering pages
   allowWords?: string[];              // names the spelling check should accept (game titles, studios)
+  services?: readonly Service[];      // the services check asks these instead of SERVICES (tests)
   guard?: boolean;                    // true: never request private or loopback addresses (the workflow does)
   concurrency?: number;               // browser pages open at once
   source?: string | null;
@@ -183,6 +185,14 @@ export interface GameLoad {
 }
 
 export interface PageText { path: string; text: string }
+
+// One service games depend on, asked for once.
+export interface ServiceSeen {
+  status: number | null;              // null: no answer
+  error: { code: string; message: string } | null;   // as net.ts errorOf() reports it
+  ms: number | null;                  // until the whole answer arrived
+  body: string;                       // the start of the answer
+}
 export interface Dictionary { correct(word: string): boolean; suggest(word: string): string[] }
 
 // ---------- limits ----------
@@ -199,12 +209,13 @@ export const LIMITS = {
   gameLoadWarnMs: 15_000, gameWarnBytes: 50_000_000, gameFailBytes: 200_000_000,
   gameMissingListed: 5,
   smallTextPx: 12, tapTargetPx: 24, overflowPx: 2,
+  serviceWarnMs: 3000,                                      // a game service that takes longer than this to answer
 } as const;
 export const MAX_PAGES_LISTED = 20;
 // Each check lists at most this many findings (worst first, then the most widespread), so one bad run can't bloat the
 // portal's database; the rest are counted (CheckSummary.unlisted).
 export const MAX_PER_CHECK = 500;
-export const MAX_FINDINGS = MAX_PER_CHECK * 6;
+export const MAX_FINDINGS = MAX_PER_CHECK * CHECKS.length;
 export const DETAIL_VERSION = 2;
 
 const mb = (bytes: number) => (bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.round(bytes / 1000)} KB`);
@@ -421,6 +432,46 @@ export function gameFindings(game: GameLoad): RawFinding[] {
     add('performance', { level: bytes > LIMITS.gameFailBytes ? 'fail' : 'warn', code: 'game.heavy', target: game.url, message: `${name} downloads ${mb(bytes)} before it can be played`, detail: { ...about, bytes } });
   }
   return out;
+}
+
+// ---------- game services ----------
+// Services Field Day's games call while they are played, hosted outside Vault: if one is down, games still open but
+// can't hand out player codes or record play. Each is asked for with one plain GET per run (no retry when it answers,
+// one more try when it doesn't), so a service that writes something per request (the player codes service makes up a
+// new code each time) does so once per run. More hosts of the same service go in as more entries.
+export interface Service {
+  name: string;                       // what a person calls it
+  url: string;
+  expect: RegExp;                     // what a healthy answer's body has in it
+  expected: string;                   // the same, for a person
+}
+export const SERVICES: readonly Service[] = [
+  {
+    name: 'Player codes', url: 'https://fieldday-web.wcer.wisc.edu/wsgi-bin/opengamedata.wsgi/player/',
+    expect: /"status"\s*:\s*"SUCCESS"/, expected: 'a new player code ("status": "SUCCESS")',
+  },
+  {
+    // Without a session it answers "No session_id"; nothing is logged, so no fake play data is sent.
+    name: 'Open Game Data logger', url: 'https://ogdlogger.fielddaylab.wisc.edu/logger/log.php',
+    expect: /No session_id/, expected: '"No session_id" (its answer to a request without game data)',
+  },
+];
+
+export function serviceFindings(service: Service, seen: ServiceSeen): RawFinding[] {
+  const { name } = service;
+  const detail = { service: name, status: seen.status, ms: seen.ms, error: seen.error ? `${seen.error.code}${seen.error.message && seen.error.message !== seen.error.code ? `: ${short(seen.error.message, 200)}` : ''}` : null, body: short(seen.body.replace(/\s+/g, ' ').trim(), 200) || null };
+  const f = (level: FindingLevel, code: string, message: string): RawFinding => ({ check: 'services', level, code, page: '', target: service.url, message, detail });
+  if (seen.error) {
+    const kind = errorKind(seen.error.code);
+    if (kind === 'dns') return [f('fail', 'service.down', `${name}: its address no longer exists (${seen.error.code})`)];
+    if (kind === 'tls') return [f('fail', 'service.down', `${name} has a broken HTTPS certificate (${seen.error.code})`)];
+    return [f('fail', 'service.down', `${name} didn't answer (${seen.error.code})`)];
+  }
+  if (seen.status === null) return [f('fail', 'service.down', `${name} didn't answer`)];
+  if (seen.status >= 400) return [f('fail', 'service.down', `${name} answers HTTP ${seen.status}`)];
+  if (!service.expect.test(seen.body)) return [f('fail', 'service.wrong-answer', `${name} answers, but not with ${service.expected}`)];
+  if (seen.ms !== null && seen.ms > LIMITS.serviceWarnMs) return [f('warn', 'service.slow', `${name} takes ${secs(seen.ms)} to answer`)];
+  return [];
 }
 
 // ---------- spelling ----------

@@ -2,7 +2,7 @@
 // what it saw to src/site-checks.ts, which decides what is wrong. This file only gathers and routes; it holds no
 // thresholds or wording about findings.
 import type { Browser, BrowserContext } from 'playwright';
-import { assetFindings, CHECKS, finishRun, LIMITS, performanceFindings, responsiveFindings, gameFindings } from '../site-checks.ts';
+import { assetFindings, CHECKS, finishRun, LIMITS, performanceFindings, responsiveFindings, gameFindings, SERVICES } from '../site-checks.ts';
 import type { CheckName, CheckResult, Engine, GameLoad, PageText, RawFinding, RunOptions, SiteCheckRun } from '../site-checks.ts';
 import { launchBrowser, makeHostGuard, NO_BROWSER, newContext } from './browser.ts';
 import type { HostGuard } from './browser.ts';
@@ -10,6 +10,7 @@ import { readSitemap } from './discover.ts';
 import { openGame } from './games.ts';
 import type { GameCandidate } from './games.ts';
 import { checkLinks } from './links.ts';
+import { checkServices } from './services.ts';
 import { errorOf, makeConnection, makeGetter, OfflineError } from './net.ts';
 import { checkSpelling } from './spelling.ts';
 import { normalisePath, pagePathOf, runPool } from './util.ts';
@@ -34,6 +35,16 @@ export const runSiteChecks: Engine = async (options) => {
   const aborted = () => options.signal?.aborted === true;
   const get = makeGetter(guard);
   const connection = makeConnection(get, origin, options.signal);
+
+  // The game services first: they live on other sites, so they are worth knowing about even when this one can't be
+  // reached. Plain requests; a run of only this check needs neither the site nor a browser.
+  if (wants('services')) {
+    const t = Date.now();
+    try { results.push({ check: 'services', status: 'done', ...(await checkServices(get, options.services ?? SERVICES, options.signal)), ms: Date.now() - t }); }
+    catch (e) { results.push({ check: 'services', status: 'error', note: e instanceof Error ? e.message : String(e), checked: 0, ms: Date.now() - t, findings: [] }); }
+    if (aborted()) return stop('cancelled');
+  }
+  if (!checks.some((c) => c !== 'services')) return finishRun(base, results);
 
   // The front door first: a site that can't be reached is one error, not a thousand failing pages.
   try {
@@ -65,7 +76,7 @@ export const runSiteChecks: Engine = async (options) => {
 
     try { browser = await launchBrowser(); } catch { return stop(NO_BROWSER); }
     const hostGuard: HostGuard | null = guard ? makeHostGuard() : null;
-    const deep = checks.some((c) => c !== 'games');
+    const deep = checks.some((c) => c !== 'games' && c !== 'services');
     const phone: BrowserContext | null = wants('responsive') ? await newPhoneContext(browser, hostGuard) : null;
     const laptop = await newLaptopContext(browser, hostGuard);
     const env = { browser, guard: hostGuard, origin, deep, responsive: wants('responsive'), laptop, phone, known: new Map() };

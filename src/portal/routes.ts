@@ -106,6 +106,26 @@ const logo = () => html`<img class="logo" src="/assets/vault-logo.png?v=${assetV
 // signed-in page) and on the sign-in page. Set by registerPortal, like assetVersion; '' shows nothing.
 let supportUrl = DEFAULT_SUPPORT_URL;
 const supportLink = (text: string) => html`<a href="${supportUrl}" target="_blank" rel="noopener" title="Opens the Slack invitation in a new tab; join the ${SUPPORT_CHANNEL} channel">${text} ↗</a>`;
+// The staging portal says so at the top of every page, signed in or not: what's saved there is for previewing and is
+// overwritten whenever the Vault code changes, so real content belongs on production. Which system this is comes from
+// the portal's own address (PORTAL_URL): the deploy refuses a staging environment whose PORTAL_URL doesn't contain
+// "staging", and a production one whose does. Set by registerPortal, like supportUrl; '' on production.
+let stagingBanner: Html | '' = '';
+export function stagingProductionUrl(baseUrl: string): string | null {
+  let u: URL;
+  try { u = new URL(baseUrl); } catch { return null; }
+  if (!/staging/i.test(u.hostname)) return null;
+  const host = u.hostname.replace(/-staging(?=\.)/i, '').replace(/^staging\./i, '');
+  return host !== u.hostname && !/staging/i.test(host) ? `${u.protocol}//${host}` : '';
+}
+function stagingBannerFor(baseUrl: string): Html | '' {
+  const prod = stagingProductionUrl(baseUrl);
+  if (prod === null) return '';
+  return html`<div class="env-banner" role="note" aria-label="This is the staging portal">
+    <strong><span aria-hidden="true">⚠</span> Staging portal: for previewing features, not for content.</strong>
+    <span>Settings, game data and anything else saved here apply only to staging, and are overwritten whenever the Vault code changes.
+    Make real changes, and preview them, on the production portal${prod ? html`: <a href="${prod}/">${new URL(prod).host}</a>` : ''}.</span></div>`;
+}
 interface Nav { user: User; studio?: Studio; memberships: (Membership & { studio_slug: string; studio_name: string })[]; allStudios: Studio[] }
 function layout(title: string, nav: Nav | null, body: Html | string, active = ''): string {
   const u = nav?.user;
@@ -147,7 +167,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
 <meta name="robots" content="noindex, nofollow"><title>${escape(title)} · Vault Studio Portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="/assets/portal.css?v=${assetVersion}"></head><body>
+<link rel="stylesheet" href="/assets/portal.css?v=${assetVersion}"></head><body${stagingBanner ? ' class="staging"' : ''}>${stagingBanner}
 <div class="${nav ? 'shell' : 'shell solo'}">${side}<main id="main">${body}</main></div>
 <script src="/assets/portal.js?v=${assetVersion}" defer></script></body></html>`;
 }
@@ -165,6 +185,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const secure = cfg.baseUrl.startsWith('https://');
   const admins = new Set(cfg.vaultAdmins.map((l) => l.toLowerCase()));
   supportUrl = cfg.supportUrl ?? DEFAULT_SUPPORT_URL;
+  stagingBanner = stagingBannerFor(cfg.baseUrl);
 
   // Browsers that reach the portal on the service's default *.run.app address are sent to the portal's
   // real address (GitHub sign-in only returns there). The API and health check keep answering on both.

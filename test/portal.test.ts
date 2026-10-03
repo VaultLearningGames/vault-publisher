@@ -6,6 +6,7 @@ import { parseSupportUrl } from '../src/config.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db, studioWebsite } from '../src/db.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
+import { stagingProductionUrl } from '../src/portal/routes.ts';
 import { signSession } from '../src/portal/session.ts';
 import { browseKeys, type Storage } from '../src/storage.ts';
 
@@ -140,6 +141,41 @@ describe('“Need support?”', () => {
     for (const page of [await (await app.request('/login')).text(), await (await as('vera', 'none', 'viewer').get('/s/fieldday')).text()]) {
       assert.doesNotMatch(page, /Need support|slack\.com|class="support"/);
     }
+  });
+});
+
+describe('the staging banner', () => {
+  const base = () => ({ db, staging, production: prod, verifier, stagingPublicUrl: 'https://stg.test', prodPublicUrl: 'https://prod.test',
+    adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production', previewRetentionDays: 90, taskInvokerEmail: 'x@y' });
+  const pages = async () => [await (await app.request('/login')).text(), await (await as('vera', 'none', 'viewer').get('/s/fieldday')).text(),
+    await (await as('boss', 'admin').get('/vault/listings')).text()];
+
+  test('the staging portal warns, on every page, that what is saved there is overwritten, and links to production', async () => {
+    app = createApp({ ...base(), portal: { baseUrl: 'https://portal.vaultlearninggames-staging.org', sessionSecret: SECRET, vaultAdmins: ['boss'] } });
+    for (const page of await pages()) {
+      assert.match(page, /<body class="staging"><div class="env-banner" role="note" aria-label="This is the staging portal">/);
+      assert.match(page, /Staging portal: for previewing features, not for content\./);
+      assert.match(page, /apply only to staging, and are overwritten whenever the Vault code changes/);
+      assert.match(page, /<a href="https:\/\/portal\.vaultlearninggames\.org\/">portal\.vaultlearninggames\.org<\/a>/);
+      assert.doesNotMatch(page.match(/<div class="env-banner"[^]*?<\/div>/)![0], /<button|data-close|dismiss/i, 'it can’t be dismissed');
+    }
+  });
+
+  test('production, and any address without "staging" in it, shows no banner', async () => {
+    for (const baseUrl of ['https://portal.vaultlearninggames.org', 'https://portal.test']) {
+      app = createApp({ ...base(), portal: { baseUrl, sessionSecret: SECRET, vaultAdmins: ['boss'] } });
+      for (const page of await pages()) {
+        assert.doesNotMatch(page, /env-banner|Staging portal|class="staging"/, baseUrl);
+      }
+    }
+  });
+
+  test('the production address comes from the staging one', () => {
+    assert.equal(stagingProductionUrl('https://portal.vaultlearninggames-staging.org'), 'https://portal.vaultlearninggames.org');
+    assert.equal(stagingProductionUrl('https://staging.example.org/'), 'https://example.org');
+    assert.equal(stagingProductionUrl('https://my-staging-box.example.org'), '', 'staging, but no production address to name');
+    assert.equal(stagingProductionUrl('https://portal.vaultlearninggames.org'), null);
+    assert.equal(stagingProductionUrl('not a url'), null);
   });
 });
 

@@ -17,6 +17,12 @@ to Cloudflare's static hosting (a Worker with files and no script).
 Studios only ever use production. Staging is where Vault tries the next version; only
 `VaultLearningGames/vault-publisher-test` publishes to it.
 
+The staging portal says so on every page, signed in or not: a banner at the top that can't be closed, saying that what
+is saved there (settings, game data, listings) applies only to staging and is overwritten whenever the Vault code
+changes, and that real changes are made and previewed on the production portal. The portal decides from its own
+address: `PORTAL_URL` containing `staging` (the deploy already refuses a staging `PORTAL_URL` without it, and a
+production one with it), so there is nothing to set.
+
 Throughout: `PROJECT=wcer-field-day-ogd-1798`, `REGION=us-central1`. Secret values are typed at hidden prompts, never
 pasted into chat, logs or command lines.
 

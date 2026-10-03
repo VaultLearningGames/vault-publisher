@@ -12,7 +12,9 @@ The portal publishes web game builds to Vault Learning Games:
   `https://builds.vaultlearninggames.org/STUDIO/GAME/BRANCH/`
 - **Releases** (Vault releases them): `https://cdn.vaultlearninggames.org/STUDIO/GAME/` → the current release
 
-Studios manage games, members and release requests at **https://portal.vaultlearninggames.org**.
+Studios manage games, members and release requests at **https://portal.vaultlearninggames.org**. The staging portal
+(`portal.vaultlearninggames-staging.org`) is for previewing features: a banner on every page says that what is saved
+there is overwritten whenever the code changes ([docs/setup.md](docs/setup.md)).
 
 ## Site checks dashboard
 

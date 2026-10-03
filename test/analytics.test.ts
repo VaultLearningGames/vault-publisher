@@ -10,7 +10,7 @@ import {
 import { loadLegacy, pagePaths } from '../src/analytics/pages.ts';
 import { parseGaPropertyId } from '../src/config.ts';
 import { EMPTY_LISTING } from '../src/listings.ts';
-import { chart, delta, duration, realtimeBody, view } from '../src/portal/analytics.ts';
+import { chart, delta, duration, placesMap, realtimeBody, view } from '../src/portal/analytics.ts';
 import { fakeGa } from '../scripts/fake-ga.ts';
 import { portalHarness } from './portal-harness.ts';
 
@@ -331,6 +331,20 @@ describe('the Google Analytics client', () => {
     assert.match(String(realtimeBody(now, { staff: false, land: '/land.svg', game: false })), /<b>4<\/b> people on the site in the last 30 minutes\.\s*<span class="muted">1 playing a game\.<\/span>/);
     const g = await new Analytics({ transport: t }).realtime({ game: 'wake' });
     assert.ok(g.who === 'players' && g.places.ok && g.places.value[0].users === 1);
+  });
+
+  test('the map has a dot per city, at its country when the city isn’t known', () => {
+    const svg = String(placesMap([
+      { countryId: 'US', country: 'United States', city: 'Madison', users: 4 },
+      { countryId: 'US', country: 'United States', city: 'Chicago', users: 1 },
+      { countryId: 'DE', country: 'Germany', city: 'Cologne', users: 2 },
+      { countryId: 'FR', country: 'France', city: 'Nowheresville', users: 1 },
+    ], '/land.svg', 'People on the site'));
+    assert.equal(svg.match(/<circle /g)?.length, 4);
+    assert.match(svg, /<circle cx="251.7" cy="116.4" r="12.0"[^>]*><title>Madison, United States: 4 on the site<\/title>/);
+    assert.match(svg, /cx="519.3" cy="94.6"[^>]*><title>Cologne, Germany: 2/);
+    assert.match(svg, /<title>Nowheresville, France: 1 on the site<\/title>/);
+    assert.match(svg, /aria-label="People on the site in the last 30 minutes, by country: United States 5, Germany 2, France 1"/);
   });
 
   test('GA_PROPERTY_ID is the numeric property id', () => {

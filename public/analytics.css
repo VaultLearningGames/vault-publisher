@@ -27,11 +27,19 @@
 .kpis.ga-k3 .kpi .d { line-height: 1.35; }
 
 .ga-split { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; }
-.ga-map { position: relative; width: 100%; margin: 4px 0 10px; }
-.ga-land { position: absolute; inset: 0; background: var(--line); -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
-.ga-map svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.ga-map circle { fill: var(--s2); fill-opacity: .55; stroke: var(--s2); stroke-width: 1.5; }
-.ga-map circle:hover { fill-opacity: .8; }
+.ga-map { position: relative; width: 100%; margin: 4px 0 10px; overflow: hidden; border-radius: 6px; }
+.ga-map.zoomed { touch-action: none; }
+.ga-map svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+.ga-map svg.dragging { cursor: grabbing; }
+.ga-map .ga-land { fill: var(--line); }
+.ga-map circle { fill: var(--s2); fill-opacity: .55; stroke: var(--s2); stroke-width: 1.5; vector-effect: non-scaling-stroke;
+  transform-box: fill-box; transform-origin: center; animation: ga-pulse 2.4s ease-in-out infinite; }
+.ga-map circle:hover { fill-opacity: .85; animation-play-state: paused; }
+@keyframes ga-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.3); } }
+@media (prefers-reduced-motion: reduce) { .ga-map circle { animation: none; } }
+.ga-zoom { position: absolute; right: 8px; bottom: 8px; display: flex; flex-direction: column; gap: 4px; }
+.ga-zoom button { width: 28px; height: 28px; padding: 0; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
+.ga-zoom button:hover { border-color: var(--s2); }
 .ga-places td, .ga-places th { padding-top: 6px; padding-bottom: 6px; }
 .card .tbl-wrap.ga-tight { margin: 0; }
 .ga-off .fix { margin: 0; }

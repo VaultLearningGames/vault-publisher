@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Analytics, AnalyticsError, type Overview, type Realtime, type Result } from '../analytics/ga.ts';
+import { cityPoint } from '../analytics/cities.ts';
 import { COUNTRY_POINTS } from '../analytics/countries.ts';
 import { MAP_HEIGHT, MAP_WIDTH } from '../analytics/projection.ts';
 import { loadLegacy, pagePaths } from '../analytics/pages.ts';
@@ -83,22 +84,33 @@ export function chart(s: Series, what = 'plays'): Html {
 // ---------- the map ----------
 export function placesMap(places: Place[], landUrl: string, what: 'Plays' | 'People on the site' = 'Plays'): Html {
   const verb = what === 'Plays' ? 'playing' : 'on the site';
-  const byCountry = new Map<string, { users: number; name: string; cities: string[] }>();
+  // A dot per city (at its country's point when the city isn't known); places on the same point share a dot.
+  const dots = new Map<string, { x: number; y: number; users: number; names: string[] }>();
+  const byCountry = new Map<string, { users: number; name: string }>();
   for (const p of places) {
-    const c = byCountry.get(p.countryId) ?? { users: 0, name: p.country, cities: [] };
+    const c = byCountry.get(p.countryId) ?? { users: 0, name: p.country };
     c.users += p.users;
-    if (p.city && p.city !== '(not set)') c.cities.push(`${p.city} ${p.users}`);
     byCountry.set(p.countryId, c);
+    const pt = cityPoint(p.countryId, p.city) ?? COUNTRY_POINTS[p.countryId];
+    if (!pt) continue;
+    const key = `${pt[0]},${pt[1]}`;
+    const d = dots.get(key) ?? { x: pt[0], y: pt[1], users: 0, names: [] };
+    d.users += p.users;
+    d.names.push(p.city && p.city !== '(not set)' ? `${p.city}, ${p.country}` : p.country);
+    dots.set(key, d);
   }
-  const max = Math.max(1, ...[...byCountry.values()].map((c) => c.users));
-  const dots = [...byCountry].filter(([id]) => COUNTRY_POINTS[id]).sort((a, b) => b[1].users - a[1].users).map(([id, c]) => {
-    const [cx, cy] = COUNTRY_POINTS[id];
-    const r = 5 + 17 * Math.sqrt(c.users / max);
-    return html`<circle cx="${cx}" cy="${cy}" r="${r.toFixed(1)}"><title>${c.name}: ${num(c.users)} ${verb}${c.cities.length ? ` (${c.cities.slice(0, 6).join(', ')})` : ''}</title></circle>`;
+  const max = Math.max(1, ...[...dots.values()].map((d) => d.users));
+  const circles = [...dots.values()].sort((a, b) => b.users - a.users).map((d, i) => {
+    const r = (3 + 9 * Math.sqrt(d.users / max)).toFixed(1);
+    return html`<circle cx="${d.x}" cy="${d.y}" r="${r}" data-r="${r}" style="animation-delay:-${((i * 0.37) % 2.4).toFixed(2)}s"><title>${d.names.slice(0, 4).join('; ')}${d.names.length > 4 ? ` and ${d.names.length - 4} more` : ''}: ${num(d.users)} ${verb}</title></circle>`;
   });
-  return html`<div class="ga-map" style="aspect-ratio:${MAP_WIDTH}/${MAP_HEIGHT}">
-    <div class="ga-land" style="-webkit-mask-image:url(${landUrl});mask-image:url(${landUrl})"></div>
-    <svg viewBox="0 0 ${MAP_WIDTH} ${MAP_HEIGHT}" role="img" aria-label="${places.length ? `${what} in the last 30 minutes, by country: ${[...byCountry.values()].map((c) => `${c.name} ${c.users}`).join(', ')}` : `No ${what.toLowerCase()} in the last 30 minutes`}">${dots}</svg>
+  return html`<div class="ga-map" style="aspect-ratio:${MAP_WIDTH}/${MAP_HEIGHT}" data-map="${MAP_WIDTH} ${MAP_HEIGHT}">
+    <svg viewBox="0 0 ${MAP_WIDTH} ${MAP_HEIGHT}" role="img" aria-label="${places.length ? `${what} in the last 30 minutes, by country: ${[...byCountry.values()].map((c) => `${c.name} ${c.users}`).join(', ')}` : `No ${what.toLowerCase()} in the last 30 minutes`}">
+      <mask id="ga-land-mask" style="mask-type:alpha"><image href="${landUrl}" width="${MAP_WIDTH}" height="${MAP_HEIGHT}" preserveAspectRatio="none"/></mask>
+      <rect class="ga-land" width="${MAP_WIDTH}" height="${MAP_HEIGHT}" mask="url(#ga-land-mask)"/>
+      <g class="ga-dots">${circles}</g>
+    </svg>
+    <div class="ga-zoom" hidden><button type="button" data-zoom="in" aria-label="Zoom in">+</button><button type="button" data-zoom="out" aria-label="Zoom out">−</button><button type="button" data-zoom="reset" aria-label="Whole world">⟲</button></div>
   </div>`;
 }
 

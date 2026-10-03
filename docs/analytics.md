@@ -138,3 +138,7 @@ Locally, `node scripts/dev-portal.ts` shows the pages with a made-up property (`
 `GA_FAKE=off` shows the not-connected state; `GA_PROPERTY_ID=NNN` reads the real property with your gcloud
 application default credentials, which need the Analytics scope:
 `gcloud auth application-default login --scopes=openid,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/analytics.readonly`.
+
+## The realtime map
+
+A dot per city, sized by people, pulsing; zoom with the buttons, a double-click (shift: out), pinch or ctrl/⌘-scroll, and drag to pan. City points come from GeoNames cities15000 (CC BY 4.0, geonames.org), made into `src/analytics/cities.json` by `scripts/world-cities.ts`; a city not in it is drawn at its country's point (`src/analytics/countries.ts`, Natural Earth, public domain).

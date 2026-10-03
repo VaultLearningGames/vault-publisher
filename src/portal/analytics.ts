@@ -44,7 +44,8 @@ export function delta(cur: number | null, prev: number | null, range: RangeKey):
 function niceMax(v: number): number {
   if (v <= 4) return 4;
   const p = 10 ** Math.floor(Math.log10(v));
-  for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+  // Tops whose quarters are round numbers, close enough together that the line fills most of the height.
+  for (const m of [1, 1.2, 1.4, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p;
   return 10 * p;
 }
 export function chart(s: Series, what = 'plays'): Html {
@@ -128,14 +129,14 @@ function rangeBar(base: string, range: RangeKey): Html {
 const kpi = (label: string, value: string, d: Html, title = '') => html`<div class="kpi" ${title ? raw(`title="${title.replace(/"/g, '&quot;')}"`) : ''}><div class="v">${value}</div><div class="l">${label}</div>${d}</div>`;
 
 export function realtimeBody(rt: Realtime, o: { staff: boolean; land: string; game: boolean }): Html {
-  if (!rt.places.ok) return problem(rt.places.error, o.staff, rt.places.error.kind === 'setup' ? 'it can’t tell which game people are playing (the user dimension vault_game)' : 'realtime plays');
+  if (!rt.places.ok) return problem(rt.places.error, o.staff, rt.places.error.kind === 'setup' ? 'it can’t tell which game people are playing (the user dimension vault_game)' : rt.who === 'visitors' ? 'realtime users' : 'realtime plays');
   const places = rt.places.value;
   const total = places.reduce((s, p) => s + p.users, 0);
   const visitors = rt.who === 'visitors';
   const rows = places.slice(0, 8).map((p) => html`<tr><td>${p.city && p.city !== '(not set)' ? html`${p.city}, ` : ''}${p.country || 'Unknown'}</td><td class="r num">${num(p.users)}</td></tr>`);
   const summary = visitors
     ? html`${rt.visitors?.ok && rt.visitors.value ? html`<b>${num(rt.visitors.value)}</b> ${rt.visitors.value === 1 ? 'person' : 'people'} on the site in the last 30 minutes.` : html`<span class="muted">No one has been on the site in the last 30 minutes.</span>`}
-      <span class="muted">Players will show here once Google Analytics knows the user dimension vault_game${o.staff ? html` (see <span class="mono">docs/analytics.md</span>)` : ''}.</span>`
+      ${rt.playing?.ok ? html` <span class="muted">${num(rt.playing.value)} playing a game.</span>` : ''}`
     : html`${total ? html`<b>${num(total)}</b> ${total === 1 ? 'person' : 'people'} playing${o.game ? ' this game' : ''} in the last 30 minutes.` : html`<span class="muted">No one has played${o.game ? ' this game' : ''} in the last 30 minutes.</span>`}
       ${rt.visitors?.ok ? html` <span class="muted">${num(rt.visitors.value)} on the site.</span>` : ''}`;
   return html`${placesMap(places, o.land, visitors ? 'People on the site' : 'Plays')}
@@ -196,7 +197,7 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
       ${!ov.site.ok ? problem(ov.site.error, o.staff, 'the website’s visits') : ''}`;
   }
 
-  const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">Playing now</span><small>last 30 minutes · updates every minute</small></h2>
+  const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">${o.scope.game ? 'Playing now' : 'On the site now'}</span><small>last 30 minutes · updates every minute</small></h2>
     <div data-realtime="${o.realtimeUrl}">${realtimeBody(rt, { staff: o.staff, land: o.assets.land, game: !!o.scope.game })}</div></div>`;
 
   let top: Html | string = '';

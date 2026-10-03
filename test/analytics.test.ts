@@ -241,12 +241,12 @@ describe('the Google Analytics client', () => {
     await a.overview('week', {});
     assert.equal(log.length, 4);
     await a.realtime({}); await a.realtime({});
-    assert.equal(log.length, 6);
+    assert.equal(log.length, 7);   // people by place, the total, and how many are playing
     now += 61_000;
     await a.realtime({});
-    assert.equal(log.length, 8);
+    assert.equal(log.length, 10);
     await a.overview('week', { game: 'wake', pages: ['/wake', '/wake/'] });
-    assert.equal(log.length, 12);  // no site report for a game; its page's report instead
+    assert.equal(log.length, 14);  // no site report for a game; its page's report instead
   });
 
   test('before any play events: the chart and the top games fall back to page views', async () => {
@@ -307,9 +307,13 @@ describe('the Google Analytics client', () => {
     assert.match(JSON.stringify(playersRequest('week', TODAY, { game: 'wake', pages: ['/wake'] })), /"pagePath","inListFilter":\{"values":\["\/wake"\]/);
   });
 
-  test('before vault_game is registered the realtime map shows everyone on the site', async () => {
+  test('the site’s realtime map is everyone on the site, playing or browsing; a game’s is its players', async () => {
+    let registered = false;
     const t = async (_m: GaMethod, body: GaRequest): Promise<GaResponse> => {
-      if (JSON.stringify(body).includes('custom')) throw new AnalyticsError('setup', 'Field customUser:vault_game is not a valid dimension.');
+      if (JSON.stringify(body).includes('custom')) {
+        if (!registered) throw new AnalyticsError('setup', 'Field customUser:vault_game is not a valid dimension.');
+        return res(['countryId', 'country', 'city'], ['activeUsers'], [[['US', 'United States', 'Madison'], [1]]]);
+      }
       return body.dimensions ? res(['countryId', 'country', 'city'], ['activeUsers'], [[['US', 'United States', 'Madison'], [3]]]) : res([], ['activeUsers'], [[[], [4]]]);
     };
     const rt = await new Analytics({ transport: t }).realtime({});
@@ -318,9 +322,15 @@ describe('the Google Analytics client', () => {
     const body = String(realtimeBody(rt, { staff: false, land: '/land.svg', game: false }));
     assert.match(body, /<b>4<\/b> people on the site in the last 30 minutes/);
     assert.match(body, /<th class="r">On the site<\/th>/);
-    assert.doesNotMatch(body, /couldn’t answer/);
+    assert.doesNotMatch(body, /couldn’t answer|playing a game/);
     const game = await new Analytics({ transport: t }).realtime({ game: 'wake' });
     assert.ok(!game.places.ok && game.places.error.kind === 'setup');
+    registered = true;
+    const now = await new Analytics({ transport: t }).realtime({});
+    assert.ok(now.who === 'visitors' && now.places.ok && now.places.value[0].users === 3);
+    assert.match(String(realtimeBody(now, { staff: false, land: '/land.svg', game: false })), /<b>4<\/b> people on the site in the last 30 minutes\.\s*<span class="muted">1 playing a game\.<\/span>/);
+    const g = await new Analytics({ transport: t }).realtime({ game: 'wake' });
+    assert.ok(g.who === 'players' && g.places.ok && g.places.value[0].users === 1);
   });
 
   test('GA_PROPERTY_ID is the numeric property id', () => {

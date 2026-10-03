@@ -127,7 +127,8 @@ realtime reports, well inside GA's free quota.
 | The game's page (game view) | `screenPageViews`, `totalUsers`, `eventCount` by `eventName` (`page_view`, `click`), its `pagePath`s, both periods |
 | Top games by page views (site view, when no game has plays) | `screenPageViews`, `eventCount` by `pagePath` and `eventName`, every game's paths, this period |
 | The website (site view) | `screenPageViews`, `sessions`, `totalUsers`, both periods |
-| Playing now | realtime `activeUsers` with play events by `countryId`, `country`, `city` (a game: `customUser:vault_game`); site view also all active users |
+| On the site now (site view) | realtime `activeUsers` by `countryId`, `country`, `city` (everyone, playing or browsing), the total, and how many have `customUser:vault_game` set (playing a game) |
+| Playing now (a game) | realtime `activeUsers` by place with `customUser:vault_game` = the game's slug |
 
 A game is filtered on its page paths (`pagePath`), and on `customEvent:game_slug` = its listing slug for play time. The map places one circle per country at Natural
 Earth's label point for it (`src/analytics/countries.ts`, from `scripts/world-map.ts`; public domain), sized by the

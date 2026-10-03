@@ -89,8 +89,8 @@ export interface Overview {
   pages: Result<PageStats> | null;          // a game with known pages only
   topPages: Result<GamePages[]> | null;     // whole site only, when no game has plays (before the custom definitions)
 }
-// who: whose places these are; 'visitors' (everyone on the site) when the site can't yet tell players apart.
-export interface Realtime { places: Result<Place[]>; visitors: Result<number> | null; who: 'players' | 'visitors' }
+// who: whose places these are: 'visitors' (everyone on the site, the site view) or 'players' (a game's).
+export interface Realtime { places: Result<Place[]>; visitors: Result<number> | null; who: 'players' | 'visitors'; playing?: Result<number> }
 
 export interface AnalyticsOptions {
   propertyId?: string;
@@ -152,19 +152,16 @@ export class Analytics {
     return { range, periods: periods(range, today), series: plainSeries, views, plays: playStats, players, site, pages, topPages };
   }
 
+  // The site: everyone on it (playing or browsing) by place, and how many of them are playing. A game: its players.
   async realtime(scope: Scope): Promise<Realtime> {
-    let who: Realtime['who'] = 'players';
-    const players = this.call('runRealtimeReport', realtimePlayersRequest(scope)).then(readPlaces).catch((err: unknown) => {
-      if (err instanceof AnalyticsError && err.kind === 'setup' && !scope.game) {
-        who = 'visitors';
-        return this.call('runRealtimeReport', realtimeVisitorPlacesRequest()).then(readPlaces);
-      }
-      throw err;
-    });
-    const [places, visitors] = await Promise.all([
-      settle(players),
-      scope.game ? null : settle(this.call('runRealtimeReport', realtimeVisitorsRequest()).then((r) => readPairs(r, ['activeUsers']).activeUsers.current)),
+    if (scope.game) {
+      return { places: await settle(this.call('runRealtimeReport', realtimePlayersRequest(scope)).then(readPlaces)), visitors: null, who: 'players' };
+    }
+    const [places, visitors, playing] = await Promise.all([
+      settle(this.call('runRealtimeReport', realtimeVisitorPlacesRequest()).then(readPlaces)),
+      settle(this.call('runRealtimeReport', realtimeVisitorsRequest()).then((r) => readPairs(r, ['activeUsers']).activeUsers.current)),
+      settle(this.call('runRealtimeReport', realtimePlayersRequest(scope)).then((r) => readPlaces(r).reduce((n, p) => n + p.users, 0))),
     ]);
-    return { places, visitors, who };
+    return { places, visitors, who: 'visitors', playing };
   }
 }

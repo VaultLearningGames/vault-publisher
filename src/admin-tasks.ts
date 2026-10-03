@@ -9,7 +9,7 @@
 //   POST /v1/admin/listings/import              { source, slugs?, pages?, overrides? }
 //   POST /v1/admin/listings/migrate-images      { base, budget_seconds? }
 //   POST /v1/admin/listings/move                { slug, studio }
-//   POST /v1/admin/listings/update              { updates: [{ slug, fields }], publish, publish_pending? }
+//   POST /v1/admin/listings/update              { updates: [{ slug, fields?, cdn_game? }], publish, publish_pending? }
 //
 // Every POST takes dry_run: true, which answers with what would change and writes nothing.
 import type { Context, Hono } from 'hono';
@@ -166,22 +166,35 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
     if (!Array.isArray(body.updates) || !body.updates.length) fail(400, 'updates must be a non-empty list of { slug, fields }');
     if (body.updates.length > MAX_UPDATES) fail(400, `at most ${MAX_UPDATES} updates at a time`);
 
-    const plans: { l: ListingRow; draft: ListingFields; changed: Field[]; publishes: Field[] }[] = [];
+    const plans: { l: ListingRow; draft: ListingFields; changed: Field[]; publishes: Field[]; link?: { id: number | null; slug: string | null } }[] = [];
     const bad: { slug: string; problems: string[] }[] = [];
     const seen = new Set<string>();
     body.updates.forEach((u: unknown, i: number) => {
-      const { slug, fields } = (u && typeof u === 'object' ? u : {}) as { slug?: unknown; fields?: unknown };
+      const { slug, fields = {}, cdn_game: cdnGame } = (u && typeof u === 'object' ? u : {}) as { slug?: unknown; fields?: unknown; cdn_game?: unknown };
       const name = typeof slug === 'string' && slug ? slug : `updates[${i}]`;
       const no = (...problems: string[]) => { bad.push({ slug: name, problems }); };
       if (!isSlug(slug)) return no('slug must be the listing’s page slug.');
       if (seen.has(slug)) return no('Listed more than once.');
       seen.add(slug);
-      if (!fields || typeof fields !== 'object' || Array.isArray(fields) || !Object.keys(fields).length) return no('fields must be an object with at least one listing field.');
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return no('fields must be an object of listing fields.');
+      if (!Object.keys(fields).length && cdnGame === undefined) return no('fields must be an object with at least one listing field (or give cdn_game).');
       const l = db.listing(slug);
       if (!l) return no('No such listing.');
+      // cdn_game connects the listing to one of its studio's CDN games (as the portal's game page does), checked
+      // and written together with the fields, so one update can connect a game and switch it to the CDN.
+      let link: { id: number | null; slug: string | null } | undefined;
+      if (cdnGame !== undefined) {
+        if (cdnGame !== null && cdnGame !== '' && !isSlug(cdnGame)) return no('cdn_game must be a CDN game’s slug, or "" to disconnect.');
+        const g = cdnGame ? db.game(l.studio_id, cdnGame as string) : undefined;
+        if (cdnGame && !g) return no(`${l.studio_name} has no CDN game “${cdnGame}”.`);
+        link = { id: g?.id ?? null, slug: g?.slug ?? null };
+        if (link.id === l.game_id) link = undefined;
+      }
       const draft = normalize(fields as Record<string, unknown>, l.draft);
       const problems = fieldProblems(fields as Record<string, unknown>, draft);
-      if (!problems.length) problems.push(...draftProblems(db, l, draft, publish));
+      if (link && !link.id && (publish ? draft : l.published)?.play_source === 'cdn')
+        problems.push('It plays from the Vault CDN; switch it back to its web address (play_source "url") to disconnect it.');
+      if (!problems.length) problems.push(...draftProblems(db, link ? { game_id: link.id } : l, draft, publish));
       const pending = changedFields(l.published, l.draft).filter((k) => !(k in (fields as object)));
       if (publish && body.publish_pending !== true && (!l.published || pending.length || l.review === 'submitted')) {
         problems.push(l.published
@@ -189,15 +202,21 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
           : 'It isn’t on the site yet, so publishing would add it; pass publish_pending: true to do that.');
       }
       if (problems.length) return no(...problems);
-      plans.push({ l, draft, changed: changedFields(l.draft, draft), publishes: publish ? changedFields(l.published, draft) : [] });
+      plans.push({ l, draft, changed: changedFields(l.draft, draft), publishes: publish ? changedFields(l.published, draft) : [], link });
     });
     if (bad.length) fail(400, `${bad.length} of ${body.updates.length} updates can’t be applied; nothing was changed`, bad);
 
-    const todo = plans.filter((p) => p.changed.length || p.publishes.length);
+    const todo = plans.filter((p) => p.changed.length || p.publishes.length || p.link);
     if (!dry && todo.length) {
       db.sqlite.exec('BEGIN');
       try {
-        for (const p of todo) saveListing(db, p.l, p.draft, actorOf(id), publish ? 'publish' : 'save');
+        for (const p of todo) {
+          if (p.link) {
+            db.linkListing(p.l.id, p.link.id);
+            db.audit(actorOf(id), 'listing.link', `${p.l.studio_slug}:${p.l.slug}`, { game: p.link.slug, via: 'admin task' });
+          }
+          if (p.changed.length || p.publishes.length) saveListing(db, p.l, p.draft, actorOf(id), publish ? 'publish' : 'save');
+        }
         db.sqlite.exec('COMMIT');
       } catch (err) {
         db.sqlite.exec('ROLLBACK');
@@ -209,6 +228,7 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
       dry_run: dry, publish,
       updated: todo.map((p) => ({
         slug: p.l.slug, studio: p.l.studio_slug, changed: p.changed, published: p.publishes,
+        ...(p.link ? { cdn_game: { before: p.l.game_id ? db.gameById(p.l.game_id)?.slug ?? null : null, after: p.link.slug } } : {}),
         before: pick(p.l.draft, p.changed), after: pick(p.draft, p.changed),
       })),
       unchanged: plans.filter((p) => !todo.includes(p)).map((p) => p.l.slug),

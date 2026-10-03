@@ -319,8 +319,9 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
 **Connecting games:**
 * A studio's first CI publish of a game connects its listing of the same name. Other names can be connected on the page.
 * **Vault can upload a game for a studio** before the studio's CI does, e.g. the version that's live today. Use the
-  action's `mode: vault-upload` with `studio`, `game`, `ref` (default `v1.0`) and `listing`. It must run from this
-  repository's workflow in the `production` environment, like releases.
+  action's `mode: vault-upload` with `studio`, `game`, `ref` (default `v1.0`), `listing` and optionally `sha` (the
+  build's commit). It must run from this repository's workflow in the system's environment (`staging` or
+  `production`), like releases; `copy-build.yml` does it for a build copied from another system.
 * A game Vault uploaded is taken over by the studio's repository on its first CI publish, with its releases.
 
 Vault admins can import the Hugo prototype's game pages once, from that repo's `migration/` folder
@@ -349,7 +350,8 @@ same code the portal's button runs (`src/listing-ops.ts`), behind `/v1/admin/lis
 | `import` | `{ "source", "slugs"?, "pages"?, "overrides"? }` | The *Import from the Hugo site prototype* import: reads `SOURCE/migration/games-export.json` and `import-overrides.json`, creates a listing for each page that has none (and its studio if new) and publishes those that can be. `slugs` limits it to those pages. Answers `created`, `drafts`, `skipped` (already has a listing), `failed`, `studios_created`. |
 | `migrate-images` | `{ "base", "budget_seconds"? }` | *Copy site images to the Vault CDN* from the site at `base`. Answers the full run (`counts`, and every image `migrated`, `failed` and `external`). |
 | `move` | `{ "slug", "studio" }` | Moves a game to another studio (not while it is hosted on its studio's CDN game). |
-| `update` | `{ "updates": [{ "slug", "fields": {…} }], "publish": true \| false, "publish_pending"? }` | Sets the given listing fields on each draft and, with `publish`, publishes each as Vault. |
+| `update` | `{ "updates": [{ "slug", "fields": {…}, "cdn_game"? }], "publish": true \| false, "publish_pending"? }` | Sets the given listing fields on each draft and, with `publish`, publishes each as Vault. `cdn_game` connects the listing to that CDN game of its studio (`""` disconnects), checked with the fields, so `"cdn_game": "lakeland", "fields": { "play_source": "cdn" }` moves a game to the CDN in one step. |
+| `release` | `{ "studio", "game", "version", "ref"?, "promote"? }` | Approves the test build `ref` (default: the version) as release `version` and, unless `promote: false`, makes it current: the Release workflow's approve-and-promote, run in the chosen system's environment (on staging, the way to release without a signed-in person). Repeating it changes nothing. |
 
 ```sh
 # Add Transformations Quest from the site's export (see the note on `import` below)
@@ -407,6 +409,20 @@ Notes on each task:
 Locally: `node scripts/admin-task.ts --portal URL --task TASK --args 'JSON' [--dry-run=false]` (a dry run unless
 `--dry-run=false`; `--pages FILE --overrides FILE` send an export from disk for `import`). Against
 `node scripts/dev-portal.ts` use `--portal http://localhost:4181 --token dev`.
+
+**Copying a production test build to staging** (`.github/workflows/copy-build.yml`): studios' CI publishes only to
+production, so to try a game on staging, copy its test build, release it, and switch its listing to the CDN:
+
+```sh
+gh workflow run copy-build.yml -f environment=staging -f studio=fieldday -f game=lakeland -f ref=master -f listing=lakeland
+gh workflow run admin-task.yml -f environment=staging -f task=release -f dry_run=false \
+  -f args='{"studio":"fieldday","game":"lakeland","version":"master-c6489ab","ref":"master"}'
+gh workflow run admin-task.yml -f environment=staging -f task=update -f dry_run=false \
+  -f args='{"publish":true,"updates":[{"slug":"lakeland","cdn_game":"lakeland","fields":{"play_source":"cdn"}}]}'
+```
+
+The bucket can't be listed, so the copy takes the files from where the source build was made (its CI artifact, or
+`make build` at its commit) and uploads them only if the file count and size match the source build exactly.
 
 `featured` sets the home page's Featured Games (the whole list): `-f task=featured -f args='{"games":[{"slug":"project-hercules","sequence":1,"image":"images/featured/project-hercules.webp"}]}'`. A site-path image is copied to the CDN by the next `migrate-images`.
 

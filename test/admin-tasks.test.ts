@@ -411,6 +411,42 @@ describe('admin task: update', () => {
     assert.equal(t.db.listing('wake')!.review, 'editing');
   });
 
+  test('cdn_game connects a CDN game, so one update can switch a listing to the CDN; disconnecting needs the web address back', async () => {
+    const fd = t.db.studioBySlug('fieldday')!;
+    const g = t.db.createGame(fd.id, 'aqualab', '', 'vault:fieldday/aqualab');
+    const unreleased = t.db.createGame(fd.id, 'tide', '', 'vault:fieldday/tide');
+    const toCdn = { slug: 'wake', cdn_game: 'aqualab', fields: { play_source: 'cdn' } };
+    // Without a current release the switch is refused, and nothing is linked.
+    const early = await post('update', { publish: true, updates: [toCdn] });
+    assert.equal(early.status, 400);
+    assert.match(early.json.detail[0].problems.join(' '), /needs a CDN game with a current release/);
+    assert.equal(t.db.listing('wake')!.game_id, null);
+    assert.match((await post('update', { publish: true, updates: [{ slug: 'wake', cdn_game: 'nope' }] })).json.detail[0].problems[0], /has no CDN game “nope”/);
+
+    const r = t.db.createRelease({ game_id: g.id, version: 'v1', source_ref: 'master', commit_sha: 'a'.repeat(40), file_count: 1, total_bytes: 1, approved_by: 'x' });
+    t.db.setCurrentRelease(g.id, r.id);
+    const before = snapshot();
+    const dry = await post('update', { publish: true, updates: [toCdn], dry_run: true });
+    assert.deepEqual(dry.json.updated[0].cdn_game, { before: null, after: 'aqualab' });
+    assert.equal(snapshot(), before);
+    const ok = await post('update', { publish: true, updates: [toCdn] });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(ok.json.updated[0].published, ['play_source']);
+    assert.equal(t.db.listing('wake')!.game_id, g.id);
+    assert.equal(audits('listing.link')[0].actor, 'github:octo');
+    const cat = (await (await t.app.request('/v1/catalog')).json()) as any;
+    assert.equal(cat.games.find((x: any) => x.slug === 'wake').play.url, 'https://prod.test/fieldday/aqualab/');
+
+    // Connecting only (no fields) works too; disconnecting a game that plays from the CDN is refused.
+    assert.equal((await post('update', { publish: false, updates: [{ slug: 'bloom', cdn_game: 'tide' }] })).status, 200);
+    assert.equal(t.db.listing('bloom')!.game_id, unreleased.id);
+    const off = await post('update', { publish: true, updates: [{ slug: 'wake', cdn_game: '' }] });
+    assert.match(off.json.detail[0].problems.join(' '), /switch it back to its web address/);
+    const back = await post('update', { publish: true, updates: [{ slug: 'wake', cdn_game: '', fields: { play_source: 'url' } }] });
+    assert.equal(back.status, 200);
+    assert.equal(t.db.listing('wake')!.game_id, null);
+  });
+
   test('bad requests', async () => {
     assert.equal((await post('update', { updates: [about('wake', 'x')] })).status, 400, 'publish is required');
     assert.equal((await post('update', { updates: [], publish: true })).status, 400);

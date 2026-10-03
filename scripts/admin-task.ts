@@ -5,7 +5,8 @@
 //     --args '{"slug":"shady-sam","studio":"ngpf"}' [--dry-run=false] [--summary FILE] [--token TOKEN]
 //
 // Tasks: list (args: { slugs? }), import ({ source, slugs?, pages?, overrides? }), migrate-images ({ base }),
-// move ({ slug, studio }), update ({ updates: [{ slug, fields }], publish }).
+// move ({ slug, studio }), update ({ updates: [{ slug, fields, cdn_game? }], publish }), featured, studios,
+// release ({ studio, game, version, ref?, promote? }: approve a test build as a release and make it current).
 // It is a dry run unless --dry-run=false: the portal answers with what would change and writes nothing.
 // For import, --pages FILE and --overrides FILE send vault-rebuild's migration/games-export.json and
 // import-overrides.json from disk instead of having the portal read them from the source site.
@@ -23,6 +24,7 @@ const TASKS: Record<string, { method: 'GET' | 'POST'; path: string }> = {
   update: { method: 'POST', path: '/v1/admin/listings/update' },
   featured: { method: 'POST', path: '/v1/admin/featured' },
   studios: { method: 'POST', path: '/v1/admin/studios' },
+  release: { method: 'POST', path: '/v1/admin/releases/publish' },
 };
 const MAX_ROUNDS = 20;             // migrate-images continues while images remain
 const MAX_SUMMARY_CHARS = 200_000; // a job summary holds 1 MiB

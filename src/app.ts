@@ -267,6 +267,43 @@ export function createApp(deps: AppDeps) {
     return c.json(await promoteRelease(studio, game, version, `github:${id.actor}`));
   });
 
+  // Release a test build and make it current in one call, for the admin task `release` (scripts/admin-task.ts), which
+  // runs in this system's GitHub environment: on staging, the only way to release without a signed-in person.
+  // Body: { studio, game, version, ref? (defaults to version), promote? (default true), dry_run? }.
+  // Safe to repeat: a version already approved from the same ref isn't approved again, and the current one isn't
+  // switched again. A version approved from another ref is refused (releases can't be replaced).
+  app.post('/v1/admin/releases/publish', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const { studio, game, version } = releaseTarget(body);
+    if (body.dry_run !== undefined && typeof body.dry_run !== 'boolean') fail(400, 'dry_run must be true or false');
+    if (body.promote !== undefined && typeof body.promote !== 'boolean') fail(400, 'promote must be true or false');
+    const promote = body.promote !== false;
+    const ref = sanitizeRefName(typeof body.ref === 'string' && body.ref ? body.ref.replace(/^refs\/(heads|tags)\//, '') : version);
+    if (!ref) fail(400, 'ref must be a branch or tag name');
+    const existing = db.release(game.id, version);
+    if (existing && existing.source_ref !== ref) fail(409, `${version} was already approved from "${existing.source_ref}", not "${ref}"; releases can't be replaced`);
+    const build = db.build(game.id, ref);
+    if (!existing && (!build || build.status !== 'live')) fail(404, `no live test build ${studio.slug}/${game.slug}/${ref}`);
+    const current = db.currentRelease(game.id);
+    const plan = { approve: !existing, promote: promote && current?.version !== version };
+    const target = `${studio.slug}/${game.slug}`;
+    if (body.dry_run === true) {
+      return c.json({
+        dry_run: true, game: target, version, ref, ...plan, current: current?.version ?? null,
+        build: build ? { ref: build.ref_name, commit_sha: build.commit_sha, files: build.file_count, bytes: build.total_bytes, url: `${deps.stagingPublicUrl}/${previewPrefix(studio, game, ref)}` } : null,
+      });
+    }
+    const actor = `github:${id.actor}`;
+    const approved = plan.approve ? await approveRelease(studio, game, version, ref, actor) : null;
+    const promoted = plan.promote ? await promoteRelease(studio, game, version, actor) : null;
+    return c.json({
+      dry_run: false, game: target, version, ref, approved: !!approved, promoted: !!promoted,
+      current: db.currentRelease(game.id)?.version ?? null, release_url: `${deps.prodPublicUrl}/${releasePrefix(`${target}/`, version)}`,
+      play_url: `${deps.prodPublicUrl}/${target}/`,
+    });
+  });
+
   // Public, read-only: what a Release run is about to do, and whether it can. The Release workflow's
   // check job shows this to the reviewer before the approval gate, and stops the run on a problem.
   // Query: ?action=approve|promote|approve-and-promote&version=m3.2&ref=m3.2

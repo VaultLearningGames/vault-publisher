@@ -1,0 +1,172 @@
+name: Copy build
+
+# Copies a test build from another Vault system (by default production's, builds.vaultlearninggames.org) into a
+# system's test builds as a Vault upload of the same studio and game, e.g. to try a game on staging whose studio's
+# CI publishes only to production. Release it afterwards with the admin task `release`.
+#
+# The builds bucket can't be listed, so the files come from where the source build was made: the source portal says
+# which repository and commit (GET /v1/releases/STUDIO/GAME/check), and this workflow takes that commit's CI artifact
+# (Unity builds: webgl-SHA) or, once the artifact has expired, checks out the commit and runs `make build` (dist/).
+# It refuses to upload unless the file count and total size match the source build exactly.
+#
+#   gh workflow run copy-build.yml -f environment=staging -f studio=fieldday -f game=lakeland -f ref=master \
+#     -f listing=lakeland
+#
+# The game's code (its makefile) runs in the first job, which has no OIDC token and no environment; only the upload
+# job runs in the target system's environment.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: The system to copy the build into
+        type: choice
+        options: [staging]
+        default: staging
+      from:
+        description: The portal of the system the build is copied from
+        type: string
+        default: https://portal.vaultlearninggames.org
+      studio:
+        description: Studio slug, e.g. fieldday
+        type: string
+        required: true
+      game:
+        description: Game slug, e.g. lakeland
+        type: string
+        required: true
+      ref:
+        description: The source test build (branch or tag name, as on the source system), e.g. master
+        type: string
+        required: true
+      listing:
+        description: Site listing to connect the game to on the target system (optional)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copy-build-${{ inputs.environment }}-${{ inputs.studio }}-${{ inputs.game }}
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      ref: ${{ steps.source.outputs.ref }}
+    env:
+      FROM: ${{ inputs.from }}
+      STUDIO: ${{ inputs.studio }}
+      GAME: ${{ inputs.game }}
+      REF: ${{ inputs.ref }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+    - name: Look up the source build
+      id: source
+      run: |
+        set -euo pipefail
+        ref=$(jq -rn --arg v "$REF" '$v|@uri')
+        curl -fsS "${FROM%/}/v1/releases/$STUDIO/$GAME/check?action=approve&version=copy&ref=$ref" > check.json
+        jq '{repository, staging}' check.json
+        if [ "$(jq -r '.staging.status // ""' check.json)" != live ]; then echo "::error::$FROM has no live test build $STUDIO/$GAME/$REF"; exit 1; fi
+        {
+          echo "repo=$(jq -r .repository check.json)"
+          echo "sha=$(jq -r .staging.commit_sha check.json)"
+          echo "ref=$(jq -r .staging.ref check.json)"
+          echo "files=$(jq -r .staging.files check.json)"
+          echo "bytes=$(jq -r .staging.bytes check.json)"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Get the build from its CI artifact
+      id: artifact
+      env:
+        REPO: ${{ steps.source.outputs.repo }}
+        SHA: ${{ steps.source.outputs.sha }}
+      run: |
+        set -euo pipefail
+        id=$(gh api "repos/$REPO/actions/artifacts?per_page=100" --paginate \
+          --jq ".artifacts[] | select(.expired | not) | select(.name | endswith(\"$SHA\")) | .id" | head -1 || true)
+        if [ -z "$id" ]; then echo "No unexpired artifact for $SHA in $REPO."; echo "found=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+        echo "Artifact $id"
+        if ! gh api "repos/$REPO/actions/artifacts/$id/zip" > build.zip; then
+          echo "::warning::Couldn't download artifact $id of $REPO"; echo "found=false" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+        mkdir build && unzip -q build.zip -d build && rm build.zip
+        echo "found=true" >> "$GITHUB_OUTPUT"
+
+    - name: Or check out the commit
+      if: steps.artifact.outputs.found != 'true'
+      uses: actions/checkout@v7
+      with:
+        repository: ${{ steps.source.outputs.repo }}
+        ref: ${{ steps.source.outputs.sha }}
+        submodules: recursive
+        lfs: true
+        path: src
+        persist-credentials: false
+
+    - name: And run make build
+      if: steps.artifact.outputs.found != 'true'
+      working-directory: src
+      run: |
+        set -euo pipefail
+        if ! make -n build > /dev/null 2>&1; then echo "::error::No CI artifact, and the repository has no 'make build'"; exit 1; fi
+        make build
+        mv dist ../build
+
+    # CI's upload-artifact leaves out hidden files, so the source build has none either.
+    - name: Check it is the same build
+      env:
+        FILES: ${{ steps.source.outputs.files }}
+        BYTES: ${{ steps.source.outputs.bytes }}
+      run: |
+        set -euo pipefail
+        find build -path '*/.*' -prune -exec rm -rf {} +
+        n=$(find build -type f | wc -l | tr -d ' ')
+        b=$(find build -type f -printf '%s\n' | awk '{s+=$1} END {print s+0}')
+        echo "Source: $FILES files, $BYTES bytes. Here: $n files, $b bytes."
+        if [ "$n" != "$FILES" ] || [ "$b" != "$BYTES" ]; then echo "::error::The build here differs from the source build"; exit 1; fi
+        test -f build/index.html || { echo "::error::No index.html at the top of the build"; exit 1; }
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: copy-${{ github.run_id }}
+        path: build
+        retention-days: 1
+
+  upload:
+    needs: fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        sparse-checkout: action
+
+    - uses: actions/download-artifact@v8
+      with:
+        name: copy-${{ github.run_id }}
+        path: build
+
+    - name: Upload as Vault
+      uses: ./action
+      with:
+        mode: vault-upload
+        studio: ${{ inputs.studio }}
+        game: ${{ inputs.game }}
+        ref: ${{ needs.fetch.outputs.ref }}
+        ref-type: branch
+        listing: ${{ inputs.listing }}
+        sha: ${{ needs.fetch.outputs.sha }}
+        path: build
+        publisher-url: ${{ vars.PORTAL_URL }}

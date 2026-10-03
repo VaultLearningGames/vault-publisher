@@ -40,6 +40,9 @@ inputs:
   listing:
     description: For mode "vault-upload", the site listing to connect this CDN game to (its vaultlearninggames.org slug).
     default: ''
+  sha:
+    description: For mode "vault-upload", the commit the build was made from (default this run's commit), e.g. the game repository's commit when copying a build.
+    default: ''
   publisher-url:
     description: Base URL of the vault-publisher service.
     required: true
@@ -69,6 +72,7 @@ runs:
         INPUT_REF_TYPE: ${{ inputs.ref-type }}
         INPUT_STUDIO: ${{ inputs.studio }}
         INPUT_LISTING: ${{ inputs.listing }}
+        INPUT_SHA: ${{ inputs.sha }}
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_NOTES: ${{ inputs.notes }}
         INPUT_PUBLISHER_URL: ${{ inputs.publisher-url }}

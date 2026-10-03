@@ -101,7 +101,7 @@ if (mode === 'delete') {
 
   const manifest = files.map(({ path, size }) => ({ path, size }));
   const upload = vault
-    ? await api(token, '/v1/admin/previews', { studio: env.INPUT_STUDIO, game, ref: env.INPUT_REF || 'v1.0', ref_type: env.INPUT_REF_TYPE || 'tag', listing: env.INPUT_LISTING || undefined, sha: env.GITHUB_SHA, files: manifest })
+    ? await api(token, '/v1/admin/previews', { studio: env.INPUT_STUDIO, game, ref: env.INPUT_REF || 'v1.0', ref_type: env.INPUT_REF_TYPE || 'tag', listing: env.INPUT_LISTING || undefined, sha: env.INPUT_SHA || env.GITHUB_SHA, files: manifest })
     : await api(token, '/v1/previews', { game, files: manifest });
   const targets = new Map(upload.files.map((t) => [t.path, t]));
   const queue = [...files];

@@ -110,6 +110,8 @@ async function start(token = 'wake', body: unknown = { game: 'aqualab', files })
   return { res, json: (await res.json()) as any };
 }
 
+const pick = (o: any, keys: string[]) => Object.fromEntries(keys.map((k) => [k, o[k]]));
+
 function uploadAll(json: any, sizes: Record<string, number> = { 'index.html': 10, 'Build/game.wasm.br': 20 }) {
   for (const f of json.files) storage.objects.set(new URL(f.url).pathname.slice(1), sizes[f.path]);
 }
@@ -266,6 +268,36 @@ describe('production releases', () => {
     await publishTag();
     assert.equal((await approve()).status, 200);
     assert.equal((await approve()).status, 409);
+  });
+
+  test('publish (the admin task "release"): approve and promote in one call, a dry run, and safe to repeat', async () => {
+    const publish = (body: Record<string, unknown>, token = 'releaser') =>
+      post('/v1/admin/releases/publish', token, { studio: 'fielddaylab', game: 'aqualab', ...body });
+    const { json } = await start(); // the feature/new-map branch
+    uploadAll(json);
+    await post(`/v1/previews/${json.upload_id}/finalize`, 'wake');
+
+    assert.equal((await publish({ version: 'v1', ref: 'feature/new-map' }, 'wake')).status, 403);
+    assert.equal((await publish({ version: 'v1', ref: 'nope' })).status, 404);
+    assert.equal((await publish({ version: 'v1', dry_run: 'yes' })).status, 400);
+    const dry = await publish({ version: 'v1', ref: 'feature/new-map', dry_run: true });
+    assert.equal(dry.status, 200);
+    assert.deepEqual(pick(await dry.json(), ['approve', 'promote', 'current', 'ref']), { approve: true, promote: true, current: null, ref: 'feature_new-map' });
+    assert.equal(prod.objects.size, 0);
+    assert.equal(db.release(1, 'v1'), undefined);
+
+    const res = await publish({ version: 'v1', ref: 'feature/new-map' });
+    assert.equal(res.status, 200);
+    assert.deepEqual(pick(await res.json(), ['approved', 'promoted', 'current', 'play_url']), { approved: true, promoted: true, current: 'v1', play_url: 'https://cdn.example.org/fielddaylab/aqualab/' });
+    assert.equal(prod.objects.has('fielddaylab/aqualab/index.html'), true);
+    assert.equal(db.currentRelease(1)?.version, 'v1');
+
+    const again = await publish({ version: 'v1', ref: 'feature/new-map' });
+    assert.deepEqual(pick(await again.json(), ['approved', 'promoted', 'current']), { approved: false, promoted: false, current: 'v1' });
+    assert.equal((await publish({ version: 'v1', ref: 'other' })).status, 409, 'a release is never replaced from another ref');
+    // promote: false only approves.
+    const only = await publish({ version: 'v2', ref: 'feature/new-map', promote: false });
+    assert.deepEqual(pick(await only.json(), ['approved', 'promoted', 'current']), { approved: true, promoted: false, current: 'v1' });
   });
 
   test('approving from another staging ref (e.g. a legacy import) works with ref', async () => {

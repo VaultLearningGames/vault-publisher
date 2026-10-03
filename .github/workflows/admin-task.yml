@@ -2,9 +2,9 @@ name: Admin task
 
 # Runs one Vault-admin operation on a system's site listings (src/admin-tasks.ts), so it doesn't need someone
 # signed in to the portal: import listings, copy site images to the Vault CDN, move a game to another studio, edit
-# and publish listings in bulk, or list listings to check the result. The job runs in the chosen system's GitHub
-# environment, and its OIDC token is what that system's portal accepts (like check-games and releases); there are no
-# secrets. It is a dry run unless dry_run is unticked: the result (what changed, or would) is in the job summary.
+# and publish listings in bulk, release a test build, or list listings to check the result. The job runs in the
+# chosen system's GitHub environment, and its OIDC token is what that system's portal accepts (like check-games and
+# releases); there are no secrets. It is a dry run unless dry_run is unticked: the result (what changed, or would) is in the job summary.
 #
 #   gh workflow run admin-task.yml -f environment=staging -f task=move -f args='{"slug":"shady-sam","studio":"ngpf"}' -f dry_run=false
 #
@@ -20,7 +20,7 @@ on:
       task:
         description: What to do
         type: choice
-        options: [list, import, migrate-images, move, update, featured, studios]
+        options: [list, import, migrate-images, move, update, featured, studios, release]
         required: true
       args:
         description: The task's arguments, as a JSON object

@@ -100,15 +100,23 @@ export function siteRequest(range: RangeKey, today: string): GaRequest {
   return { dateRanges: twoRanges(range, today), metrics: [{ name: 'screenPageViews' }, { name: 'sessions' }, { name: 'totalUsers' }] };
 }
 
-// Realtime (the last 30 minutes): people with play events, by country and city. A game is told apart by the
-// user property vault_game, since realtime reports can't filter on event parameters.
+// Realtime (the last 30 minutes), by country and city. Realtime reports can't see event parameters and refuse eventName
+// with activeUsers ("cannot be queried together"), so a player is someone whose user property vault_game is set (the
+// play script sets it on play_start), and a game's players are those whose vault_game is that game.
+const PLACE_DIMS = [{ name: 'countryId' }, { name: 'country' }, { name: 'city' }];
+const notSet = (fieldName: string): Expr => ({ notExpression: exact(fieldName, '(not set)') });
 export function realtimePlayersRequest(scope: Scope): GaRequest {
   return {
-    dimensions: [{ name: 'countryId' }, { name: 'country' }, { name: 'city' }],
+    dimensions: PLACE_DIMS,
     metrics: [{ name: 'activeUsers' }],
-    dimensionFilter: withGame(scope, DIM_RT_GAME, eventIn(PLAY_EVENTS)),
+    dimensionFilter: scope.game ? exact(DIM_RT_GAME, scope.game)
+      : all({ filter: { fieldName: DIM_RT_GAME, stringFilter: { matchType: 'FULL_REGEXP', value: '.+' } } }, notSet(DIM_RT_GAME)),
     limit: 250,
   };
+}
+// Everyone on the site, by place: the site's map until vault_game is registered.
+export function realtimeVisitorPlacesRequest(): GaRequest {
+  return { dimensions: PLACE_DIMS, metrics: [{ name: 'activeUsers' }], limit: 250 };
 }
 export function realtimeVisitorsRequest(): GaRequest {
   return { metrics: [{ name: 'activeUsers' }] };

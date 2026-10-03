@@ -77,7 +77,8 @@ export function chart(s: Series): Html {
 }
 
 // ---------- the map ----------
-export function placesMap(places: Place[], landUrl: string): Html {
+export function placesMap(places: Place[], landUrl: string, what: 'Plays' | 'People on the site' = 'Plays'): Html {
+  const verb = what === 'Plays' ? 'playing' : 'on the site';
   const byCountry = new Map<string, { users: number; name: string; cities: string[] }>();
   for (const p of places) {
     const c = byCountry.get(p.countryId) ?? { users: 0, name: p.country, cities: [] };
@@ -89,11 +90,11 @@ export function placesMap(places: Place[], landUrl: string): Html {
   const dots = [...byCountry].filter(([id]) => COUNTRY_POINTS[id]).sort((a, b) => b[1].users - a[1].users).map(([id, c]) => {
     const [cx, cy] = COUNTRY_POINTS[id];
     const r = 5 + 17 * Math.sqrt(c.users / max);
-    return html`<circle cx="${cx}" cy="${cy}" r="${r.toFixed(1)}"><title>${c.name}: ${num(c.users)} playing${c.cities.length ? ` (${c.cities.slice(0, 6).join(', ')})` : ''}</title></circle>`;
+    return html`<circle cx="${cx}" cy="${cy}" r="${r.toFixed(1)}"><title>${c.name}: ${num(c.users)} ${verb}${c.cities.length ? ` (${c.cities.slice(0, 6).join(', ')})` : ''}</title></circle>`;
   });
   return html`<div class="ga-map" style="aspect-ratio:${MAP_WIDTH}/${MAP_HEIGHT}">
     <div class="ga-land" style="-webkit-mask-image:url(${landUrl});mask-image:url(${landUrl})"></div>
-    <svg viewBox="0 0 ${MAP_WIDTH} ${MAP_HEIGHT}" role="img" aria-label="${places.length ? `Plays in the last 30 minutes, by country: ${[...byCountry.values()].map((c) => `${c.name} ${c.users}`).join(', ')}` : 'No plays in the last 30 minutes'}">${dots}</svg>
+    <svg viewBox="0 0 ${MAP_WIDTH} ${MAP_HEIGHT}" role="img" aria-label="${places.length ? `${what} in the last 30 minutes, by country: ${[...byCountry.values()].map((c) => `${c.name} ${c.users}`).join(', ')}` : `No ${what.toLowerCase()} in the last 30 minutes`}">${dots}</svg>
   </div>`;
 }
 
@@ -127,11 +128,16 @@ export function realtimeBody(rt: Realtime, o: { staff: boolean; land: string; ga
   if (!rt.places.ok) return problem(rt.places.error, o.staff, rt.places.error.kind === 'setup' ? 'it can’t tell which game people are playing (the user dimension vault_game)' : 'realtime plays');
   const places = rt.places.value;
   const total = places.reduce((s, p) => s + p.users, 0);
+  const visitors = rt.who === 'visitors';
   const rows = places.slice(0, 8).map((p) => html`<tr><td>${p.city && p.city !== '(not set)' ? html`${p.city}, ` : ''}${p.country || 'Unknown'}</td><td class="r num">${num(p.users)}</td></tr>`);
-  return html`${placesMap(places, o.land)}
-    <p class="small">${total ? html`<b>${num(total)}</b> ${total === 1 ? 'person' : 'people'} playing${o.game ? ' this game' : ''} in the last 30 minutes.` : html`<span class="muted">No one has played${o.game ? ' this game' : ''} in the last 30 minutes.</span>`}
-      ${rt.visitors?.ok ? html` <span class="muted">${num(rt.visitors.value)} on the site.</span>` : ''}</p>
-    ${rows.length ? html`<div class="tbl-wrap"><table class="ga-places"><thead><tr><th>Where</th><th class="r">Playing</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
+  const summary = visitors
+    ? html`${rt.visitors?.ok && rt.visitors.value ? html`<b>${num(rt.visitors.value)}</b> ${rt.visitors.value === 1 ? 'person' : 'people'} on the site in the last 30 minutes.` : html`<span class="muted">No one has been on the site in the last 30 minutes.</span>`}
+      <span class="muted">Players will show here once Google Analytics knows the user dimension vault_game${o.staff ? html` (see <span class="mono">docs/analytics.md</span>)` : ''}.</span>`
+    : html`${total ? html`<b>${num(total)}</b> ${total === 1 ? 'person' : 'people'} playing${o.game ? ' this game' : ''} in the last 30 minutes.` : html`<span class="muted">No one has played${o.game ? ' this game' : ''} in the last 30 minutes.</span>`}
+      ${rt.visitors?.ok ? html` <span class="muted">${num(rt.visitors.value)} on the site.</span>` : ''}`;
+  return html`${placesMap(places, o.land, visitors ? 'People on the site' : 'Plays')}
+    <p class="small">${summary}</p>
+    ${rows.length ? html`<div class="tbl-wrap"><table class="ga-places"><thead><tr><th>Where</th><th class="r">${visitors ? 'On the site' : 'Playing'}</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
 }
 
 export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {

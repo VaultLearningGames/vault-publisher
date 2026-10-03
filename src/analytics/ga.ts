@@ -5,7 +5,7 @@
 import { googleTokenSource, NoCredentialsError, type TokenSource } from './google-auth.ts';
 import {
   basicPlaysRequest, localNow, periods, playersRequest, playsRequest, readBasicPlays, readPairs, readPlaces, readPlays,
-  readSeries, realtimePlayersRequest, realtimeVisitorsRequest, seriesRequest, siteRequest,
+  readSeries, realtimePlayersRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest, seriesRequest, siteRequest,
   type GaRequest, type GaResponse, type Pair, type Period, type Place, type PlayStats, type RangeKey, type Scope, type Series,
 } from './reports.ts';
 
@@ -85,7 +85,8 @@ export interface Overview {
   players: Result<Pair>;
   site: Result<Record<'screenPageViews' | 'sessions' | 'totalUsers', Pair>> | null;   // whole site only
 }
-export interface Realtime { places: Result<Place[]>; visitors: Result<number> | null }
+// who: whose places these are; 'visitors' (everyone on the site) when the site can't yet tell players apart.
+export interface Realtime { places: Result<Place[]>; visitors: Result<number> | null; who: 'players' | 'visitors' }
 
 export interface AnalyticsOptions {
   propertyId?: string;
@@ -138,10 +139,18 @@ export class Analytics {
   }
 
   async realtime(scope: Scope): Promise<Realtime> {
+    let who: Realtime['who'] = 'players';
+    const players = this.call('runRealtimeReport', realtimePlayersRequest(scope)).then(readPlaces).catch((err: unknown) => {
+      if (err instanceof AnalyticsError && err.kind === 'setup' && !scope.game) {
+        who = 'visitors';
+        return this.call('runRealtimeReport', realtimeVisitorPlacesRequest()).then(readPlaces);
+      }
+      throw err;
+    });
     const [places, visitors] = await Promise.all([
-      settle(this.call('runRealtimeReport', realtimePlayersRequest(scope)).then(readPlaces)),
+      settle(players),
       scope.game ? null : settle(this.call('runRealtimeReport', realtimeVisitorsRequest()).then((r) => readPairs(r, ['activeUsers']).activeUsers.current)),
     ]);
-    return { places, visitors };
+    return { places, visitors, who };
   }
 }

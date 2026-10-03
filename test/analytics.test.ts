@@ -8,7 +8,7 @@ import {
 } from '../src/analytics/reports.ts';
 import { parseGaPropertyId } from '../src/config.ts';
 import { EMPTY_LISTING } from '../src/listings.ts';
-import { chart, delta, duration } from '../src/portal/analytics.ts';
+import { chart, delta, duration, realtimeBody } from '../src/portal/analytics.ts';
 import { fakeGa } from '../scripts/fake-ga.ts';
 import { portalHarness } from './portal-harness.ts';
 
@@ -64,7 +64,10 @@ describe('periods and requests', () => {
 
   test('realtime tells games apart by the user property vault_game', () => {
     assert.deepEqual(realtimePlayersRequest({}).dimensions, [{ name: 'countryId' }, { name: 'country' }, { name: 'city' }]);
-    assert.doesNotMatch(JSON.stringify(realtimePlayersRequest({})), /vault_game/);
+    // A player is anyone with vault_game set: realtime refuses eventName with activeUsers.
+    assert.doesNotMatch(JSON.stringify(realtimePlayersRequest({})), /eventName/);
+    assert.match(JSON.stringify(realtimePlayersRequest({})), /"fieldName":"customUser:vault_game","stringFilter":\{"matchType":"FULL_REGEXP","value":"\.\+"\}/);
+    assert.doesNotMatch(JSON.stringify(realtimePlayersRequest({ game: 'wake' })), /eventName/);
     assert.match(JSON.stringify(realtimePlayersRequest({ game: 'wake' })), /"fieldName":"customUser:vault_game","stringFilter":\{"matchType":"EXACT","value":"wake"\}/);
     assert.equal(realtimePlayersRequest({}).dateRanges, undefined);
   });
@@ -215,6 +218,22 @@ describe('the Google Analytics client', () => {
     assert.deepEqual(site.plays.value.current, { plays: 8, timedPlays: 0, seconds: 0 });
     const game = await new Analytics({ transport: t }).overview('week', { game: 'wake' });
     assert.ok(!game.plays.ok && game.plays.error.kind === 'setup');
+  });
+
+  test('before vault_game is registered the realtime map shows everyone on the site', async () => {
+    const t = async (_m: GaMethod, body: GaRequest): Promise<GaResponse> => {
+      if (JSON.stringify(body).includes('custom')) throw new AnalyticsError('setup', 'Field customUser:vault_game is not a valid dimension.');
+      return body.dimensions ? res(['countryId', 'country', 'city'], ['activeUsers'], [[['US', 'United States', 'Madison'], [3]]]) : res([], ['activeUsers'], [[[], [4]]]);
+    };
+    const rt = await new Analytics({ transport: t }).realtime({});
+    assert.equal(rt.who, 'visitors');
+    assert.ok(rt.places.ok && rt.places.value[0].users === 3);
+    const body = String(realtimeBody(rt, { staff: false, land: '/land.svg', game: false }));
+    assert.match(body, /<b>4<\/b> people on the site in the last 30 minutes/);
+    assert.match(body, /<th class="r">On the site<\/th>/);
+    assert.doesNotMatch(body, /couldn’t answer/);
+    const game = await new Analytics({ transport: t }).realtime({ game: 'wake' });
+    assert.ok(!game.places.ok && game.places.error.kind === 'setup');
   });
 
   test('GA_PROPERTY_ID is the numeric property id', () => {

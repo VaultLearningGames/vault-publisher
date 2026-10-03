@@ -28,6 +28,7 @@ All of these currently build with game-ci and rsync to DoIT. Each gets the same 
 | Art testbed | `art-testbed` | 2022.3.47f1 | `develop` | 2024-10-24 | `/play/art-testbed/ci/develop` | — | To do |
 
 Notes:
+- **Plants-o-Plenty (v1 and v2) is not to be on Vault** (David, 2026-10-03): not copied, published or listed.
 - **Branch names:** Field Day's framework picks its build configuration from the branch name (`*preview*`/`milestone*`
   → PREVIEW, `*dev*`/`*proto*`/`feature/*` → DEVELOPMENT; `production` → PRODUCTION). Migration PR branches must be named
   so they build like `develop` (e.g. `dev-vault-staging`), and the PREVIEW config currently fails to compile in
@@ -52,7 +53,6 @@ single, replaceable version (no version folders).
 | Jo Wilder and the Capitol Case | `/play/jowilder/game/` | `jowilder` | JavaScript | `fieldday/jowilder/doit/` |
 | Lakeland | `/play/lakeland/game/` | `lakeland` | JavaScript | `fieldday/lakeland/doit/` |
 | Lost at the Forever Mine | `/play/forevermine/game/` | `forevermine` | JavaScript | `fieldday/forevermine/doit/` |
-| Plants-o-Plenty v2 | `/play/plants-o-plenty-v2/ci/main/` | `plants-o-plenty-v2` | JavaScript (webpack, CI → DoIT) | `fieldday/plants-o-plenty-v2/main/` |
 | ThermoVR (desktop) | `/play/thermovr/ci/desktop/` | `thermovr` | Unity 2021.3 WebGL, built by hand (no workflow) | `fieldday/thermovr/desktop/` |
 | Shadowspect (MIT Education Arcade) | `/play/partner/shadowspect/ci/main/` | `shadowspect` (Unity 2018.4) | External studio | `mit-education-arcade/shadowspect/main/` |
 | Transformation Quest (University of Calgary) | `/play/transformation-quest/ci/develop/` | `transformation-quest` | External studio, JavaScript | `ucalgary/transformation-quest/develop/` |

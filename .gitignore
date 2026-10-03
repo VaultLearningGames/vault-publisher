@@ -12,3 +12,6 @@ site/.hugo_build.lock
 # wrangler's local state (cloudflare/site/check.sh, wrangler dev).
 .wrangler/
 .DS_Store
+
+# The card pipeline's per-worktree folder; never commit it.
+.dispatch/

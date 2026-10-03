@@ -27,6 +27,7 @@ const TASKS: Record<string, { method: 'GET' | 'POST'; path: string }> = {
   release: { method: 'POST', path: '/v1/admin/releases/publish' },
 };
 const MAX_ROUNDS = 20;             // migrate-images continues while images remain
+const MAX_RELEASE_ROUNDS = 100;    // a release continues while files remain (about 75 s a round)
 const MAX_SUMMARY_CHARS = 200_000; // a job summary holds 1 MiB
 
 const { values: opt } = parseArgs({
@@ -89,19 +90,24 @@ async function main() {
 
   const mode = task.method === 'GET' ? '' : dry ? ' (dry run: nothing was changed)' : '';
   const title = `Admin task: ${opt.task} on ${portal}${mode}`;
+  let lastProgress = '';
   for (let round = 1; ; round++) {
     const { status, json } = await call(a);
     if (status !== 200) {
       report(`${title} failed (HTTP ${status})`, json);
       process.exit(1);
     }
-    // The image migration stops starting downloads before the request would time out; go on while it makes progress.
-    const r = json as { remaining?: number; migrated?: unknown[] };
-    const more = opt.task === 'migrate-images' && !dry && (r.remaining ?? 0) > 0;
+    // The image migration and a release stop starting copies before the request would time out; go on while they
+    // make progress.
+    const r = json as { remaining?: number; migrated?: unknown[]; done?: boolean; step?: string };
+    const release = opt.task === 'release' && !dry && r.done === false;
+    const more = release || (opt.task === 'migrate-images' && !dry && (r.remaining ?? 0) > 0);
     report(more || round > 1 ? `${title}, round ${round}` : title, json);
     if (!more) return;
-    if (!r.migrated?.length || round >= MAX_ROUNDS) {
-      console.error(`admin-task: ${r.remaining} image(s) still remain after ${round} round(s); run the task again`);
+    const progress = release ? `${r.step}:${r.remaining}` !== lastProgress : !!r.migrated?.length;
+    lastProgress = `${r.step}:${r.remaining}`;
+    if (!progress || round >= (release ? MAX_RELEASE_ROUNDS : MAX_ROUNDS)) {
+      console.error(`admin-task: ${r.remaining} ${release ? 'file(s)' : 'image(s)'} still remain after ${round} round(s); run the task again`);
       process.exit(1);
     }
   }

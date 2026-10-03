@@ -3,8 +3,8 @@ import { HTTPException } from 'hono/http-exception';
 import { bodyLimit } from 'hono/body-limit';
 import { randomUUID } from 'node:crypto';
 import { bearerToken, type GitHubIdentity, type Verifier } from './auth.ts';
-import type { Db, Game, ManifestFile, Studio } from './db.ts';
-import { copyRelease, makeLive, ReleaseLayoutError, releasePrefix } from './releases.ts';
+import type { Db, Game, ManifestFile, Release, Studio } from './db.ts';
+import { copyRelease, makeLive, ReleaseLayoutError, releasePrefix, type Budget } from './releases.ts';
 import { buildCatalog } from './catalog.ts';
 import type { PreviewSite } from './config.ts';
 import { parseRun } from './game-checks.ts';
@@ -67,6 +67,9 @@ const PUBLISH_EVENTS = new Set(['push', 'workflow_dispatch', 'release']);
 // what the monitors' own task route may spend (give its Scheduler job a 15-minute deadline).
 const CLEANUP_MONITOR_BUDGET_MS = 100_000;
 const MONITOR_TASK_BUDGET_MS = 12 * 60_000;
+// What one admin `release` call may spend copying files (Cloudflare ends a proxied request after 100 seconds).
+const DEFAULT_RELEASE_BUDGET_SECONDS = 75;
+const MAX_RELEASE_BUDGET_SECONDS = 280;
 
 export function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 413 | 503, message: string, detail?: unknown): never {
   throw new HTTPException(status, { res: Response.json({ error: message, detail }, { status }) });
@@ -205,7 +208,11 @@ export function createApp(deps: AppDeps) {
   // Approve: copy a live staging build to production as an immutable release.
   // Body: { studio, game, version, ref } where ref is the staging branch/tag (defaults to version).
   // Shared by the Release workflow (OIDC) and the web portal (signed-in release managers).
-  async function approveRelease(studio: Studio, game: Game, version: string, rawRef: string | undefined, actor: string) {
+  // With a deadline (the admin task `release`) the copy may stop part-way: the answer is then { pending: remaining },
+  // and the next call carries on. A settings key remembers which build an unfinished copy is of, so files left in the
+  // release folder are only ever resumed for that same build (otherwise the folder is a 409, as before).
+  async function approveStep(studio: Studio, game: Game, version: string, rawRef: string | undefined, actor: string, budget: Budget = {}):
+    Promise<{ release: Release; url: string } | { pending: number; files: number }> {
     const production = productionStorage();
     const ref = sanitizeRefName(rawRef ? rawRef.replace(/^refs\/(heads|tags)\//, '') : version);
     if (!ref) fail(400, 'ref must be a branch or tag name');
@@ -213,22 +220,37 @@ export function createApp(deps: AppDeps) {
     if (!build || build.status !== 'live') fail(404, `no live staging build ${studio.slug}/${game.slug}/${ref}`);
     if (db.release(game.id, version)) fail(409, `release ${version} already exists and can't be changed`);
     const dstPrefix = releasePrefix(`${studio.slug}/${game.slug}/`, version);
-    if ((await production.list(dstPrefix)).length > 0) fail(409, `production already has files under ${dstPrefix}`);
-    const copied = await copyRelease({ staging, production, srcPrefix: previewPrefix(studio, game, ref), dstPrefix })
+    const marker = `release_copy:${game.id}:${version}`;
+    const of = `${build.id}:${build.updated_at}:${build.commit_sha}`;
+    const resume = (await production.list(dstPrefix)).length > 0;
+    if (resume && db.setting(marker) !== of) fail(409, `production already has files under ${dstPrefix}`);
+    db.setSetting(marker, of);
+    const copied = await copyRelease({ staging, production, srcPrefix: previewPrefix(studio, game, ref), dstPrefix, resume, ...budget })
       .catch((err) => { if (err instanceof ReleaseLayoutError) fail(400, `Can’t release ${ref}: ${err.message}.`); throw err; });
+    if (copied.remaining) return { pending: copied.remaining, files: copied.files };
+    if (db.release(game.id, version)) fail(409, `release ${version} already exists and can't be changed`); // a parallel call finished it
+    db.setSetting(marker, '');
     const release = db.createRelease({
       game_id: game.id, version, source_ref: ref, commit_sha: build.commit_sha,
       file_count: copied.files, total_bytes: copied.bytes, approved_by: actor,
     });
     db.closeRequestsForVersion(game.id, version, actor);
-    db.audit(actor, 'release.approve', dstPrefix, { from: ref, sha: build.commit_sha, ...copied });
+    db.audit(actor, 'release.approve', dstPrefix, { from: ref, sha: build.commit_sha, files: copied.files, bytes: copied.bytes });
     return { release, url: `${deps.prodPublicUrl}/${dstPrefix}` };
+  }
+  async function approveRelease(studio: Studio, game: Game, version: string, rawRef: string | undefined, actor: string) {
+    const r = await approveStep(studio, game, version, rawRef, actor);
+    if ('pending' in r) throw new Error('unreachable: an approval without a deadline always finishes');
+    return r;
   }
 
   // Switch the release players get at STUDIO/GAME/ by copying it into place. One switch per game at a time;
   // if a copy fails part-way, the previous release is put back so players never keep a mixed folder.
+  // With a deadline (the admin task `release`) it may stop part-way and answer { pending: remaining }; a settings
+  // key remembers how far it got, and the next call for the same version carries on from there.
   const switching = new Set<number>();
-  async function promoteRelease(studio: Studio, game: Game, version: string, actor: string) {
+  async function promoteStep(studio: Studio, game: Game, version: string, actor: string, budget: Budget = {}):
+    Promise<{ current: string; previous: string | null; rollback: boolean; url: string } | { pending: number; files: number }> {
     const production = productionStorage();
     const release = db.release(game.id, version);
     if (!release) fail(404, `${version} hasn't been approved for ${studio.slug}/${game.slug}`);
@@ -238,12 +260,22 @@ export function createApp(deps: AppDeps) {
     try {
       const previous = db.currentRelease(game.id);
       const gamePrefix = `${studio.slug}/${game.slug}/`;
+      const marker = `release_live:${game.id}`;
+      const saved = (() => { try { return JSON.parse(db.setting(marker) || 'null') as { version: string; done: number } | null; } catch { return null; } })();
+      const skip = saved?.version === version ? saved.done : 0;
+      let live;
       try {
-        await makeLive(production, gamePrefix, version);
+        live = await makeLive(production, gamePrefix, version, { ...budget, skip });
       } catch (err) {
+        db.setSetting(marker, '');
         if (previous) await makeLive(production, gamePrefix, previous.version).catch(() => {});
         throw err;
       }
+      if (live.remaining) {
+        db.setSetting(marker, JSON.stringify({ version, done: live.done }));
+        return { pending: live.remaining, files: live.files };
+      }
+      db.setSetting(marker, '');
       db.setCurrentRelease(game.id, release.id);
       const rollback = previous !== undefined && previous.id > release.id;
       db.audit(actor, rollback ? 'release.rollback' : 'release.promote', gamePrefix, { from: previous?.version ?? null, to: version });
@@ -251,6 +283,11 @@ export function createApp(deps: AppDeps) {
     } finally {
       switching.delete(game.id);
     }
+  }
+  async function promoteRelease(studio: Studio, game: Game, version: string, actor: string) {
+    const r = await promoteStep(studio, game, version, actor);
+    if ('pending' in r) throw new Error('unreachable: a switch without a deadline always finishes');
+    return r;
   }
 
   // Approve: copy a live staging build to production as an immutable release.
@@ -270,10 +307,12 @@ export function createApp(deps: AppDeps) {
     return c.json(await promoteRelease(studio, game, version, `github:${id.actor}`));
   });
 
-  // Release a test build and make it current in one call, for the admin task `release` (scripts/admin-task.ts), which
+  // Release a test build and make it current, for the admin task `release` (scripts/admin-task.ts), which
   // runs in this system's GitHub environment: on staging, the only way to release without a signed-in person.
-  // Body: { studio, game, version, ref? (defaults to version), promote? (default true), dry_run? }.
-  // Safe to repeat: a version already approved from the same ref isn't approved again, and the current one isn't
+  // Body: { studio, game, version, ref? (defaults to version), promote? (default true), budget_seconds?, dry_run? }.
+  // A call starts no new file copy after budget_seconds (default 75, inside Cloudflare's 100-second limit on a
+  // request), and then answers done: false with what remains; calling again carries on (the script does). Big games
+  // (thousands of files) take several calls. Safe to repeat: a version already approved from the same ref isn't approved again, and the current one isn't
   // switched again. A version approved from another ref is refused (releases can't be replaced).
   app.post('/v1/admin/releases/publish', async (c) => {
     const id = await admin(c);
@@ -297,11 +336,24 @@ export function createApp(deps: AppDeps) {
         build: build ? { ref: build.ref_name, commit_sha: build.commit_sha, files: build.file_count, bytes: build.total_bytes, url: `${deps.stagingPublicUrl}/${previewPrefix(studio, game, ref)}` } : null,
       });
     }
+    const budget = body.budget_seconds ?? DEFAULT_RELEASE_BUDGET_SECONDS;
+    if (typeof budget !== 'number' || !(budget >= 1 && budget <= MAX_RELEASE_BUDGET_SECONDS)) fail(400, `budget_seconds must be a number from 1 to ${MAX_RELEASE_BUDGET_SECONDS}`);
+    const steps: Budget = { deadline: Date.now() + budget * 1000, concurrency: 16 };
     const actor = `github:${id.actor}`;
-    const approved = plan.approve ? await approveRelease(studio, game, version, ref, actor) : null;
-    const promoted = plan.promote ? await promoteRelease(studio, game, version, actor) : null;
+    const base = { dry_run: false, game: target, version, ref };
+    let approved = false, promoted = false;
+    if (plan.approve) {
+      const r = await approveStep(studio, game, version, ref, actor, steps);
+      if ('pending' in r) return c.json({ ...base, done: false, step: 'approve', remaining: r.pending, files: r.files });
+      approved = true;
+    }
+    if (plan.promote) {
+      const r = await promoteStep(studio, game, version, actor, steps);
+      if ('pending' in r) return c.json({ ...base, done: false, step: 'promote', approved, remaining: r.pending, files: r.files });
+      promoted = true;
+    }
     return c.json({
-      dry_run: false, game: target, version, ref, approved: !!approved, promoted: !!promoted,
+      ...base, done: true, approved, promoted,
       current: db.currentRelease(game.id)?.version ?? null, release_url: `${deps.prodPublicUrl}/${releasePrefix(`${target}/`, version)}`,
       play_url: `${deps.prodPublicUrl}/${target}/`,
     });

@@ -6,6 +6,7 @@ import { Db } from '../src/db.ts';
 import { browseKeys, type Storage } from '../src/storage.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import type { Readable } from 'node:stream';
+import { copyRelease, makeLive } from '../src/releases.ts';
 
 class FakeStorage implements Storage {
   objects = new Map<string, number>();
@@ -298,6 +299,51 @@ describe('production releases', () => {
     // promote: false only approves.
     const only = await publish({ version: 'v2', ref: 'feature/new-map', promote: false });
     assert.deepEqual(pick(await only.json(), ['approved', 'promoted', 'current']), { approved: true, promoted: false, current: 'v1' });
+  });
+
+  test('a copy or a switch cut short by its deadline carries on where it stopped', async () => {
+    const src = new FakeStorage(), dst = new FakeStorage();
+    for (let i = 0; i < 20; i++) src.objects.set(`s/g/b/f${String(i).padStart(2, '0')}.js`, 10 + i);
+    src.objects.set('s/g/b/index.html', 5);
+    dst.objects.set('s/g/_releases/v1/stale.js', 3); // left by an earlier build: removed on resume
+    const slow = Object.assign(Object.create(dst), { put: async (...a: Parameters<FakeStorage['put']>) => { await new Promise((r) => setTimeout(r, 5)); return dst.put(...a); } }) as FakeStorage;
+    const opts = { staging: src, production: slow, srcPrefix: 's/g/b/', dstPrefix: 's/g/_releases/v1/' };
+    const first = await copyRelease({ ...opts, deadline: Date.now() + 12, concurrency: 1, resume: true });
+    assert.ok(first.remaining > 0 && first.remaining < 21, `remaining ${first.remaining}`);
+    assert.equal(dst.objects.has('s/g/_releases/v1/stale.js'), false);
+    const puts = dst.objects.size;
+    const second = await copyRelease({ ...opts, resume: true });
+    assert.deepEqual(second, { files: 21, bytes: 5 + 20 * 10 + 190, remaining: 0 });
+    assert.equal(dst.objects.size, 21);
+    assert.ok(puts >= 21 - first.remaining);
+
+    // makeLive: stop part-way, then skip what was done; index.html last, current.json only at the end.
+    dst.objects.set('s/g/old.js', 1);
+    const live = await makeLive(dst, 's/g/', 'v1', { deadline: 0 });
+    assert.deepEqual([live.done, live.remaining], [0, 21]);
+    const slowCopy = Object.assign(Object.create(dst), { copy: async (...a: Parameters<FakeStorage['copy']>) => { await new Promise((r) => setTimeout(r, 5)); return dst.copy(...a); } }) as FakeStorage;
+    const part = await makeLive(slowCopy, 's/g/', 'v1', { deadline: Date.now() + 12, concurrency: 1 });
+    assert.ok(part.remaining > 0 && part.done === 21 - part.remaining);
+    assert.equal(dst.objects.has('s/g/index.html'), false);
+    assert.equal(dst.objects.has('s/g/current.json'), false);
+    assert.equal(dst.objects.has('s/g/old.js'), true, 'the old release stays until the switch finishes');
+    const rest = await makeLive(dst, 's/g/', 'v1', { skip: part.done });
+    assert.deepEqual([rest.done, rest.remaining], [21, 0]);
+    assert.equal(dst.objects.has('s/g/index.html'), true);
+    assert.equal(dst.objects.has('s/g/current.json'), true);
+    assert.equal(dst.objects.has('s/g/old.js'), false);
+  });
+
+  test('approve resumes files left by an unfinished copy of the same build, and refuses leftovers it did not start', async () => {
+    await publishTag();
+    prod.objects.set('fielddaylab/aqualab/_releases/m3.2/index.html', 10);
+    assert.equal((await approve()).status, 409);
+    const b = db.build(1, 'm3.2')!;
+    db.setSetting('release_copy:1:m3.2', `${b.id}:${b.updated_at}:${b.commit_sha}`);
+    const res = await approve();
+    assert.equal(res.status, 200);
+    assert.equal(db.release(1, 'm3.2')?.file_count, 2);
+    assert.equal(db.setting('release_copy:1:m3.2'), '');
   });
 
   test('approving from another staging ref (e.g. a legacy import) works with ref', async () => {

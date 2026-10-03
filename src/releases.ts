@@ -27,27 +27,46 @@ export interface CopyResult {
   bytes: number;
 }
 
+// Stop starting new copies once `deadline` (ms since the epoch) has passed; what is left is `remaining`.
+export interface Budget {
+  deadline?: number;
+  concurrency?: number;
+}
+const pastDeadline = (b: Budget) => b.deadline !== undefined && Date.now() > b.deadline;
+
 // Copies every object under `srcPrefix` in staging to `dstPrefix` in production, re-labelling each
 // file with the release cache policy. On any failure it removes what it copied, so a failed approval
 // can be retried (the release folder must be empty before an approval starts).
-export async function copyRelease(opts: {
+// With `resume`, files already at the destination with the right size are kept and files the source doesn't have
+// are removed, so a copy cut short by its deadline (or a dropped request) carries on where it stopped. With a
+// deadline it may return with `remaining` > 0: nothing is verified then; call it again with `resume`.
+export async function copyRelease(opts: Budget & {
   staging: Storage;
   production: Storage;
   srcPrefix: string;
   dstPrefix: string;
-  concurrency?: number;
-}): Promise<CopyResult> {
+  resume?: boolean;
+}): Promise<CopyResult & { remaining: number }> {
   const { staging, production, srcPrefix, dstPrefix } = opts;
   const objects = await staging.list(srcPrefix);
   if (objects.length === 0) throw new Error(`nothing in staging under ${srcPrefix}`);
   const clash = objects.map((o) => o.key.slice(srcPrefix.length)).find(isVaultPath);
   if (clash) throw new ReleaseLayoutError(`the build contains ${clash}, which would collide with the release layout (${RELEASES_DIR}, ${ASSETS_DIR} and current.json are Vault's)`);
+  const total = { files: objects.length, bytes: objects.reduce((n, o) => n + o.size, 0) };
+  let todo = objects;
+  if (opts.resume) {
+    const there = new Map((await production.list(dstPrefix)).map((c) => [c.key, c.size]));
+    const wanted = new Set(objects.map((o) => dstPrefix + o.key.slice(srcPrefix.length)));
+    const extra = [...there.keys()].filter((k) => !wanted.has(k));
+    if (extra.length) await production.deleteKeys(extra);
+    todo = objects.filter((o) => there.get(dstPrefix + o.key.slice(srcPrefix.length)) !== o.size);
+  }
   const written: string[] = [];
-  const queue = [...objects];
+  const queue = [...todo];
   try {
     await Promise.all(
       Array.from({ length: opts.concurrency ?? 8 }, async () => {
-        for (let o = queue.shift(); o; o = queue.shift()) {
+        for (let o = pastDeadline(opts) ? undefined : queue.shift(); o; o = pastDeadline(opts) ? undefined : queue.shift()) {
           const rel = o.key.slice(srcPrefix.length);
           const headers: ObjectHeaders = { ...headersFor(rel), cacheControl: RELEASE_CACHE };
           const dst = dstPrefix + rel;
@@ -56,6 +75,7 @@ export async function copyRelease(opts: {
         }
       }),
     );
+    if (queue.length) return { ...total, remaining: queue.length };
     // Verify the copy before recording the release.
     const copied = new Map((await production.list(dstPrefix)).map((c) => [c.key, c.size]));
     const bad = objects.filter((o) => copied.get(dstPrefix + o.key.slice(srcPrefix.length)) !== o.size);
@@ -64,17 +84,20 @@ export async function copyRelease(opts: {
     if (written.length) await production.deleteKeys(written).catch(() => {});
     throw err;
   }
-  return { files: objects.length, bytes: objects.reduce((n, o) => n + o.size, 0) };
+  return { ...total, remaining: 0 };
 }
 
 // Copies release `version` over STUDIO/GAME/ (server-side, inside the production bucket), then removes files
 // the previous release had that this one doesn't. HTML goes in last and the top index.html very last, so a
 // player arriving mid-switch gets either the old page or a new page whose files are all in place.
-export async function makeLive(production: Storage, gamePrefix: string, version: string, concurrency = 8): Promise<CopyResult> {
+// With a deadline it may stop part-way and return `remaining` > 0, with `done` the number of files copied in the
+// fixed order below; call it again with `skip: done` to carry on (the old files and current.json stay until the end).
+export async function makeLive(production: Storage, gamePrefix: string, version: string, budget: Budget & { skip?: number } | number = {}): Promise<CopyResult & { remaining: number; done: number }> {
+  const b: Budget & { skip?: number } = typeof budget === 'number' ? { concurrency: budget } : budget;
   const src = releasePrefix(gamePrefix, version);
   const objects = await production.list(src);
   if (objects.length === 0) throw new Error(`release ${version} has no files under ${src}`);
-  const rels = objects.map((o) => ({ rel: o.key.slice(src.length), size: o.size }));
+  const rels = objects.map((o) => ({ rel: o.key.slice(src.length), size: o.size })).sort((x, y) => (x.rel < y.rel ? -1 : x.rel > y.rel ? 1 : 0));
   const clash = rels.find((r) => isVaultPath(r.rel));
   if (clash) throw new Error(`release ${version} contains ${clash.rel}, which would collide with the release layout`);
   const liveBefore = (await production.list(gamePrefix))
@@ -83,20 +106,27 @@ export async function makeLive(production: Storage, gamePrefix: string, version:
 
   const isHtml = (rel: string) => /\.html?$/i.test(rel);
   const phases = [rels.filter((r) => !isHtml(r.rel)), rels.filter((r) => isHtml(r.rel) && r.rel !== 'index.html'), rels.filter((r) => r.rel === 'index.html')];
+  const total = { files: rels.length, bytes: rels.reduce((n, r) => n + r.size, 0) };
+  let skip = Math.max(0, Math.min(b.skip ?? 0, rels.length));
+  let done = skip;
   for (const phase of phases) {
-    const queue = [...phase];
-    await Promise.all(Array.from({ length: concurrency }, async () => {
-      for (let r = queue.shift(); r; r = queue.shift()) {
+    const queue = phase.slice(Math.min(skip, phase.length));
+    skip = Math.max(0, skip - phase.length);
+    // Copies that started always finish (Promise.all waits for them), so every file taken from the queue is done.
+    await Promise.all(Array.from({ length: b.concurrency ?? 8 }, async () => {
+      for (let r = pastDeadline(b) ? undefined : queue.shift(); r; r = pastDeadline(b) ? undefined : queue.shift()) {
         await production.copy(src + r.rel, gamePrefix + r.rel, { ...headersFor(r.rel), cacheControl: LIVE_CACHE });
+        done++;
       }
     }));
+    if (queue.length) return { ...total, remaining: rels.length - done, done };
   }
   const json = new TextEncoder().encode(JSON.stringify({ version, promoted_at: new Date().toISOString() }) + '\n');
   await production.put(`${gamePrefix}current.json`, json, json.byteLength, { contentType: 'application/json', cacheControl: LIVE_CACHE });
   const keep = new Set(rels.map((r) => gamePrefix + r.rel));
   const stale = liveBefore.filter((k) => !keep.has(k));
   if (stale.length) await production.deleteKeys(stale);
-  return { files: rels.length, bytes: rels.reduce((n, r) => n + r.size, 0) };
+  return { ...total, remaining: 0, done: rels.length };
 }
 
 // One-time move from the first layout (STUDIO/GAME/VERSION/ plus a redirect page at STUDIO/GAME/) to the one above.

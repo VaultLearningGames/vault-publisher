@@ -412,13 +412,19 @@ html:not(.js) .fe:has(.sq-news:target) { --pad: clamp(56px, 9vw, 104px); display
 .blog-older { margin-left: auto; }
 .chev { width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
 .blog-newer .chev { transform: rotate(135deg); }
-@media (min-width: 768px) {
-  .blog-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 21px; row-gap: 100px; }
+/* Columns: one on phones, two from 600px, three from 768px and four from 1024px. Squarespace went straight from one
+   to four at 768px, which left ~170px cards and tiny titles on tablets (David, 2026-10-03: three at that width). */
+@media (min-width: 600px) {
+  .blog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 21px; row-gap: 60px; }
   .blog-item { margin-bottom: 0; }
+}
+@media (min-width: 768px) {
+  .blog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 100px; }
   .blog-meta { margin: 35px 10% 25px; }
   .blog-excerpt, .blog-more { font-size: 14.272px; }
   .blog-more { padding-top: 20px; }
 }
+@media (min-width: 1024px) { .blog-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 /* ---------- Submit a Game form ---------- */
 .fb-form { justify-content: flex-start !important; }

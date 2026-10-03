@@ -13,7 +13,7 @@ form:
   - { name: maker, label: "Who made the game?", type: text, required: true }
   - { name: url, label: "Please provide a link to the playable game here", type: text, required: true }
   - { type: section, label: "These next questions are optional, but your answers help us categorize and review your submission faster!" }
-  - { name: grades, label: "What grade-range is this game suited for?", desc: "select all that apply", type: checkbox, options: ["Kindergarten - 3rd grade", "4th grade - 5th grade", "6th grade - 8th grade", "9th grade - 12th grade"] }
+  - { name: grades, label: "What grade-range is this game suited for?", desc: "select all that apply", type: checkbox, options: ["Kindergarten - 3rd grade", "4th grade - 5th grade", "6th grade - 8th grade", "9th grade - 12th grade", "College / undergraduate (13+)"] }
   - { name: video, label: "Is there a trailer or gameplay video of this game?", desc: "If yes, please link it below:", type: text }
   - { name: media, label: "Is there a folder with thumbnails, screenshots or logos?", desc: "Optimally you will provide a thumbnail (3x2), 4 screenshots of in-game play, a logo, and a hero image (landscape.) Please link it below:", type: text }
   - { name: curriculum, label: "Are there teacher support materials or curriculum associated with this game?", desc: "If yes, please link it below:", type: text }

@@ -1,10 +1,11 @@
 {{- /* A page's one address, as Squarespace had it and as Google knows it: no trailing slash (the hosting serves
        /wake/index.html at /wake: cloudflare/site/wrangler.jsonc), the home page (also served at /home) at the site's
        root, and a /game-cards filter page at Squarespace's spelling of its value ("Dev: CU Boulder" is
-       Dev%3A+CU+Boulder, "Family/Consumer" is Family%2FConsumer: what urlquery gives). Used for the canonical link,
+       Dev%3A+CU+Boulder, "Family/Consumer" is Family%2FConsumer: what urlquery gives, except that a "+" in the value stays "+", as the folder it is built in and the
+       hosting's address for it spell it: "Grades 13+" is Grades+13+, src/site-hosting.ts linkedPath). Used for the canonical link,
        og:url, the sitemap and structured data. */ -}}
 {{- $base := site.BaseURL | strings.TrimSuffix "/" -}}
 {{- $canon := .Permalink | strings.TrimSuffix "/" -}}
 {{- if or .IsHome (eq .Layout "home") }}{{ $canon = $base }}{{ end -}}
-{{- with .Params.filter_kind }}{{ $canon = printf "%s/game-cards/%s/%s" $base . (urlquery $.Params.filter_value) }}{{ end -}}
+{{- with .Params.filter_kind }}{{ $canon = printf "%s/game-cards/%s/%s" $base . (replace (urlquery $.Params.filter_value) "%2B" "+") }}{{ end -}}
 {{- return $canon -}}

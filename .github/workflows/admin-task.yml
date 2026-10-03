@@ -21,7 +21,7 @@ on:
       task:
         description: What to do
         type: choice
-        options: [list, import, migrate-images, move, update, featured, studios, release, image-variants]
+        options: [list, import, migrate-images, move, update, featured, studios, remove-studios, release, image-variants]
         required: true
       args:
         description: The task's arguments, as a JSON object

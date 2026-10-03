@@ -5,7 +5,8 @@
 // Vault CDN: the current release of one of the studio's games at https://cdn.vaultlearninggames.org/STUDIO/GAME/.
 import { isSlug } from './paths.ts';
 
-export const GRADES = ['Grades K-3', 'Grades 3-5', 'Grades 5-8', 'Grades 9-12'] as const;
+// "Grades 13+" is undergraduate and beyond (David, 2026-10-03; ThermoLab is the first).
+export const GRADES = ['Grades K-3', 'Grades 3-5', 'Grades 5-8', 'Grades 9-12', 'Grades 13+'] as const;
 
 export interface ListingFields {
   title: string;

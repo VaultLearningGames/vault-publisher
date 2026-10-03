@@ -5,6 +5,7 @@
 //
 //   GET  /v1/admin/listings[?slug=a&slug=b]     drafts, published listings and review state, to verify a task
 //   POST /v1/admin/studios                      { studios: [{ slug, name?, website? }] }
+//   POST /v1/admin/studios/remove               { slugs: [slug, …] }   delete empty studios
 //   POST /v1/admin/featured                     { games: [{ slug, sequence?, blurb?, image? }] }
 //   POST /v1/admin/listings/import              { source, slugs?, pages?, overrides? }
 //   POST /v1/admin/listings/migrate-images      { base, budget_seconds? }
@@ -19,7 +20,7 @@ import { fail, jsonBody, type AppDeps } from './app.ts';
 import type { GitHubIdentity } from './auth.ts';
 import { MAX_FEATURED, normalizeFeatured, readFeatured, saveFeatured, sortFeatured } from './featured.ts';
 import { isSlug } from './paths.ts';
-import { studioWebsite } from './db.ts';
+import { StudioNotEmptyError, studioWebsite } from './db.ts';
 import { changedFields, EMPTY_LISTING, normalize, type ListingFields } from './listings.ts';
 import { IMAGE_CACHE } from './assets.ts';
 import { isOriginalKey, keyOfUrl, listingImageUrls, MAX_VARIANT_BYTES, readVariants, recordVariants, variantKey, variantWidths, webpWidth } from './image-variants.ts';
@@ -279,6 +280,38 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
         db.audit(actorOf(id), 'studio.update', p.slug, { ...changes, via: 'admin task' });
       }
       return { slug: p.slug, created: false, changes };
+    });
+    return c.json({ dry_run: dry, studios: out });
+  });
+
+  // Delete studios that are completely empty, as Vault → Studios → Delete does, but stricter: besides CDN games
+  // (which carry the builds and releases) and site listings, a studio with members, invitations or repositories
+  // assigned to it, or one that studios.json defines, is refused. Each studio is checked (a dry run of the removal)
+  // before any is removed, so a refusal removes nothing.
+  app.post('/v1/admin/studios/remove', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const dry = dryRun(body);
+    const slugs = body.slugs;
+    if (!Array.isArray(slugs) || !slugs.length || !slugs.every((s) => typeof s === 'string' && isSlug(s))) fail(400, 'slugs must be a non-empty list of studio short names');
+    const unique = [...new Set(slugs as string[])];
+    const checked = unique.map((slug) => {
+      const s = db.studioBySlug(slug);
+      if (!s) fail(404, `There’s no studio ${slug}.`);
+      if (s.source === 'file') fail(409, `${s.name} is defined in studios.json; remove it there.`);
+      try {
+        const r = db.removeStudio(s.id, { dryRun: true, actor: actorOf(id) });
+        if (r.memberships.length) fail(409, `${s.name} has ${r.memberships.length} member(s) or invitation(s): ${r.memberships.map((m) => m.github_login).join(', ')}.`);
+        if (r.repositories.length) fail(409, `${s.name} has repositories assigned: ${r.repositories.map((x) => x.repository).join(', ')}.`);
+        return { s, r };
+      } catch (err) {
+        if (err instanceof StudioNotEmptyError) fail(409, `${s.name} is not empty: ${err.message}`);
+        throw err;
+      }
+    });
+    const out = checked.map(({ s, r }) => {
+      if (!dry) db.removeStudio(s.id, { actor: actorOf(id) });
+      return { slug: s.slug, name: s.name, website: s.website || null, removed: !dry, games: 0, listings: 0, members: 0, repositories: 0, warnings: r.warnings };
     });
     return c.json({ dry_run: dry, studios: out });
   });

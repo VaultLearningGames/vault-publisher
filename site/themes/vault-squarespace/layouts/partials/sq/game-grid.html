@@ -6,13 +6,17 @@
   {{- range .subjects }}{{ if and . (ne . "null") }}{{ $subjects = $subjects | append . }}{{ end }}{{ end }}
   {{- range .makers }}{{ $makers = $makers | append . }}{{ end }}
 {{- end }}{{ end -}}
+{{- /* Grade bands youngest first (K-3 … 9-12, 13+), then any other value. */ -}}
+{{- $gradeOrder := slice "K-3" "3-5" "5-8" "9-12" "13+" }}{{ $gradeVals := slice -}}
+{{- range $gradeOrder }}{{ if in $grades . }}{{ $gradeVals = $gradeVals | append . }}{{ end }}{{ end -}}
+{{- range ($grades | uniq | sort) }}{{ if not (in $gradeOrder .) }}{{ $gradeVals = $gradeVals | append . }}{{ end }}{{ end -}}
 <div class="gg" data-page-size="30">
   {{- /* Up to 500px wide the filters are a panel that slides in from the left (Filter opens it, the X at its foot
          closes it); wider, they are a row of dropdowns above the grid. See "All Games grid" in vault-sq.css. */}}
   <button type="button" class="gg-mobile-trigger" aria-expanded="false" aria-controls="gg-filters">Filter</button>
   <div class="gg-filters" id="gg-filters">
     <div class="gg-filters-in">
-    {{- range slice (dict "k" "grade" "name" "Grade" "vals" ($grades | uniq | sort)) (dict "k" "subject" "name" "Subject" "vals" ($subjects | uniq | sort)) (dict "k" "maker" "name" "Maker" "vals" ($makers | uniq | sort)) }}
+    {{- range slice (dict "k" "grade" "name" "Grade" "vals" $gradeVals) (dict "k" "subject" "name" "Subject" "vals" ($subjects | uniq | sort)) (dict "k" "maker" "name" "Maker" "vals" ($makers | uniq | sort)) }}
     <div class="gg-dd" data-filter="{{ .k }}">
       <button type="button" class="gg-dd-toggle" aria-expanded="false"><span class="gg-dd-name">{{ .name }}</span><span class="gg-dd-val"> : All</span><span class="gg-dd-caret" aria-hidden="true"></span></button>
       <ul class="gg-dd-list" role="listbox" aria-multiselectable="true">

@@ -512,3 +512,34 @@ describe('admin task: studios', () => {
     assert.deepEqual(audits('studio.create', 'studio.update').map((a) => [a.action, a.target]).sort(), [['studio.create', 'cmu'], ['studio.update', 'cmu']]);
   });
 });
+
+describe('admin task: remove-studios', () => {
+  const studios = async (path: string, body: unknown) => {
+    const res = await call('POST', path, 'admin', body);
+    return { status: res.status, json: (await res.json()) as any };
+  };
+
+  test('deletes only completely empty studios; one refusal removes nothing; a dry run changes nothing', async () => {
+    assert.equal((await studios('/v1/admin/studios', { studios: [{ slug: 'empty-a', name: 'Empty A' }, { slug: 'empty-b', name: 'Empty B' }, { slug: 'busy', name: 'Busy' }, { slug: 'staffed', name: 'Staffed' }] })).status, 200);
+    assert.equal((await post('move', { slug: 'wake', studio: 'busy' })).status, 200);
+    t.db.setMembership(t.db.studioBySlug('staffed')!.id, 'someone', 'viewer', 'test');
+    const exists = (...slugs: string[]) => slugs.map((s) => !!t.db.studioBySlug(s));
+
+    for (const blocked of ['busy', 'staffed', 'fieldday']) {
+      const r = await studios('/v1/admin/studios/remove', { slugs: ['empty-a', blocked] });
+      assert.equal(r.status, 409, blocked);
+    }
+    assert.equal((await studios('/v1/admin/studios/remove', { slugs: ['nope'] })).status, 404);
+    assert.deepEqual(exists('empty-a', 'empty-b', 'busy', 'staffed'), [true, true, true, true]);
+
+    const dry = await studios('/v1/admin/studios/remove', { slugs: ['empty-a', 'empty-b'], dry_run: true });
+    assert.equal(dry.status, 200);
+    assert.deepEqual(dry.json.studios.map((s: any) => [s.slug, s.removed]), [['empty-a', false], ['empty-b', false]]);
+    assert.deepEqual(exists('empty-a', 'empty-b'), [true, true]);
+
+    const done = await studios('/v1/admin/studios/remove', { slugs: ['empty-a', 'empty-b'] });
+    assert.equal(done.status, 200);
+    assert.deepEqual(exists('empty-a', 'empty-b', 'busy', 'staffed'), [false, false, true, true]);
+    assert.deepEqual(audits('studio.delete').map((a) => [a.actor, a.target]).sort(), [['github:octo', 'empty-a'], ['github:octo', 'empty-b']]);
+  });
+});

@@ -6,6 +6,7 @@
 //
 // Tasks: list (args: { slugs? }), import ({ source, slugs?, pages?, overrides? }), migrate-images ({ base }),
 // move ({ slug, studio }), update ({ updates: [{ slug, fields, cdn_game? }], publish }), featured, studios,
+// remove-studios ({ slugs }: delete completely empty studios),
 // release ({ studio, game, version, ref?, promote? }: approve a test build as a release and make it current).
 // It is a dry run unless --dry-run=false: the portal answers with what would change and writes nothing.
 // For import, --pages FILE and --overrides FILE send vault-rebuild's migration/games-export.json and
@@ -24,6 +25,7 @@ const TASKS: Record<string, { method: 'GET' | 'POST'; path: string }> = {
   update: { method: 'POST', path: '/v1/admin/listings/update' },
   featured: { method: 'POST', path: '/v1/admin/featured' },
   studios: { method: 'POST', path: '/v1/admin/studios' },
+  'remove-studios': { method: 'POST', path: '/v1/admin/studios/remove' },
   release: { method: 'POST', path: '/v1/admin/releases/publish' },
 };
 const MAX_ROUNDS = 20;             // migrate-images continues while images remain

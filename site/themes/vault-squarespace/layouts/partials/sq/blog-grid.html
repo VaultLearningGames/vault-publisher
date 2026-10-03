@@ -18,9 +18,9 @@
     {{- $href := strings.TrimSuffix "/" $p.RelPermalink }}
     {{- $img := partial "sq/card-image.html" $p }}
     <article class="blog-item" data-offset="{{ mul .date.Unix 1000 }}">
-      <a class="blog-img" href="{{ $href }}">{{ with $img }}{{ partial "sq/img.html" (dict "src" . "alt" $p.Title "sizes" "(min-width: 1400px) 340px, (min-width: 768px) 25vw, 100vw" "lazy" true) }}{{ end }}</a>
+      <a class="blog-img" href="{{ $href }}">{{ with $img }}{{ partial "sq/img.html" (dict "src" . "alt" $p.Title "sizes" "(min-width: 1400px) 340px, (min-width: 1024px) 25vw, (min-width: 768px) 33vw, (min-width: 600px) 50vw, 100vw" "lazy" true) }}{{ end }}</a>
       <div class="blog-meta">
-        <span class="blog-cats">{{ range $i, $c := $cats }}{{ if $i }}, {{ end }}<a href="{{ printf "/game-cards/category/%s" (urlquery $c) | safeURL }}">{{ $c }}</a>{{ end }}</span>
+        <span class="blog-cats">{{ range $i, $c := $cats }}{{ if $i }}, {{ end }}<a href="{{ printf "/game-cards/category/%s" (replace (urlquery $c) "%2B" "+") | safeURL }}">{{ $c }}</a>{{ end }}</span>
         <span class="blog-delim" aria-hidden="true"></span>
         <time class="blog-date" datetime="{{ .date.Format "2006-01-02" }}">{{ .date.Format "1/2/06" }}</time>
       </div>

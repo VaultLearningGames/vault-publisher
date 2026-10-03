@@ -1,37 +1,53 @@
 // What the analytics pages ask Google Analytics (Data API v1beta request bodies) and how the answers are read. Pure:
-// no network, no clock (callers pass "today" in the property's time zone). The events are those the website's game
-// pages send (site/themes/vault-squarespace/static/sq/js/vault-play-analytics.js; docs/analytics.md).
+// no network, no clock (callers pass "today" and the hour in the property's time zone). The events are those the
+// website's game pages send (site/themes/vault-squarespace/static/sq/js/vault-play-analytics.js; docs/analytics.md).
 
 export type RangeKey = 'day' | 'week' | 'month' | 'quarter' | 'year';
-export interface RangeDef { label: string; long: string; previous: string; days: number; bucketDays: number; hourly: boolean }
-// Rolling periods ending today, each compared with the same length just before it. "Year" is 52 weeks, in weekly
-// points, so both periods have whole weeks.
+export interface RangeDef {
+  label: string; long: string;
+  previous: string;              // the period before, whole
+  same: string;                  // what the period so far is compared with
+  unit: 'hour' | 'day' | 'month';
+}
+// Calendar periods: this one so far (it always holds today), compared with the same days of the one before (today
+// with yesterday up to the same hour). The chart draws the whole period, the days still to come empty. Weeks start
+// on Sunday (a US school audience; the property's days are America/Chicago days).
 export const RANGES: Record<RangeKey, RangeDef> = {
-  day: { label: 'Day', long: 'Today', previous: 'yesterday', days: 1, bucketDays: 1, hourly: true },
-  week: { label: 'Week', long: 'Last 7 days', previous: 'the 7 days before', days: 7, bucketDays: 1, hourly: false },
-  month: { label: 'Month', long: 'Last 30 days', previous: 'the 30 days before', days: 30, bucketDays: 1, hourly: false },
-  quarter: { label: 'Quarter', long: 'Last 90 days', previous: 'the 90 days before', days: 90, bucketDays: 1, hourly: false },
-  year: { label: 'Year', long: 'Last 52 weeks', previous: 'the 52 weeks before', days: 364, bucketDays: 7, hourly: false },
+  day: { label: 'Day', long: 'Today', previous: 'yesterday', same: 'yesterday by this hour', unit: 'hour' },
+  week: { label: 'Week', long: 'This week', previous: 'last week', same: 'the same days last week', unit: 'day' },
+  month: { label: 'Month', long: 'This month', previous: 'last month', same: 'the same days last month', unit: 'day' },
+  quarter: { label: 'Quarter', long: 'This quarter', previous: 'last quarter', same: 'the same days last quarter', unit: 'day' },
+  year: { label: 'Year', long: 'This year', previous: 'last year', same: 'the same days last year', unit: 'month' },
 };
 export const RANGE_KEYS = Object.keys(RANGES) as RangeKey[];
 export const rangeOf = (v: string | undefined): RangeKey => (v && v in RANGES ? (v as RangeKey) : 'month');
 
 export const PLAY_EVENTS = ['play_start', 'play_heartbeat', 'play_end'];
-// Custom definitions David registers in GA (Admin → Custom definitions): event-scoped dimensions game_slug, studio,
+// Custom definitions registered in GA (Admin → Custom definitions): event-scoped dimensions game_slug, studio,
 // play_mode; event-scoped metric play_seconds; user-scoped dimension vault_game (the realtime report's only way to
-// tell games apart). Until they exist, requests naming them are refused (400) and the pages say so.
+// tell games apart). A property without them refuses requests naming them (400) and the pages say so.
 export const DIM_GAME = 'customEvent:game_slug';
 export const DIM_MODE = 'customEvent:play_mode';
 export const MET_SECONDS = 'customEvent:play_seconds';
 export const DIM_RT_GAME = 'customUser:vault_game';
 
 export interface Period { start: string; end: string }   // YYYY-MM-DD, inclusive
-// A game's slug and its page paths on the site (pages.ts); none: the whole site.
-export interface Scope { game?: string; pages?: string[] }
+// What a view covers. A game: its slug and its page paths on the site (pages.ts). A studio: its slug, its games on the
+// site and all their page paths. Neither: the whole site.
+export interface Scope { game?: string; studio?: string; games?: string[]; pages?: string[] }
 
 // ---------- dates ----------
 const DAY = 86_400_000;
 export const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / DAY);
+const ymd = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);   // m from 0; overflow rolls
+const monthEnd = (y: number, m: number) => ymd(y, m + 1, 0);
+// The same day n months away, or that month's last day when it is shorter (Mar 31 → Feb 28).
+function addMonths(d: string, n: number): string {
+  const y = Number(d.slice(0, 4)), m = Number(d.slice(5, 7)) - 1, day = Number(d.slice(8, 10));
+  const end = monthEnd(y, m + n);
+  return Number(end.slice(8, 10)) < day ? end : ymd(y, m + n, day);
+}
 
 // The date and hour now in the GA property's time zone (its reports' days are that zone's days).
 export function localNow(timeZone: string, now: Date): { today: string; hour: number } {
@@ -40,11 +56,25 @@ export function localNow(timeZone: string, now: Date): { today: string; hour: nu
   return { today: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) % 24 };
 }
 
-export function periods(range: RangeKey, today: string): { current: Period; previous: Period } {
-  const n = RANGES[range].days;
+// current: this period so far (to today); previous: the same days of the one before; *Full: the whole periods.
+export interface Periods { current: Period; previous: Period; currentFull: Period; previousFull: Period }
+export function periods(range: RangeKey, today: string): Periods {
+  const y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7)) - 1;
+  if (range === 'day' || range === 'week') {
+    const back = range === 'day' ? 0 : new Date(`${today}T00:00:00Z`).getUTCDay();   // Sunday: 0
+    const n = range === 'day' ? 1 : 7;
+    const cs = addDays(today, -back), ps = addDays(cs, -n);
+    return {
+      current: { start: cs, end: today }, previous: { start: ps, end: addDays(today, -n) },
+      currentFull: { start: cs, end: addDays(cs, n - 1) }, previousFull: { start: ps, end: addDays(cs, -1) },
+    };
+  }
+  const months = range === 'month' ? 1 : range === 'quarter' ? 3 : 12;
+  const first = range === 'month' ? m : range === 'quarter' ? m - (m % 3) : 0;
+  const cs = ymd(y, first, 1), ps = ymd(y, first - months, 1);
   return {
-    current: { start: addDays(today, -(n - 1)), end: today },
-    previous: { start: addDays(today, -(2 * n - 1)), end: addDays(today, -n) },
+    current: { start: cs, end: today }, previous: { start: ps, end: addMonths(today, -months) },
+    currentFull: { start: cs, end: monthEnd(y, first + months - 1) }, previousFull: { start: ps, end: addDays(cs, -1) },
   };
 }
 
@@ -54,9 +84,15 @@ const eventIn = (names: string[]): Expr => names.length === 1
   ? { filter: { fieldName: 'eventName', stringFilter: { matchType: 'EXACT', value: names[0] } } }
   : { filter: { fieldName: 'eventName', inListFilter: { values: names } } };
 const exact = (fieldName: string, value: string): Expr => ({ filter: { fieldName, stringFilter: { matchType: 'EXACT', value } } });
+const inList = (fieldName: string, values: string[]): Expr => ({ filter: { fieldName, inListFilter: { values: [...new Set(values)] } } });
 const all = (...e: Expr[]): Expr => (e.length === 1 ? e[0] : { andGroup: { expressions: e } });
-const withGame = (scope: Scope, field: string, ...e: Expr[]) => all(...e, ...(scope.game ? [exact(field, scope.game)] : []));
-const pathIn = (paths: string[]): Expr => ({ filter: { fieldName: 'pagePath', inListFilter: { values: [...new Set(paths)] } } });
+// A game by game_slug, or a studio's games by the list of them.
+const withGame = (scope: Scope, field: string, ...e: Expr[]) =>
+  all(...e, ...(scope.game ? [exact(field, scope.game)] : scope.games ? [inList(field, scope.games)] : []));
+const pathIn = (paths: string[]): Expr => inList('pagePath', paths);
+// Today against yesterday: both days up to this hour (GA's hour is "00"–"23"; the single digits too, to be safe).
+const hoursTo = (range: RangeKey, hour: number): Expr[] => (range !== 'day' || hour >= 23 ? []
+  : [inList('hour', Array.from({ length: hour + 1 }, (_, h) => (h < 10 ? [`0${h}`, String(h)] : [String(h)])).flat())]);
 const twoRanges = (range: RangeKey, today: string) => {
   const p = periods(range, today);
   return [{ startDate: p.current.start, endDate: p.current.end, name: 'current' }, { startDate: p.previous.start, endDate: p.previous.end, name: 'previous' }];
@@ -64,56 +100,58 @@ const twoRanges = (range: RangeKey, today: string) => {
 
 export type GaRequest = Record<string, unknown>;
 
-// Plays (play_start) and page views over both periods, by hour (day) or by day, in one range: split into the two
-// periods and the two events when read. A game is its page (play events are sent from it), so no custom definitions
-// are needed and the years of page views before the play events are there too.
+// Plays (play_start) and page views by hour (day) or by day, from the start of the previous period to today, in one
+// range: split into the two periods and the two events when read. A game is its page (play events are sent from it),
+// so no custom definitions are needed and the years of page views before the play events are there too.
 export function seriesRequest(range: RangeKey, today: string, scope: Scope): GaRequest {
   const p = periods(range, today);
   return {
-    dateRanges: [{ startDate: p.previous.start, endDate: p.current.end }],
-    dimensions: [{ name: RANGES[range].hourly ? 'dateHour' : 'date' }, { name: 'eventName' }],
+    dateRanges: [{ startDate: p.previousFull.start, endDate: p.current.end }],
+    dimensions: [{ name: RANGES[range].unit === 'hour' ? 'dateHour' : 'date' }, { name: 'eventName' }],
     metrics: [{ name: 'eventCount' }],
     dimensionFilter: byGame(scope, eventIn(['play_start', 'page_view'])),
     limit: 10000,
   };
 }
 
-// Plays, timed plays and seconds played, per game, event and mode, in each period.
-export function playsRequest(range: RangeKey, today: string, scope: Scope): GaRequest {
+// Plays, timed plays and seconds played, per game, event and mode, in each period. hour: now (for Day).
+export function playsRequest(range: RangeKey, today: string, scope: Scope, hour = 23): GaRequest {
   return {
     dateRanges: twoRanges(range, today),
     dimensions: [{ name: 'eventName' }, { name: DIM_MODE }, { name: DIM_GAME }],
     metrics: [{ name: 'eventCount' }, { name: MET_SECONDS }],
-    dimensionFilter: withGame(scope, DIM_GAME, eventIn(PLAY_EVENTS)),
+    dimensionFilter: withGame(scope, DIM_GAME, eventIn(PLAY_EVENTS), ...hoursTo(range, hour)),
     limit: 10000,
   };
 }
 
-// A game by its pages when they're known, else by game_slug.
+// A game (or a studio's games) by its pages when they're known, else by game_slug.
 const byGame = (scope: Scope, ...e: Expr[]) => (scope.pages?.length ? all(...e, pathIn(scope.pages)) : withGame(scope, DIM_GAME, ...e));
 
-// Plays without the custom definitions (before they're registered): play_start counts only (a game: on its page).
-export function basicPlaysRequest(range: RangeKey, today: string, scope: Scope = {}): GaRequest {
-  return { dateRanges: twoRanges(range, today), dimensions: [{ name: 'eventName' }], metrics: [{ name: 'eventCount' }], dimensionFilter: byGame(scope, eventIn(['play_start'])) };
+// Plays without the custom definitions: play_start counts only (a game: on its page).
+export function basicPlaysRequest(range: RangeKey, today: string, scope: Scope = {}, hour = 23): GaRequest {
+  return { dateRanges: twoRanges(range, today), dimensions: [{ name: 'eventName' }], metrics: [{ name: 'eventCount' }], dimensionFilter: byGame(scope, eventIn(['play_start']), ...hoursTo(range, hour)) };
 }
 
 // People who started a play, in each period (users can't be added up across rows, so this is its own report).
-export function playersRequest(range: RangeKey, today: string, scope: Scope): GaRequest {
-  return { dateRanges: twoRanges(range, today), metrics: [{ name: 'totalUsers' }], dimensionFilter: byGame(scope, eventIn(['play_start'])) };
+export function playersRequest(range: RangeKey, today: string, scope: Scope, hour = 23): GaRequest {
+  return { dateRanges: twoRanges(range, today), metrics: [{ name: 'totalUsers' }], dimensionFilter: byGame(scope, eventIn(['play_start']), ...hoursTo(range, hour)) };
 }
 
 // The whole site: page views, sessions and visitors in each period.
-export function siteRequest(range: RangeKey, today: string): GaRequest {
-  return { dateRanges: twoRanges(range, today), metrics: [{ name: 'screenPageViews' }, { name: 'sessions' }, { name: 'totalUsers' }] };
+export function siteRequest(range: RangeKey, today: string, hour = 23): GaRequest {
+  const h = hoursTo(range, hour);
+  return { dateRanges: twoRanges(range, today), metrics: [{ name: 'screenPageViews' }, { name: 'sessions' }, { name: 'totalUsers' }], ...(h.length ? { dimensionFilter: all(...h) } : {}) };
 }
 
-// A game's page in each period: page views, visitors (users of its page_view rows) and outbound link clicks from it
-// (enhanced measurement's "click" event, outbound links only: the old site's Play button linked out to the game).
-export function pagesRequest(range: RangeKey, today: string, paths: string[]): GaRequest {
+// A game's pages (or a studio's games' pages) in each period: page views, visitors (users of its page_view rows) and
+// outbound link clicks from them (enhanced measurement's "click" event, outbound links only: the old site's Play
+// button linked out to the game).
+export function pagesRequest(range: RangeKey, today: string, paths: string[], hour = 23): GaRequest {
   return {
     dateRanges: twoRanges(range, today), dimensions: [{ name: 'eventName' }],
     metrics: [{ name: 'screenPageViews' }, { name: 'totalUsers' }, { name: 'eventCount' }],
-    dimensionFilter: all(eventIn(['page_view', 'click']), pathIn(paths)),
+    dimensionFilter: all(eventIn(['page_view', 'click']), pathIn(paths), ...hoursTo(range, hour)),
   };
 }
 // Every game page's views and outbound clicks this period: the site's top games before there are plays by game.
@@ -139,6 +177,10 @@ export function realtimePlayersRequest(scope: Scope): GaRequest {
       : all({ filter: { fieldName: DIM_RT_GAME, stringFilter: { matchType: 'FULL_REGEXP', value: '.+' } } }, notSet(DIM_RT_GAME)),
     limit: 250,
   };
+}
+// A studio's players now: those whose vault_game is one of its games (the players' report, by the list of them).
+export function realtimeStudioRequest(games: string[]): GaRequest {
+  return { ...realtimePlayersRequest({}), dimensionFilter: inList(DIM_RT_GAME, games) };
 }
 // Everyone on the site, by place: the site's map until vault_game is registered.
 export function realtimeVisitorPlacesRequest(): GaRequest {
@@ -170,13 +212,15 @@ const periodOf = (r: Row): 'current' | 'previous' | null => {
 
 export interface Series {
   range: RangeKey;
-  labels: string[];              // one per point, e.g. "Sep 29" or "14:00"
-  current: (number | null)[];    // null: a point still in the future (later hours today)
-  previous: number[];
-  totals: { current: number; previous: number };
+  labels: string[];              // one per point, e.g. "Sun Sep 27", "14:00" or "Jan"
+  current: (number | null)[];    // null: a point still to come (later hours today, later days)
+  previous: (number | null)[];   // the whole previous period; null: past its end (a shorter month or quarter)
+  totals: { current: number; previous: number };   // this period so far, and the same days (hours) of the one before
+  partial?: number;              // the point still being counted, when it is a month (Year): drawn apart
 }
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const dayLabel = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`;
+export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+export const dayLabel = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`;
 const compact = (d: string) => d.replaceAll('-', '');
 
 // event: which event's counts (rows without eventName count as it).
@@ -189,26 +233,40 @@ export function readSeries(res: GaResponse, range: RangeKey, today: string, hour
     counts.set(k, (counts.get(k) ?? 0) + (r.mets.eventCount ?? 0));
   }
   const p = periods(range, today);
-  const labels: string[] = [], current: (number | null)[] = [], previous: number[] = [];
-  if (def.hourly) {
+  const labels: string[] = [], current: (number | null)[] = [], previous: (number | null)[] = [];
+  const sum = (from: string, to: string) => { let s = 0; for (let d = from; d <= to; d = addDays(d, 1)) s += counts.get(compact(d)) ?? 0; return s; };
+  if (def.unit === 'hour') {
+    const at = (d: string, h: number) => counts.get(`${compact(d)}${String(h).padStart(2, '0')}`) ?? 0;
+    let prevSoFar = 0;
     for (let h = 0; h < 24; h++) {
-      const hh = String(h).padStart(2, '0');
-      labels.push(`${hh}:00`);
-      current.push(h > hourNow ? null : counts.get(`${compact(p.current.start)}${hh}`) ?? 0);
-      previous.push(counts.get(`${compact(p.previous.start)}${hh}`) ?? 0);
+      labels.push(`${String(h).padStart(2, '0')}:00`);
+      current.push(h > hourNow ? null : at(p.current.start, h));
+      previous.push(at(p.previous.start, h));
+      if (h <= hourNow) prevSoFar += at(p.previous.start, h);
     }
-  } else {
-    const n = def.days / def.bucketDays;
-    const sum = (start: string) => { let s = 0; for (let d = 0; d < def.bucketDays; d++) s += counts.get(compact(addDays(start, d))) ?? 0; return s; };
+    return { range, labels, current, previous, totals: { current: current.reduce<number>((s, v) => s + (v ?? 0), 0), previous: prevSoFar } };
+  }
+  if (def.unit === 'day') {
+    const n = daysBetween(p.currentFull.start, p.currentFull.end) + 1;
     for (let i = 0; i < n; i++) {
-      const cs = addDays(p.current.start, i * def.bucketDays);
-      labels.push(def.bucketDays === 1 ? dayLabel(cs) : `Week of ${dayLabel(cs)}`);
-      current.push(sum(cs));
-      previous.push(sum(addDays(p.previous.start, i * def.bucketDays)));
+      const d = addDays(p.currentFull.start, i), pd = addDays(p.previousFull.start, i);
+      labels.push(range === 'week' ? `${WEEKDAYS[i]} ${dayLabel(d)}` : dayLabel(d));
+      current.push(d > today ? null : counts.get(compact(d)) ?? 0);
+      previous.push(pd > p.previousFull.end ? null : counts.get(compact(pd)) ?? 0);
     }
   }
-  const add = (a: (number | null)[]) => a.reduce<number>((s, v) => s + (v ?? 0), 0);
-  return { range, labels, current, previous, totals: { current: add(current), previous: add(previous) } };
+  let partial: number | undefined;
+  if (def.unit === 'month') {
+    const y = Number(today.slice(0, 4));
+    if (today !== monthEnd(y, Number(today.slice(5, 7)) - 1)) partial = Number(today.slice(5, 7)) - 1;
+    for (let m = 0; m < 12; m++) {
+      const ms = ymd(y, m, 1), me = monthEnd(y, m);
+      labels.push(MONTHS[m]);
+      current.push(ms > today ? null : sum(ms, me < today ? me : today));
+      previous.push(sum(ymd(y - 1, m, 1), monthEnd(y - 1, m)));
+    }
+  }
+  return { range, labels, current, previous, totals: { current: sum(p.current.start, p.current.end), previous: sum(p.previous.start, p.previous.end) }, ...(partial === undefined ? {} : { partial }) };
 }
 
 export interface PlayTotals { plays: number; timedPlays: number; seconds: number }

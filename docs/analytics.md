@@ -2,16 +2,31 @@
 
 Plays of the games on the website, from Google Analytics 4 (GA4), shown in the portal:
 
-* **Vault → Analytics** (`/vault/analytics`, Vault staff): the whole site.
-* **A game's Analytics tab** (`/s/STUDIO/g/GAME?tab=analytics`): the same view for that game. Vault staff see every
-  game; studio members see their own studio's games only.
+* **Vault → Analytics** (`/vault/analytics`, Vault staff only): the whole site.
+* **A studio's Analytics page** (`/s/STUDIO/analytics`, in the studio's nav): all the studio's games on the site
+  (its published listings).
+* **A game's Analytics tab** (`/s/STUDIO/g/GAME?tab=analytics`): the same view for that game.
 
-Each view has a chart of plays over time with the previous period dashed (Day, Week, Month, Quarter, Year: today,
-the last 7, 30 and 90 days, and the last 52 weeks in weekly points, each against the same length just before), the
-plays, unique players and average play time for that range with the change from the previous period, and a map of
-where people are playing now (the last 30 minutes, refreshed every minute). The site view also has the top games
-and the site's page views, sessions and visitors; a game's view has its page's views, visitors and Play-button
-clicks (see [History](#history-before-the-play-events)).
+Vault staff see every studio and game; a studio's members, **viewers included**, see their own studio's page and its
+games' tabs. The realtime refresh (`/portal/analytics/realtime?game=…|studio=…`) follows the same rules; without
+either it is the site's, Vault staff only.
+
+**Periods are calendar periods**: Day (today), Week, Month, Quarter, Year (this week, month, quarter, year). Weeks
+start on **Sunday** (a US school audience; days are the property's, America/Chicago). The current period is never
+over, so its figures are **this period so far against the same days of the previous one** (this week Sunday to today
+against last week Sunday to the same weekday; this month to the 3rd against last month to the 3rd, or to its last day
+if shorter; this year to Oct 3 against last year to Oct 3; today against yesterday up to the current hour, by a
+filter on GA's `hour`). The page says which dates are compared, under the chart. The chart draws the whole period:
+points still to come are empty, the previous period is dashed over its whole length (a shorter month or quarter
+before has no points at the end). Points are hours (Day), days (Week, Month, Quarter) or months (Year); in Year the
+month still being counted is drawn dotted, so a few days don't read as a fall.
+
+Each view has that chart of plays, the plays, unique players and average play time with the change from the same days
+before, and a map of where people are playing now (the last 30 minutes, refreshed every minute). The site and studio
+views have the top games (on the site view, each with a link to its studio's page); the site view has the site's page
+views, sessions and visitors; game and studio views have their pages' views, visitors and Play-button clicks (see
+[History](#history-before-the-play-events)). A **play is the unit** for studios and games: they have no sessions figure
+(GA's sessions are the site's visits, not a game's).
 
 ## The play events
 
@@ -102,12 +117,12 @@ domain and the same game page addresses. So, with standard fields only (no custo
   the old site's Play button linked out to the game, so these are shown as **Play-button clicks (outbound clicks
   from the game's page)**: mostly plays before the play events, but any link out counts (curriculum, studio sites).
   A property without click events shows 0.
-* **Top games by page views** (site view): when no game has plays in the range (always, until `game_slug` is
-  registered), the top-games card ranks the games by their pages' views this period, with their Play-button
-  clicks. Pages that aren't a published listing's are left out.
+* **Top games by page views** (site and studio views): when no game has plays in the range, the top-games card
+  ranks the games by their pages' views this period, with their Play-button clicks. Pages that aren't a published
+  listing's (of the studio, on its page) are left out.
 
-The Year range (52 weeks against the 52 before) is the longest; the Data API's reports aren't limited by the property's data-retention setting (only explorations are), so
-it reaches back into the Squarespace years as far as the property has data. Locally, `GA_FAKE=history node scripts/dev-portal.ts` shows a property with page
+The Year range (this year against last year, the chart from January 1 of last year) is the longest; the Data API's
+reports aren't limited by the property's data-retention setting (only explorations are). Locally, `GA_FAKE=history node scripts/dev-portal.ts` shows a property with page
 views and no play events.
 
 ## How the portal reads it
@@ -116,21 +131,24 @@ views and no play events.
 property's days, `GA_TIMEZONE`, default `America/Chicago`); `ga.ts` sends them (`runReport`, `runRealtimeReport` on
 `properties/GA_PROPERTY_ID`), caches answers (reports 10 minutes, realtime 60 s, failures 1 minute; one call for
 identical requests in flight) and turns errors into what the page explains; `google-auth.ts` gets the token (Cloud
-Run: the metadata server; elsewhere application default credentials). One page view is at most five reports and two
-realtime reports, well inside GA's free quota.
+Run: the metadata server; elsewhere application default credentials). One page view is at most five reports and three
+realtime reports (the site; a studio: five and one; a game: four and one), well inside GA's free quota.
 
 | Report | Request |
 | --- | --- |
-| Chart | `eventCount` of `play_start` and `page_view` by `date` (`dateHour` for Day) and `eventName`, over both periods |
-| Plays, play time, top games | `eventCount` and `customEvent:play_seconds` by `eventName`, `customEvent:play_mode`, `customEvent:game_slug`; periods `current` and `previous` |
+| Chart | `eventCount` of `play_start` and `page_view` by `date` (`dateHour` for Day) and `eventName`, from the start of the previous period to today |
+| Plays, play time, top games | `eventCount` and `customEvent:play_seconds` by `eventName`, `customEvent:play_mode`, `customEvent:game_slug`; periods `current` (so far) and `previous` (the same days) |
 | Unique players | `totalUsers` of `play_start`, both periods |
-| The game's page (game view) | `screenPageViews`, `totalUsers`, `eventCount` by `eventName` (`page_view`, `click`), its `pagePath`s, both periods |
-| Top games by page views (site view, when no game has plays) | `screenPageViews`, `eventCount` by `pagePath` and `eventName`, every game's paths, this period |
+| The game's page, the studio's game pages | `screenPageViews`, `totalUsers`, `eventCount` by `eventName` (`page_view`, `click`), their `pagePath`s, both periods |
+| Top games by page views (site and studio views, when no game has plays) | `screenPageViews`, `eventCount` by `pagePath` and `eventName`, the games' paths, this period so far |
 | The website (site view) | `screenPageViews`, `sessions`, `totalUsers`, both periods |
 | On the site now (site view) | realtime `activeUsers` by `countryId`, `country`, `city` (everyone, playing or browsing), the total, and how many have `customUser:vault_game` set (playing a game) |
 | Playing now (a game) | realtime `activeUsers` by place with `customUser:vault_game` = the game's slug |
+| Playing now (a studio) | the same, with `customUser:vault_game` in the list of its games' slugs (no request when it has none on the site) |
 
-A game is filtered on its page paths (`pagePath`), and on `customEvent:game_slug` = its listing slug for play time. The map places one circle per country at Natural
+Day adds `hour` in `00`…the current hour to every two-period report, so today and yesterday cover the same hours.
+A game is filtered on its page paths (`pagePath`), and on `customEvent:game_slug` = its listing slug for play time; a
+studio on all its published listings' page paths, and on `game_slug` in the list of their slugs. The map places one circle per country at Natural
 Earth's label point for it (`src/analytics/countries.ts`, from `scripts/world-map.ts`; public domain), sized by the
 number playing; cities are listed under the map (GA gives no coordinates).
 

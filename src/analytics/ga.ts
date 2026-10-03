@@ -5,8 +5,8 @@
 import { googleTokenSource, NoCredentialsError, type TokenSource } from './google-auth.ts';
 import {
   basicPlaysRequest, localNow, pagesRequest, periods, playersRequest, playsRequest, readBasicPlays, readPages, readPairs, readPlaces,
-  readPlays, readSeries, readTopPages, realtimePlayersRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest, seriesRequest,
-  siteRequest, topPagesRequest, type GamePages, type GaRequest, type GaResponse, type PageStats, type Pair, type Period, type Place,
+  readPlays, readSeries, readTopPages, realtimePlayersRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest, seriesRequest,
+  siteRequest, topPagesRequest, type GamePages, type GaRequest, type GaResponse, type PageStats, type Pair, type Periods, type Place,
   type PlayStats, type RangeKey, type Scope, type Series,
 } from './reports.ts';
 
@@ -80,16 +80,17 @@ const settle = <T>(p: Promise<T>): Promise<Result<T>> => p.then((value) => ({ ok
 
 export interface Overview {
   range: RangeKey;
-  periods: { current: Period; previous: Period };
+  periods: Periods;
+  hour: number;                  // now, in the property's time zone (Day compares up to it)
   series: Result<Series>;
   views: Result<Series>;         // page views (of the game's page), from the same report as series
   plays: Result<PlayStats>;
   players: Result<Pair>;
   site: Result<Record<'screenPageViews' | 'sessions' | 'totalUsers', Pair>> | null;   // whole site only
-  pages: Result<PageStats> | null;          // a game with known pages only
-  topPages: Result<GamePages[]> | null;     // whole site only, when no game has plays (before the custom definitions)
+  pages: Result<PageStats> | null;          // a game's (or a studio's games') pages, when known
+  topPages: Result<GamePages[]> | null;     // the site or a studio, when no game has plays (before the custom definitions)
 }
-// who: whose places these are: 'visitors' (everyone on the site, the site view) or 'players' (a game's).
+// who: whose places these are: 'visitors' (everyone on the site, the site view) or 'players' (a game's or a studio's).
 export interface Realtime { places: Result<Place[]>; visitors: Result<number> | null; who: 'players' | 'visitors'; playing?: Result<number> }
 
 export interface AnalyticsOptions {
@@ -126,34 +127,39 @@ export class Analytics {
     return this.cache.get(`${method} ${JSON.stringify(body)}`, method === 'runRealtimeReport' ? this.realtimeTtl : this.reportTtl, () => t(method, body));
   }
 
-  // catalog: every game's page paths (pages.ts), for the site's top games by page views.
+  // catalog: every game's page paths (pages.ts) in the view (the site's, or the studio's), for its top games by page views.
   async overview(range: RangeKey, scope: Scope, catalog: Record<string, string[]> = {}): Promise<Overview> {
     const { today, hour } = localNow(this.timeZone, this.now());
     const series = this.call('runReport', seriesRequest(range, today, scope));
-    const plays = this.call('runReport', playsRequest(range, today, scope)).then(readPlays).catch((err: unknown) => {
+    const plays = this.call('runReport', playsRequest(range, today, scope, hour)).then(readPlays).catch((err: unknown) => {
       // Before the custom definitions exist the site, and a game by its pages, still have play counts (but no lengths,
       // and no games).
-      if (err instanceof AnalyticsError && err.kind === 'setup' && (!scope.game || scope.pages?.length)) return this.call('runReport', basicPlaysRequest(range, today, scope)).then(readBasicPlays);
+      if (err instanceof AnalyticsError && err.kind === 'setup' && (!scope.game || scope.pages?.length)) return this.call('runReport', basicPlaysRequest(range, today, scope, hour)).then(readBasicPlays);
       throw err;
     });
     const paths = Object.values(catalog).flat();
-    // The site's top games by page views, asked for only when no game has plays.
+    // The site's (or the studio's) top games by page views, asked for only when no game has plays.
     const top = scope.game || !paths.length ? null
       : plays.then((p) => p.games.length, () => 0).then((n) => (n ? null : settle(this.call('runReport', topPagesRequest(range, today, paths)).then((r) => readTopPages(r, catalog)))));
     const [plainSeries, views, playStats, players, site, pages, topPages] = await Promise.all([
       settle(series.then((r) => readSeries(r, range, today, hour))),
       settle(series.then((r) => readSeries(r, range, today, hour, 'page_view'))),
       settle(plays),
-      settle(this.call('runReport', playersRequest(range, today, scope)).then((r) => readPairs(r, ['totalUsers']).totalUsers)),
-      scope.game ? null : settle(this.call('runReport', siteRequest(range, today)).then((r) => readPairs(r, ['screenPageViews', 'sessions', 'totalUsers']))),
-      scope.game && scope.pages?.length ? settle(this.call('runReport', pagesRequest(range, today, scope.pages)).then(readPages)) : null,
+      settle(this.call('runReport', playersRequest(range, today, scope, hour)).then((r) => readPairs(r, ['totalUsers']).totalUsers)),
+      scope.game || scope.studio ? null : settle(this.call('runReport', siteRequest(range, today, hour)).then((r) => readPairs(r, ['screenPageViews', 'sessions', 'totalUsers']))),
+      (scope.game || scope.studio) && scope.pages?.length ? settle(this.call('runReport', pagesRequest(range, today, scope.pages, hour)).then(readPages)) : null,
       top,
     ]);
-    return { range, periods: periods(range, today), series: plainSeries, views, plays: playStats, players, site, pages, topPages };
+    return { range, periods: periods(range, today), hour, series: plainSeries, views, plays: playStats, players, site, pages, topPages };
   }
 
-  // The site: everyone on it (playing or browsing) by place, and how many of them are playing. A game: its players.
+  // The site: everyone on it (playing or browsing) by place, and how many of them are playing. A game: its players. A
+  // studio: the players of its games (none on the site: no one, without asking).
   async realtime(scope: Scope): Promise<Realtime> {
+    if (scope.studio) {
+      const games = scope.games ?? [];
+      return { places: games.length ? await settle(this.call('runRealtimeReport', realtimeStudioRequest(games)).then(readPlaces)) : { ok: true, value: [] }, visitors: null, who: 'players' };
+    }
     if (scope.game) {
       return { places: await settle(this.call('runRealtimeReport', realtimePlayersRequest(scope)).then(readPlaces)), visitors: null, who: 'players' };
     }

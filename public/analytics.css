@@ -10,6 +10,7 @@
 .ga-yl { position: absolute; left: -40px; width: 34px; text-align: right; transform: translateY(50%); font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .ga-chart .gridl { stroke: var(--grid); stroke-width: 1; }
 .ga-cur { fill: none; stroke: var(--s1); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
+.ga-cur.ga-part { stroke-dasharray: 1 5; }
 .ga-prev { fill: none; stroke: var(--axis); stroke-width: 1.5; stroke-dasharray: 5 4; stroke-linejoin: round; }
 .ga-area { fill: var(--s1); opacity: .12; }
 .ga-hit { fill: transparent; }

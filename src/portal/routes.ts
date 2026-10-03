@@ -125,6 +125,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
           <a href="/s/${cur.slug}" class="${active === 'studio' ? 'on' : ''}">Games</a>
           <a href="/s/${cur.slug}/files" class="${active === 'files' ? 'on' : ''}">Files</a>
           <a href="/s/${cur.slug}/register" class="${active === 'register' ? 'on' : ''}">Upload builds</a>
+          <a href="/s/${cur.slug}/analytics" class="${active === 'studio-analytics' ? 'on' : ''}">Analytics</a>
           <a href="/s/${cur.slug}/members" class="${active === 'members' ? 'on' : ''}">Members</a>` : ''}
         ${staff ? html`
           <div class="nav-sep">Vault</div>
@@ -213,7 +214,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const LP = listingPieces(listingHelpers);
   // The "Upload builds" page (/s/:studio/register), zip uploads and URL monitors.
   const UP = registerUploads(app, listingHelpers);
-  // Analytics (analytics.ts): Vault → Analytics, and each game's Analytics tab.
+  // Analytics (analytics.ts): Vault → Analytics, each studio's Analytics page, and each game's Analytics tab.
   const AN = registerAnalytics(app, listingHelpers, deps.analytics ?? new Analytics({}));
 
   function page(c: Context, title: string, body: Html, opts: { studio?: Studio; active?: string; status?: number } = {}) {

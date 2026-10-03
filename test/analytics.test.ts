@@ -4,7 +4,7 @@ import { Analytics, AnalyticsError, classify, httpTransport, TtlCache, type GaMe
 import { googleTokenSource } from '../src/analytics/google-auth.ts';
 import {
   averageSeconds, basicPlaysRequest, localNow, pagesRequest, periods, playersRequest, playsRequest, rangeOf, readPages, readPairs,
-  readPlaces, readPlays, readSeries, readTopPages, realtimePlayersRequest, seriesRequest, siteRequest, topPagesRequest,
+  readPlaces, readPlays, readSeries, readTopPages, realtimePlayersRequest, realtimeStudioRequest, seriesRequest, siteRequest, topPagesRequest,
   type GaRequest, type GaResponse,
 } from '../src/analytics/reports.ts';
 import { loadLegacy, pagePaths } from '../src/analytics/pages.ts';
@@ -21,12 +21,36 @@ const res = (dims: string[], mets: string[], rows: [string[], number[]][]): GaRe
 });
 
 describe('periods and requests', () => {
-  test('each range is a rolling period ending today, compared with the one just before', () => {
-    assert.deepEqual(periods('day', TODAY), { current: { start: TODAY, end: TODAY }, previous: { start: '2026-10-02', end: '2026-10-02' } });
-    assert.deepEqual(periods('week', TODAY), { current: { start: '2026-09-27', end: TODAY }, previous: { start: '2026-09-20', end: '2026-09-26' } });
-    assert.deepEqual(periods('month', TODAY).previous, { start: '2026-08-05', end: '2026-09-03' });
-    assert.deepEqual(periods('quarter', TODAY).current, { start: '2026-07-06', end: TODAY });
-    assert.deepEqual(periods('year', TODAY), { current: { start: '2025-10-05', end: TODAY }, previous: { start: '2024-10-06', end: '2025-10-04' } });
+  test('each range is a calendar period so far, compared with the same days of the one before', () => {
+    // 2026-10-03 is a Saturday; weeks start on Sunday.
+    assert.deepEqual(periods('day', TODAY), {
+      current: { start: TODAY, end: TODAY }, previous: { start: '2026-10-02', end: '2026-10-02' },
+      currentFull: { start: TODAY, end: TODAY }, previousFull: { start: '2026-10-02', end: '2026-10-02' },
+    });
+    assert.deepEqual(periods('week', TODAY), {
+      current: { start: '2026-09-27', end: TODAY }, previous: { start: '2026-09-20', end: '2026-09-26' },
+      currentFull: { start: '2026-09-27', end: TODAY }, previousFull: { start: '2026-09-20', end: '2026-09-26' },
+    });
+    assert.deepEqual(periods('week', '2026-09-30'), {   // a Wednesday: Sunday to Wednesday, both weeks
+      current: { start: '2026-09-27', end: '2026-09-30' }, previous: { start: '2026-09-20', end: '2026-09-23' },
+      currentFull: { start: '2026-09-27', end: TODAY }, previousFull: { start: '2026-09-20', end: '2026-09-26' },
+    });
+    assert.deepEqual(periods('week', '2026-09-27').previous, { start: '2026-09-20', end: '2026-09-20' });   // a Sunday
+    assert.deepEqual(periods('month', TODAY), {
+      current: { start: '2026-10-01', end: TODAY }, previous: { start: '2026-09-01', end: '2026-09-03' },
+      currentFull: { start: '2026-10-01', end: '2026-10-31' }, previousFull: { start: '2026-09-01', end: '2026-09-30' },
+    });
+    assert.deepEqual(periods('month', '2026-03-31').previous, { start: '2026-02-01', end: '2026-02-28' });   // a shorter month before
+    assert.deepEqual(periods('quarter', TODAY), {
+      current: { start: '2026-10-01', end: TODAY }, previous: { start: '2026-07-01', end: '2026-07-03' },
+      currentFull: { start: '2026-10-01', end: '2026-12-31' }, previousFull: { start: '2026-07-01', end: '2026-09-30' },
+    });
+    assert.deepEqual(periods('quarter', '2026-02-15').previous, { start: '2025-10-01', end: '2025-11-15' });
+    assert.deepEqual(periods('year', TODAY), {
+      current: { start: '2026-01-01', end: TODAY }, previous: { start: '2025-01-01', end: '2025-10-03' },
+      currentFull: { start: '2026-01-01', end: '2026-12-31' }, previousFull: { start: '2025-01-01', end: '2025-12-31' },
+    });
+    assert.deepEqual(periods('year', '2028-02-29').previous, { start: '2027-01-01', end: '2027-02-28' });
     assert.equal(rangeOf('quarter'), 'quarter');
     assert.equal(rangeOf('decade'), 'month');
     assert.equal(rangeOf(undefined), 'month');
@@ -38,7 +62,9 @@ describe('periods and requests', () => {
     assert.deepEqual(localNow('UTC', at), { today: '2026-10-03', hour: 3 });
   });
 
-  test('the chart asks for play_start and page_view over both periods, by hour for a day; a game by its page', () => {
+  test('the chart asks for play_start and page_view over the whole previous period and this one so far, by hour for a day; a game by its page', () => {
+    assert.deepEqual(seriesRequest('month', TODAY, {}).dateRanges, [{ startDate: '2026-09-01', endDate: TODAY }]);
+    assert.deepEqual(seriesRequest('week', '2026-09-30', {}).dateRanges, [{ startDate: '2026-09-20', endDate: '2026-09-30' }]);
     assert.deepEqual(seriesRequest('week', TODAY, {}), {
       dateRanges: [{ startDate: '2026-09-20', endDate: TODAY }], dimensions: [{ name: 'date' }, { name: 'eventName' }], metrics: [{ name: 'eventCount' }],
       dimensionFilter: { filter: { fieldName: 'eventName', inListFilter: { values: ['play_start', 'page_view'] } } }, limit: 10000,
@@ -60,7 +86,7 @@ describe('periods and requests', () => {
     assert.deepEqual(pagePaths('a-new-game', legacy), ['/a-new-game', '/a-new-game/']);
     assert.deepEqual(pagePaths('x', { x: { path: 'jowilder' } }), ['/jowilder', '/jowilder/']);
     const r = pagesRequest('month', TODAY, ['/wake', '/wake/']);
-    assert.deepEqual(r.dateRanges, [{ startDate: '2026-09-04', endDate: TODAY, name: 'current' }, { startDate: '2026-08-05', endDate: '2026-09-03', name: 'previous' }]);
+    assert.deepEqual(r.dateRanges, [{ startDate: '2026-10-01', endDate: TODAY, name: 'current' }, { startDate: '2026-09-01', endDate: '2026-09-03', name: 'previous' }]);
     assert.deepEqual(r.dimensions, [{ name: 'eventName' }]);
     assert.deepEqual(r.metrics, [{ name: 'screenPageViews' }, { name: 'totalUsers' }, { name: 'eventCount' }]);
     assert.deepEqual(r.dimensionFilter, { andGroup: { expressions: [
@@ -68,7 +94,7 @@ describe('periods and requests', () => {
       { filter: { fieldName: 'pagePath', inListFilter: { values: ['/wake', '/wake/'] } } },
     ] } });
     const t = topPagesRequest('year', TODAY, ['/wake', '/wake/', '/bloom/', '/wake']);
-    assert.deepEqual(t.dateRanges, [{ startDate: '2025-10-05', endDate: TODAY }]);
+    assert.deepEqual(t.dateRanges, [{ startDate: '2026-01-01', endDate: TODAY }]);
     assert.deepEqual(t.dimensions, [{ name: 'pagePath' }, { name: 'eventName' }]);
     assert.match(JSON.stringify(t.dimensionFilter), /"pagePath","inListFilter":\{"values":\["\/wake","\/wake\/","\/bloom\/"\]\}/);
     for (const q of [r, t]) assert.doesNotMatch(JSON.stringify(q), /custom/);
@@ -76,7 +102,7 @@ describe('periods and requests', () => {
 
   test('plays, players and the site compare two named periods; a game filters on game_slug', () => {
     const p = playsRequest('month', TODAY, { game: 'wake' });
-    assert.deepEqual(p.dateRanges, [{ startDate: '2026-09-04', endDate: TODAY, name: 'current' }, { startDate: '2026-08-05', endDate: '2026-09-03', name: 'previous' }]);
+    assert.deepEqual(p.dateRanges, [{ startDate: '2026-10-01', endDate: TODAY, name: 'current' }, { startDate: '2026-09-01', endDate: '2026-09-03', name: 'previous' }]);
     assert.deepEqual(p.dimensions, [{ name: 'eventName' }, { name: 'customEvent:play_mode' }, { name: 'customEvent:game_slug' }]);
     assert.deepEqual(p.metrics, [{ name: 'eventCount' }, { name: 'customEvent:play_seconds' }]);
     assert.match(JSON.stringify(p.dimensionFilter), /"inListFilter":\{"values":\["play_start","play_heartbeat","play_end"\]\}.*"value":"wake"/);
@@ -84,6 +110,29 @@ describe('periods and requests', () => {
     assert.doesNotMatch(JSON.stringify(playersRequest('week', TODAY, {})), /game_slug/);
     assert.deepEqual(siteRequest('year', TODAY).metrics, [{ name: 'screenPageViews' }, { name: 'sessions' }, { name: 'totalUsers' }]);
     assert.doesNotMatch(JSON.stringify(basicPlaysRequest('week', TODAY)), /custom/);
+    for (const q of [p, playersRequest('week', TODAY, {}), siteRequest('month', TODAY)]) assert.doesNotMatch(JSON.stringify(q), /"hour"/);
+  });
+
+  test('today is compared with yesterday up to the same hour', () => {
+    const hours = { filter: { fieldName: 'hour', inListFilter: { values: ['00', '0', '01', '1', '02', '2'] } } };
+    assert.deepEqual(siteRequest('day', TODAY, 2).dimensionFilter, hours);
+    assert.deepEqual(playersRequest('day', TODAY, {}, 2).dimensionFilter, { andGroup: { expressions: [
+      { filter: { fieldName: 'eventName', stringFilter: { matchType: 'EXACT', value: 'play_start' } } }, hours,
+    ] } });
+    for (const q of [playsRequest('day', TODAY, {}, 14), basicPlaysRequest('day', TODAY, {}, 14), pagesRequest('day', TODAY, ['/wake'], 14)]) {
+      assert.match(JSON.stringify(q), /"fieldName":"hour","inListFilter":\{"values":\["00","0",.*"13","14"\]\}/);
+    }
+    assert.equal(siteRequest('day', TODAY, 23).dimensionFilter, undefined);   // the whole day: no filter
+    assert.equal(siteRequest('week', TODAY, 2).dimensionFilter, undefined);
+  });
+
+  test('a studio: all its games, by their pages, and by game_slug in the list of them', () => {
+    const scope = { studio: 'fieldday', games: ['wake', 'bloom'], pages: ['/wake', '/wake/', '/bloom', '/bloom/'] };
+    assert.match(JSON.stringify(seriesRequest('week', TODAY, scope)), /"pagePath","inListFilter":\{"values":\["\/wake","\/wake\/","\/bloom","\/bloom\/"\]\}/);
+    assert.match(JSON.stringify(playersRequest('week', TODAY, scope)), /"pagePath","inListFilter"/);
+    assert.match(JSON.stringify(playsRequest('week', TODAY, scope)), /"fieldName":"customEvent:game_slug","inListFilter":\{"values":\["wake","bloom"\]\}/);
+    assert.deepEqual(realtimeStudioRequest(['wake', 'bloom']).dimensionFilter, { filter: { fieldName: 'customUser:vault_game', inListFilter: { values: ['wake', 'bloom'] } } });
+    assert.deepEqual(realtimeStudioRequest(['wake']).dimensions, realtimePlayersRequest({}).dimensions);
   });
 
   test('realtime tells games apart by the user property vault_game', () => {
@@ -101,28 +150,57 @@ describe('reading answers', () => {
   test('a week: one point per day in each period', () => {
     const s = readSeries(res(['date'], ['eventCount'], [[['20261003'], [5]], [['20260927'], [2]], [['20260926'], [7]], [['20260920'], [1]]]), 'week', TODAY, 12);
     assert.equal(s.labels.length, 7);
-    assert.equal(s.labels[0], 'Sep 27');
+    assert.equal(s.labels[0], 'Sun Sep 27');
     assert.deepEqual(s.current, [2, 0, 0, 0, 0, 0, 5]);
     assert.deepEqual(s.previous, [1, 0, 0, 0, 0, 0, 7]);
     assert.deepEqual(s.totals, { current: 7, previous: 8 });
   });
 
-  test('a day: hours, with later hours today left empty', () => {
-    const s = readSeries(res(['dateHour'], ['eventCount'], [[['2026100309'], [4]], [['2026100223'], [3]]]), 'day', TODAY, 10);
+  test('a week so far: the whole week drawn, later days empty, totals over the same days of last week', () => {
+    const s = readSeries(res(['date'], ['eventCount'], [[['20260927'], [2]], [['20260930'], [3]], [['20260920'], [1]], [['20260923'], [4]], [['20260925'], [6]]]), 'week', '2026-09-30', 12);
+    assert.equal(s.labels.length, 7);
+    assert.equal(s.labels[6], 'Sat Oct 3');
+    assert.deepEqual(s.current, [2, 0, 0, 3, null, null, null]);
+    assert.deepEqual(s.previous, [1, 0, 0, 4, 0, 6, 0]);
+    assert.deepEqual(s.totals, { current: 5, previous: 5 });
+  });
+
+  test('a month: one point per day of this month; a shorter month before has none for the last days', () => {
+    const s = readSeries(res(['date'], ['eventCount'], [[['20261002'], [5]], [['20260902'], [2]], [['20260930'], [8]]]), 'month', TODAY, 12);
+    assert.equal(s.labels.length, 31);
+    assert.equal(s.labels[0], 'Oct 1');
+    assert.deepEqual(s.current.slice(0, 4), [0, 5, 0, null]);
+    assert.equal(s.previous[29], 8);
+    assert.equal(s.previous[30], null);
+    assert.deepEqual(s.totals, { current: 5, previous: 2 });
+  });
+
+  test('a day: hours, with later hours today left empty; yesterday counted up to the same hour', () => {
+    const s = readSeries(res(['dateHour'], ['eventCount'], [[['2026100309'], [4]], [['2026100208'], [2]], [['2026100223'], [3]]]), 'day', TODAY, 10);
     assert.equal(s.labels[9], '09:00');
     assert.equal(s.current[9], 4);
     assert.equal(s.current[10], 0);
     assert.equal(s.current[11], null);
     assert.equal(s.previous[23], 3);
-    assert.deepEqual(s.totals, { current: 4, previous: 3 });
+    assert.deepEqual(s.totals, { current: 4, previous: 2 });
   });
 
-  test('a year: 52 weekly points', () => {
-    const s = readSeries(res(['date'], ['eventCount'], [[['20251005'], [1]], [['20251011'], [2]], [['20251012'], [4]], [['20241006'], [9]]]), 'year', TODAY, 0);
-    assert.equal(s.labels.length, 52);
-    assert.equal(s.labels[0], 'Week of Oct 5');
-    assert.deepEqual(s.current.slice(0, 2), [3, 4]);
-    assert.equal(s.previous[0], 9);
+  test('a year: one point per month, later months empty', () => {
+    const s = readSeries(res(['date'], ['eventCount'], [[['20260105'], [1]], [['20260220'], [2]], [['20251231'], [9]], [['20250103'], [4]], [['20251004'], [50]]]), 'year', TODAY, 0);
+    assert.equal(s.labels.length, 12);
+    assert.equal(s.labels[0], 'Jan');
+    assert.deepEqual(s.current.slice(0, 2), [1, 2]);
+    assert.equal(s.current[9], 0);       // October so far
+    assert.equal(s.current[10], null);
+    assert.deepEqual([s.previous[0], s.previous[9], s.previous[11]], [4, 50, 9]);
+    assert.deepEqual(s.totals, { current: 3, previous: 4 });   // last year to October 3 only
+    // October is still being counted: drawn dotted from September, and said so.
+    assert.equal(s.partial, 9);
+    const svg = String(chart(s));
+    assert.match(svg, /<path class="ga-cur ga-part" d="M8\.5 [\d.]+L9\.5 100"/);
+    assert.match(svg, /<title>Oct: 0 plays so far \(last year: 50\)<\/title>/);
+    assert.match(svg, /<title>Nov: still to come/);
+    assert.equal(readSeries({}, 'year', '2026-12-31', 0).partial, undefined);
   });
 
   test('plays, timed plays and seconds per period and per game', () => {
@@ -249,6 +327,26 @@ describe('the Google Analytics client', () => {
     assert.equal(log.length, 14);  // no site report for a game; its page's report instead
   });
 
+  test('a studio: its games’ plays, players and pages, and its players now', async () => {
+    const log: { method: GaMethod; body: GaRequest }[] = [];
+    const a = new Analytics({ transport: fakeGa(['wake', 'bloom', 'quiet'], { log }), now: () => new Date('2026-10-03T17:00:00Z') });
+    const catalog = { wake: ['/wake', '/wake/'], bloom: ['/bloom', '/bloom/'] };
+    const scope = { studio: 'fieldday', games: ['wake', 'bloom'], pages: Object.values(catalog).flat() };
+    const ov = await a.overview('week', scope, catalog);
+    assert.equal(log.length, 4);   // series, plays, players, its games' pages; no site report
+    assert.equal(ov.site, null);
+    assert.ok(ov.pages?.ok && ov.pages.value.views.current > 0);
+    assert.ok(ov.plays.ok && ov.plays.value.games.length === 2 && ov.plays.value.games.every((g) => g.slug !== 'quiet'));
+    const rt = await a.realtime(scope);
+    assert.equal(rt.who, 'players');
+    assert.ok(rt.places.ok && rt.places.value.length > 0);
+    assert.equal(log.length, 5);   // one realtime report
+    assert.match(JSON.stringify(log[4].body), /"customUser:vault_game","inListFilter":\{"values":\["wake","bloom"\]\}/);
+    const none = await a.realtime({ studio: 'empty', games: [], pages: [] });
+    assert.ok(none.places.ok && none.places.value.length === 0);
+    assert.equal(log.length, 5);   // a studio without games on the site asks nothing
+  });
+
   test('before any play events: the chart and the top games fall back to page views', async () => {
     const log: { method: GaMethod; body: GaRequest }[] = [];
     const a = new Analytics({ transport: fakeGa(['wake', 'bloom'], { log, plays: false }), now: () => new Date('2026-10-03T17:00:00Z') });
@@ -262,9 +360,9 @@ describe('the Google Analytics client', () => {
       timeZone: 'America/Chicago', scope: {}, range: 'year', staff: true, base: '/vault/analytics', realtimeUrl: '/rt', assets: { css: '', js: '', land: '' },
       titleOf: (slug) => ({ title: slug.toUpperCase(), href: null }),
     }));
-    assert.match(page, /Page views <small>Last 52 weeks/);
+    assert.match(page, /Page views <small>This year/);
     assert.match(page, /No plays recorded in this range/);
-    assert.match(page, /Top games <small>by page views, last 52 weeks/);
+    assert.match(page, /Top games <small>by page views, this year/);
     assert.match(page, /<b>WAKE<\/b>/);
     assert.match(page, /Play-button clicks/);
     const game = await a.overview('year', { game: 'wake', pages: catalog.wake }, catalog);
@@ -273,7 +371,7 @@ describe('the Google Analytics client', () => {
       timeZone: 'America/Chicago', scope: { game: 'wake', pages: catalog.wake }, range: 'year', staff: false, base: '/s/x/g/wake?tab=analytics', realtimeUrl: '/rt', assets: { css: '', js: '', land: '' },
       titleOf: (slug) => ({ title: slug, href: null }),
     }));
-    assert.match(gp, /Page views <small>Last 52 weeks/);
+    assert.match(gp, /Page views <small>This year/);
     assert.match(gp, /The game’s page/);
     assert.match(gp, /Visitors/);
     assert.match(gp, /Play-button clicks/);
@@ -361,10 +459,10 @@ describe('formatting', () => {
     assert.equal(duration(42.4), '42s');
     assert.equal(duration(312), '5m 12s');
     assert.equal(duration(3725), '1h 02m');
-    assert.match(String(delta(12, 10, 'week')), /class="d up">\+20% vs the 7 days before/);
-    assert.match(String(delta(19, 20, 'day')), /class="d down">-5\.0% vs yesterday/);
-    assert.match(String(delta(20, 20, 'day')), /no change vs yesterday/);
-    assert.match(String(delta(3, 0, 'week')), /new; none the 7 days before/);
+    assert.match(String(delta(12, 10, 'week')), /class="d up">\+20% vs the same days last week/);
+    assert.match(String(delta(19, 20, 'day')), /class="d down">-5\.0% vs yesterday by this hour/);
+    assert.match(String(delta(20, 20, 'day')), /no change vs yesterday by this hour/);
+    assert.match(String(delta(3, 0, 'week')), /new: none the same days last week/);
     const svg = String(chart(readSeries(res(['dateHour'], ['eventCount'], [[['2026100301'], [4]]]), 'day', TODAY, 2)));
     assert.match(svg, /<path class="ga-cur" d="M0\.5 100L1\.5 0L2\.5 100"/);   // stops at the current hour
     assert.match(svg, /<title>05:00: later today \(yesterday: 0\)<\/title>/);
@@ -388,12 +486,16 @@ describe('portal pages', () => {
     const page = await (await h.as('rm', 'release_manager').get('/vault/analytics?range=quarter')).text();
     assert.match(page, /<h1>Analytics<\/h1>/);
     assert.match(page, /href="\/vault\/analytics\?range=quarter" class="on"/);
-    assert.match(page, /Last 90 days/);
+    assert.match(page, /This quarter/);
+    assert.match(page, /compared with the same days last quarter/);
     assert.match(page, /Unique players/);
     assert.match(page, /Average play time/);
     assert.match(page, /Page views/);
+    assert.match(page, /Sessions/);
     assert.match(page, /Top games/);
     assert.match(page, /href="\/s\/ucalgary\/g\/transformations-quest\?tab=analytics"><b>Transformations Quest<\/b>/);
+    assert.match(page, /href="\/s\/ucalgary\/analytics"/);   // each game's studio's page
+    assert.match(await (await h.as('rm', 'release_manager').get('/vault/analytics?range=week')).text(), /Weeks start on Sunday/);
     assert.match(page, /Top games <small>by plays/);
     assert.match(page, /<circle cx=/);
     assert.match(page, /href="\/vault\/analytics" class="on">Analytics/);
@@ -417,6 +519,32 @@ describe('portal pages', () => {
     assert.equal((await h.as('mia', 'none', 'viewer').get('/portal/analytics/realtime?game=transformations-quest')).status, 404);
     assert.equal((await h.as('mia', 'none', 'viewer').get('/portal/analytics/realtime')).status, 403);
     assert.match(await (await h.as('rm', 'release_manager').get('/portal/analytics/realtime')).text(), /on the site/);
+  });
+
+  test('a studio’s Analytics page: its games, for every member (viewers too) and Vault staff', async () => {
+    const h = setup(fake());
+    const viewer = h.as('mia', 'none', 'viewer');
+    const page = await (await viewer.get('/s/fieldday/analytics?range=month')).text();
+    assert.match(page, /href="\/s\/fieldday\/analytics" class="on">Analytics<\/a>/);
+    assert.match(page, /This month/);
+    assert.match(page, /Unique players/);
+    assert.match(page, /Top games/);
+    assert.match(page, /href="\/s\/fieldday\/g\/wake\?tab=analytics"><b>Wake<\/b>/);
+    assert.doesNotMatch(page, /Transformations Quest|Sessions/);   // a play is the unit; no site figures
+    assert.match(page, /data-realtime="\/portal\/analytics\/realtime\?studio=fieldday"/);
+    assert.match(page, /Playing now/);
+    assert.match(page, /href="\/s\/fieldday\/analytics\?range=week"/);
+    assert.match(await (await viewer.get('/s/fieldday')).text(), /href="\/s\/fieldday\/analytics"/);   // in the studio's nav
+    assert.equal((await viewer.get('/s/ucalgary/analytics')).status, 404);
+    assert.equal((await h.as('rm', 'release_manager').get('/s/ucalgary/analytics')).status, 200);
+    assert.equal((await viewer.get('/portal/analytics/realtime?studio=fieldday')).status, 200);
+    assert.equal((await viewer.get('/portal/analytics/realtime?studio=ucalgary')).status, 404);
+    assert.equal((await viewer.get('/portal/analytics/realtime?studio=nope')).status, 404);
+    // A studio without games on the site.
+    h.db.createStudio({ slug: 'empty', name: 'Empty Studio', github_owner: '', github_owner_id: 'vault:empty' });
+    const empty = await (await h.as('rm', 'release_manager').get('/s/empty/analytics')).text();
+    assert.match(empty, /None of this studio’s games are on the site/);
+    assert.doesNotMatch(empty, /ga-chart/);
   });
 
   test('not connected: one plain message instead of empty charts', async () => {

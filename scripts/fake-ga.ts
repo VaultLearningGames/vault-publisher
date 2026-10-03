@@ -20,7 +20,12 @@ export function fakeGa(games: string[], opts: { log?: { method: GaMethod; body: 
     // A game: by game_slug / vault_game, or by its pages (the first path stands for it).
     const game = json.match(/"fieldName":"custom(?:Event|User):(?:game_slug|vault_game)","stringFilter":\{"matchType":"EXACT","value":"([^"]+)"/)?.[1]
       ?? (paths.length && !dims.includes('pagePath') ? paths[0] : undefined);
-    const scale = game ? weight(game) / games.reduce((s, g) => s + weight(g), 0) : 1;
+    // A studio: its games, by game_slug / vault_game in a list.
+    const listed = json.match(/"fieldName":"custom(?:Event|User):(?:game_slug|vault_game)","inListFilter":\{"values":(\[[^\]]*\])/)?.[1];
+    const pool = listed ? (JSON.parse(listed) as string[]) : games;
+    const sumW = (gs: string[]) => gs.reduce((s, g) => s + weight(g), 0);
+    const scale = game ? weight(game) / sumW(games) : listed ? sumW(pool) / sumW(games) : 1;
+    const some = !!(game || listed);
     const asked = (ev: string) => json.includes(`"${ev}"`);
     const byName = (vals: Record<string, number>) => mets.map((m) => vals[m] ?? 0);
     const res = (rows: [string[], number[]][]): GaResponse => ({
@@ -38,7 +43,7 @@ export function fakeGa(games: string[], opts: { log?: { method: GaMethod; body: 
       if (!dims.length) return res([[[], [Math.round(140 * scale) + 3]]]);
       const places: [string, string, string, number][] = [['US', 'United States', 'Madison', 14], ['US', 'United States', 'Chicago', 9], ['US', 'United States', 'Austin', 6],
         ['US', 'United States', 'Seattle', 4], ['CA', 'Canada', 'Calgary', 5], ['GB', 'United Kingdom', 'London', 3], ['IN', 'India', 'Bengaluru', 2], ['AU', 'Australia', 'Sydney', 2], ['BR', 'Brazil', 'São Paulo', 1]];
-      return res(places.map(([id, c, city, n]) => [[id, c, city], [Math.max(game ? 0 : 1, Math.round(n * scale * (game ? 6 : 1)))]] as [string[], number[]]).filter(([, [n]]) => n > 0));
+      return res(places.map(([id, c, city, n]) => [[id, c, city], [Math.max(some ? 0 : 1, Math.round(n * scale * (some ? 6 : 1)))]] as [string[], number[]]).filter(([, [n]]) => n > 0));
     }
     if (dims[0] === 'date' || dims[0] === 'dateHour') {
       // play_start and page_view (about six page views per play), or rows without eventName: plays.
@@ -77,8 +82,8 @@ export function fakeGa(games: string[], opts: { log?: { method: GaMethod; body: 
       const rows: [string[], number[]][] = [];
       ranges.forEach((r, i) => {
         const total = span(r);
-        for (const g of game ? [game] : games) {
-          const share = game ? 1 : weight(g) / games.reduce((s, x) => s + weight(x), 0);
+        for (const g of game ? [game] : pool) {
+          const share = game ? 1 : weight(g) / sumW(pool);
           const plays = total * share, secs = plays * 0.85 * (240 + 600 * hash(`d${g}`));
           const d = (ev: string, mode: string) => dims.map((n) => (n === 'eventName' ? ev : n.endsWith('play_mode') ? mode : g));
           rows.push([d('play_start', 'player'), [plays * 0.85, 0].slice(0, mets.length)], [d('play_start', 'new_tab'), [plays * 0.15, 0].slice(0, mets.length)]);

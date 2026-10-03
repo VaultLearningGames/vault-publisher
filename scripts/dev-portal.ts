@@ -15,6 +15,9 @@ import { buildCatalog } from '../src/catalog.ts';
 import { SitePreviewer } from '../src/portal/site-preview.ts';
 import { countLevels, parseRun, type GameCheck } from '../src/game-checks.ts';
 import { parseRun as parseSiteRun } from '../src/site-checks.ts';
+import { Analytics } from '../src/analytics/ga.ts';
+import { parseGaPropertyId } from '../src/config.ts';
+import { fakeGa } from './fake-ga.ts';
 
 class MemoryStorage implements Storage {
   objects = new Map<string, Uint8Array>();
@@ -155,6 +158,12 @@ const app = createApp({
     siteDir: new URL('../site/', import.meta.url).pathname, siteUrl: SITE_URL, portalUrl: `http://localhost:${PORT}`,
     catalog: () => buildCatalog(db, 'https://cdn.vaultlearninggames.org'),
   }),
+  // Analytics: a made-up property, or the real one with GA_PROPERTY_ID (read with your gcloud application default
+  // credentials: `gcloud auth application-default login --scopes=openid,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/analytics.readonly`).
+  // GA_FAKE=off: neither, to see the pages' "not connected" state.
+  analytics: new Analytics(parseGaPropertyId(process.env.GA_PROPERTY_ID)
+    ? { propertyId: parseGaPropertyId(process.env.GA_PROPERTY_ID) }
+    : process.env.GA_FAKE === 'off' ? {} : { transport: fakeGa(db.listings({ published: true }).map((l) => l.slug).slice(0, 40).concat(['wake', 'bloom'])) }),
   portal: {
     baseUrl: `http://localhost:${PORT}`, sessionSecret: 'dev-only-secret', vaultAdmins: ['boss'],
     oauth: {

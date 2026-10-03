@@ -26,6 +26,7 @@ import {
 } from './paths.ts';
 import { requestHeaders, type Storage } from './storage.ts';
 import { guardedFetcher, type Fetcher } from './net-guard.ts';
+import type { Analytics } from './analytics/ga.ts';
 import { checkMonitors, monitoredBuilds } from './url-monitor.ts';
 
 export interface AppDeps {
@@ -50,6 +51,8 @@ export interface AppDeps {
   previewSites?: PreviewSite[];
   // Renders a listing preview with the website's templates (Hugo on site/). Without it /_preview/TOKEN/ answers 503.
   sitePreview?: Pick<SitePreviewer, 'page'> | null;
+  // Google Analytics for the analytics pages (analytics/ga.ts). Left out: not connected.
+  analytics?: Analytics;
   // Injected in tests (image migration downloads).
   fetch?: typeof fetch;
   // How URL monitors fetch a studio's hosted game (net-guard.ts: public addresses only). Injected in tests.

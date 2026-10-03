@@ -47,6 +47,10 @@ export interface Config {
   hugoBin: string;
   // The portal's "Need support?" link: the invitation to the Slack workspace. '' hides the link.
   supportUrl: string;
+  // Google Analytics 4 property the analytics pages read (its numeric id, not the G- measurement id), and its time
+  // zone (the property's days). No id: the pages say analytics isn't connected. See docs/analytics.md.
+  gaPropertyId?: string;
+  gaTimeZone: string;
 }
 
 // Where "Need support?" sends people, and the channel they're told to join there.
@@ -76,6 +80,13 @@ export function parsePreviewSites(v: string | undefined): PreviewSite[] {
     if (at > 0 && /^https?:\/\/[^\s/]+/i.test(url)) out.push({ label, url });
   }
   return out;
+}
+
+// GA_PROPERTY_ID: the numeric property id ("123456789", or "properties/123456789" as the Admin API names it).
+// Anything else (empty, a "G-" measurement id) is no property.
+export function parseGaPropertyId(v: string | undefined): string | undefined {
+  const m = (v ?? '').trim().match(/^(?:properties\/)?(\d{4,})$/);
+  return m ? m[1] : undefined;
 }
 
 function required(name: string): string {
@@ -122,5 +133,7 @@ export function loadConfig(): Config {
     siteDir: process.env.SITE_DIR?.trim() || 'site',
     hugoBin: process.env.HUGO_BIN?.trim() || 'hugo',
     supportUrl: parseSupportUrl(process.env.SUPPORT_URL),
+    gaPropertyId: parseGaPropertyId(process.env.GA_PROPERTY_ID),
+    gaTimeZone: process.env.GA_TIMEZONE?.trim() || 'America/Chicago',
   };
 }

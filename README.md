@@ -72,6 +72,8 @@ this version reaches the `production` branch) shows its badges as not found.
 | `scripts/cloudflare-site-hosts.sh` | Admin, once per hostname: attach it to the site's Worker, detach it, remove its R2-era setup |
 | `scripts/cloudflare-site-rules.sh` | R2-era: the five zone rules a bucket's hostname needed. Kept to remove them (and for a rollback) |
 | `src/site-checks.ts`, `src/site-checks/` | [Site checks](#site-checks): what the measurements mean and the reports (`site-checks.ts`), and the engine that drives Chromium and probes links (`run.ts`; `words.txt`: spellings to accept), which only the command line and the workflow load |
+| `src/analytics/`, `src/portal/analytics.ts` | [Analytics](docs/analytics.md): Google Analytics Data API client (cached), the reports, and Vault → Analytics / each game's Analytics tab; `public/analytics.{css,js}`, `public/world-map.svg` (Natural Earth, `scripts/world-map.ts`) |
+| `site/themes/vault-squarespace/static/sq/js/vault-play-analytics.js` | The website's play events (`play_start`, `play_heartbeat`, `play_end`) on game pages |
 | `scripts/check-site.ts`, `.github/workflows/check-site.yml` | Site checks from the command line, and daily on a GitHub runner, which posts each run to the portal |
 
 ### API

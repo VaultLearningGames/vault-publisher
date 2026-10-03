@@ -11,9 +11,12 @@
 */ -}}
 {{- define "head" }}
 {{- with .Params.studio }}<meta name="vault:studio" content="{{ .name }}">{{ end }}
+{{- /* For play analytics (partials/vault-play-analytics.html): the game's slug in the portal, and its studio's. */}}
+<meta name="vault:game" content="{{ .Params.catalog_slug }}">
+{{- with .Params.studio }}<meta name="vault:studio-slug" content="{{ .slug }}">{{ end }}
 {{- with .Params.play }}{{ with .fit }}<meta name="vault:fit" content="{{ delimit . "," }}">{{ end }}{{ end }}
 {{- end }}
-{{- define "scripts" }}{{ partial "vault-player.html" . }}{{ end }}
+{{- define "scripts" }}{{ partial "vault-player.html" . }}{{ partial "vault-play-analytics.html" . }}{{ end }}
 {{- define "main" }}
 {{- $p := . -}}
 {{- $lg := .Params.legacy | default dict -}}

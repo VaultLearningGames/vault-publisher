@@ -197,6 +197,7 @@
     document.documentElement.classList.add('vault-player-open');
     if (!(history.state && history.state.vaultPlayer)) history.pushState({ vaultPlayer: true }, '', '#play');
     frame.focus();
+    announce('open');
   }
 
   // Scale and position a FIT game so its rectangle is as large as possible and centred in the stage.
@@ -217,6 +218,12 @@
     document.documentElement.classList.remove('vault-player-open');
     if (location.hash === '#play') history.replaceState(null, '', location.pathname + location.search);
     if (lastFocus && lastFocus.focus) lastFocus.focus();
+    announce('close');
+  }
+
+  // "vault-player:open" / "vault-player:close" on document, for play analytics (sq/js/vault-play-analytics.js).
+  function announce(what) {
+    try { document.dispatchEvent(new CustomEvent('vault-player:' + what)); } catch (e) {}
   }
 
   // Close via Back when we pushed the #play entry, so Back and Close stay in sync.

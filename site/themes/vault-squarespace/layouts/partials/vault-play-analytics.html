@@ -1,0 +1,6 @@
+{{- /* Play analytics on a game page (sq/js/vault-play-analytics.js; events in docs/analytics.md): only in a build that
+       sends Google Analytics (params.analytics.google, set per system by the deploy's GOOGLE_ANALYTICS_ID), so local
+       builds, listing previews and a staging site without its own measurement id send nothing. */ -}}
+{{- if site.Params.analytics.google }}
+<script type="module" src="{{ "sq/js/vault-play-analytics.js" | relURL }}{{ partialCached "sq/asset-v.html" "sq/js/vault-play-analytics.js" "sq/js/vault-play-analytics.js" }}"></script>
+{{- end }}

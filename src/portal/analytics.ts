@@ -1,0 +1,251 @@
+// Analytics: plays of the games on the website, from Google Analytics (src/analytics/). Vault staff see the whole
+// site (Vault → Analytics, /vault/analytics); a game's page has an Analytics tab with the same view for that game,
+// which its studio's members see too. Each view: plays over time with the previous period, plays / players / average
+// play time, a realtime map of where people are playing, and for the site its page views, sessions and top games.
+import type { Hono } from 'hono';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { Analytics, AnalyticsError, type Overview, type Realtime, type Result } from '../analytics/ga.ts';
+import { COUNTRY_POINTS } from '../analytics/countries.ts';
+import { MAP_HEIGHT, MAP_WIDTH } from '../analytics/projection.ts';
+import { averageSeconds, RANGE_KEYS, RANGES, rangeOf, type Pair, type Place, type RangeKey, type Scope, type Series } from '../analytics/reports.ts';
+import type { Studio, User } from '../db.ts';
+import { html, raw, type Html } from './html.ts';
+import type { ListingHelpers, ListingRow } from './listings.ts';
+import { head } from './routes.ts';
+
+// ---------- formatting ----------
+const nf = new Intl.NumberFormat('en-US');
+const num = (n: number) => nf.format(Math.round(n));
+export function duration(s: number | null): string {
+  if (s === null) return '—';
+  const t = Math.round(s);
+  if (t < 60) return `${t}s`;
+  const m = Math.floor(t / 60), sec = t % 60;
+  if (m < 60) return `${m}m ${String(sec).padStart(2, '0')}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+}
+// The change from the previous period, as a KPI's second line.
+export function delta(cur: number | null, prev: number | null, range: RangeKey): Html {
+  const vs = `vs ${RANGES[range].previous}`;
+  if (cur === null || prev === null) return html`<div class="d">${prev === null && cur !== null ? `no ${vs.slice(3)} data` : ''}</div>`;
+  if (prev === 0) return html`<div class="d">${cur > 0 ? `new; none ${RANGES[range].previous}` : `none ${RANGES[range].previous} either`}</div>`;
+  const pct = ((cur - prev) / prev) * 100;
+  if (Math.abs(pct) < 0.05) return html`<div class="d">no change ${vs}</div>`;
+  const shown = Math.abs(pct) < 10 ? pct.toFixed(1) : String(Math.round(pct));
+  return html`<div class="d ${pct > 0 ? 'up' : pct < 0 ? 'down' : ''}">${pct > 0 ? '+' : ''}${shown}% ${vs}</div>`;
+}
+
+// ---------- the chart ----------
+function niceMax(v: number): number {
+  if (v <= 4) return 4;
+  const p = 10 ** Math.floor(Math.log10(v));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+}
+export function chart(s: Series): Html {
+  const n = s.labels.length;
+  const top = niceMax(Math.max(1, ...s.previous, ...s.current.map((v) => v ?? 0)));
+  const y = (v: number) => +(100 - (v / top) * 100).toFixed(2);
+  const x = (i: number) => i + 0.5;
+  const line = (vals: (number | null)[]) => {
+    let d = '', pen = false;
+    vals.forEach((v, i) => { if (v === null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${x(i)} ${y(v)}`; pen = true; });
+    return d;
+  };
+  const lastIdx = s.current.reduce<number>((k, v, i) => (v === null ? k : i), -1);
+  const area = lastIdx >= 0 ? `${line(s.current.slice(0, lastIdx + 1))}L${x(lastIdx)} 100L${x(0)} 100Z` : '';
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * top);
+  const every = Math.max(1, Math.ceil(n / 6));
+  const xl = s.labels.map((l, i) => ({ l, i })).filter(({ i }) => i % every === 0);
+  const def = RANGES[s.range];
+  const unit = def.hourly ? 'hour' : def.bucketDays === 7 ? 'week' : 'day';
+  return html`<div class="ga-chart" role="img" aria-label="Plays per ${unit}: ${num(s.totals.current)} in ${def.long.toLowerCase()}, ${num(s.totals.previous)} in ${def.previous}.">
+    <div class="ga-plot">
+      ${ticks.filter((t) => Number.isInteger(t)).map((t) => html`<span class="ga-yl" style="bottom:${(t / top) * 100}%">${num(t)}</span>`)}
+      <svg viewBox="0 0 ${n} 100" preserveAspectRatio="none" aria-hidden="true">
+        ${ticks.map((t) => html`<line class="gridl" x1="0" x2="${n}" y1="${y(t)}" y2="${y(t)}" vector-effect="non-scaling-stroke"/>`)}
+        <path class="ga-prev" d="${line(s.previous)}" vector-effect="non-scaling-stroke"/>
+        ${area ? html`<path class="ga-area" d="${area}"/>` : ''}
+        <path class="ga-cur" d="${line(s.current)}" vector-effect="non-scaling-stroke"/>
+        ${s.labels.map((l, i) => html`<rect class="ga-hit" x="${i}" y="0" width="1" height="100"><title>${l}: ${s.current[i] === null ? 'later today' : `${num(s.current[i]!)} plays`} (${def.previous}: ${num(s.previous[i])})</title></rect>`)}
+      </svg>
+    </div>
+    <div class="ga-x" aria-hidden="true">${xl.map(({ l, i }) => html`<span style="left:${(x(i) / n) * 100}%">${l.replace(/^Week of /, '')}</span>`)}</div>
+  </div>`;
+}
+
+// ---------- the map ----------
+export function placesMap(places: Place[], landUrl: string): Html {
+  const byCountry = new Map<string, { users: number; name: string; cities: string[] }>();
+  for (const p of places) {
+    const c = byCountry.get(p.countryId) ?? { users: 0, name: p.country, cities: [] };
+    c.users += p.users;
+    if (p.city && p.city !== '(not set)') c.cities.push(`${p.city} ${p.users}`);
+    byCountry.set(p.countryId, c);
+  }
+  const max = Math.max(1, ...[...byCountry.values()].map((c) => c.users));
+  const dots = [...byCountry].filter(([id]) => COUNTRY_POINTS[id]).sort((a, b) => b[1].users - a[1].users).map(([id, c]) => {
+    const [cx, cy] = COUNTRY_POINTS[id];
+    const r = 5 + 17 * Math.sqrt(c.users / max);
+    return html`<circle cx="${cx}" cy="${cy}" r="${r.toFixed(1)}"><title>${c.name}: ${num(c.users)} playing${c.cities.length ? ` (${c.cities.slice(0, 6).join(', ')})` : ''}</title></circle>`;
+  });
+  return html`<div class="ga-map" style="aspect-ratio:${MAP_WIDTH}/${MAP_HEIGHT}">
+    <div class="ga-land" style="-webkit-mask-image:url(${landUrl});mask-image:url(${landUrl})"></div>
+    <svg viewBox="0 0 ${MAP_WIDTH} ${MAP_HEIGHT}" role="img" aria-label="${places.length ? `Plays in the last 30 minutes, by country: ${[...byCountry.values()].map((c) => `${c.name} ${c.users}`).join(', ')}` : 'No plays in the last 30 minutes'}">${dots}</svg>
+  </div>`;
+}
+
+// ---------- errors ----------
+const CONNECTION = new Set(['not_connected', 'denied', 'api_disabled']);
+function problem(e: AnalyticsError, staff: boolean, what = ''): Html {
+  const text: Record<AnalyticsError['kind'], string> = {
+    not_connected: 'Analytics isn’t connected: this portal has no Google Analytics property to read (GA_PROPERTY_ID), or no Google credentials.',
+    denied: 'Analytics isn’t connected: this portal’s service account doesn’t have access to the Google Analytics property yet.',
+    api_disabled: 'Analytics isn’t connected: the Google Analytics Data API isn’t enabled in the service account’s Google Cloud project.',
+    setup: `Google Analytics doesn’t know the play events’ custom definitions yet${what ? `, so ${what}` : ''}.`,
+    failed: `Google Analytics couldn’t answer${what ? ` for ${what}` : ''}.`,
+  };
+  if (!staff && CONNECTION.has(e.kind)) return html`<p class="fix">Analytics isn’t connected yet: Vault hasn’t given the portal access to Google Analytics.</p>`;
+  return html`<p class="fix">${text[e.kind]}${staff && e.kind !== 'failed' ? html` See <span class="mono">docs/analytics.md</span>.` : ''}${staff ? html`<br><span class="small muted">${e.message}</span>` : ''}</p>`;
+}
+const firstError = (...rs: (Result<unknown> | null)[]) => rs.find((r): r is { ok: false; error: AnalyticsError } => !!r && !r.ok)?.error ?? null;
+
+// ---------- a view ----------
+interface ViewOpts { timeZone: string; scope: Scope; range: RangeKey; staff: boolean; base: string; realtimeUrl: string; assets: Assets; titleOf(slug: string): { title: string; href: string | null } }
+interface Assets { css: string; js: string; land: string }
+
+function rangeBar(base: string, range: RangeKey): Html {
+  const sep = base.includes('?') ? '&' : '?';
+  return html`<div class="seg ga-range" role="group" aria-label="Time range">${RANGE_KEYS.map((k) => html`<a href="${base}${sep}range=${k}" class="${k === range ? 'on' : ''}" title="${RANGES[k].long}" ${k === range ? raw('aria-current="true"') : ''}>${RANGES[k].label}</a>`)}</div>`;
+}
+
+const kpi = (label: string, value: string, d: Html, title = '') => html`<div class="kpi" ${title ? raw(`title="${title.replace(/"/g, '&quot;')}"`) : ''}><div class="v">${value}</div><div class="l">${label}</div>${d}</div>`;
+
+export function realtimeBody(rt: Realtime, o: { staff: boolean; land: string; game: boolean }): Html {
+  if (!rt.places.ok) return problem(rt.places.error, o.staff, rt.places.error.kind === 'setup' ? 'it can’t tell which game people are playing (the user dimension vault_game)' : 'realtime plays');
+  const places = rt.places.value;
+  const total = places.reduce((s, p) => s + p.users, 0);
+  const rows = places.slice(0, 8).map((p) => html`<tr><td>${p.city && p.city !== '(not set)' ? html`${p.city}, ` : ''}${p.country || 'Unknown'}</td><td class="r num">${num(p.users)}</td></tr>`);
+  return html`${placesMap(places, o.land)}
+    <p class="small">${total ? html`<b>${num(total)}</b> ${total === 1 ? 'person' : 'people'} playing${o.game ? ' this game' : ''} in the last 30 minutes.` : html`<span class="muted">No one has played${o.game ? ' this game' : ''} in the last 30 minutes.</span>`}
+      ${rt.visitors?.ok ? html` <span class="muted">${num(rt.visitors.value)} on the site.</span>` : ''}</p>
+    ${rows.length ? html`<div class="tbl-wrap"><table class="ga-places"><thead><tr><th>Where</th><th class="r">Playing</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
+}
+
+export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
+  const def = RANGES[ov.range];
+  const assets = html`<link rel="stylesheet" href="${o.assets.css}"><script src="${o.assets.js}" defer></script>`;
+  const bar = rangeBar(o.base, ov.range);
+  // Not connected at all: say so once, rather than an empty chart and a row of dashes.
+  const conn = [ov.series, ov.plays, ov.players].every((r) => !r.ok && CONNECTION.has(r.error.kind)) ? firstError(ov.series) : null;
+  if (conn) return html`${assets}<div class="card ga-off">${problem(conn, o.staff)}${o.staff ? '' : html`<p class="small muted">Ask Vault about it.</p>`}</div>`;
+
+  const s = ov.series;
+  const chartCard = html`<div class="card ga-top">
+    <h2><span>Plays <small>${def.long} · ${s.ok ? html`<b class="ga-tot">${num(s.value.totals.current)}</b>, ${def.previous} ${num(s.value.totals.previous)}` : ''}</small></span>${bar}</h2>
+    ${s.ok ? html`${chart(s.value)}<div class="ga-legend small"><span class="k cur"></span>${def.long}<span class="k prev"></span>${def.previous[0].toUpperCase()}${def.previous.slice(1)}</div>`
+      : problem(s.error, o.staff, o.scope.game ? 'plays of one game can’t be counted (the dimension game_slug)' : 'the chart')}
+  </div>`;
+
+  const p = ov.plays.ok ? ov.plays.value : null;
+  const avgCur = p && p.timed ? averageSeconds(p.current) : null, avgPrev = p && p.timed ? averageSeconds(p.previous) : null;
+  const players = ov.players.ok ? ov.players.value : null;
+  const avgNote = !p ? '' : !p.timed ? 'Needs the custom definitions in Google Analytics.'
+    : avgCur === null ? 'No timed plays in this range yet. Only plays since the game pages began sending play events are timed.' : '';
+  const kpis = html`<div class="kpis ga-k3" aria-label="Plays, ${def.long.toLowerCase()}">
+      ${kpi('Plays', p ? num(p.current.plays) : '—', p ? delta(p.current.plays, p.previous.plays, ov.range) : html`<div class="d"></div>`, 'A play: the game opened from its page on the site (in the player, or in a new tab)')}
+      ${kpi('Unique players', players ? num(players.current) : '—', players ? delta(players.current, players.previous, ov.range) : html`<div class="d"></div>`, 'People (browsers) who started at least one play')}
+      ${kpi('Average play time', duration(avgCur), avgNote ? html`<div class="d">${avgNote}</div>` : delta(avgCur, avgPrev, ov.range), 'Time the game was open in the player with the page on screen, per play in the player. Games opened in a new tab can’t be timed.')}
+    </div>
+    ${!ov.plays.ok ? problem(ov.plays.error, o.staff, o.scope.game ? 'this game’s plays can’t be counted' : 'plays') : ''}
+    ${!ov.players.ok && ov.plays.ok ? problem(ov.players.error, o.staff, 'players') : ''}`;
+
+  let site: Html | string = '';
+  if (ov.site) {
+    const sv = ov.site.ok ? ov.site.value : null;
+    const pair = (k: 'screenPageViews' | 'sessions' | 'totalUsers') => (sv ? sv[k] : null);
+    const k = (label: string, v: Pair | null, title: string) => kpi(label, v ? num(v.current) : '—', v ? delta(v.current, v.previous, ov.range) : html`<div class="d"></div>`, title);
+    site = html`<h3 class="sec">The website <small class="muted small">${def.long}</small></h3>
+      <div class="kpis ga-k3">${k('Page views', pair('screenPageViews'), 'Every page shown on the site')}${k('Sessions', pair('sessions'), 'Visits to the site')}${k('Visitors', pair('totalUsers'), 'People (browsers) who visited')}</div>
+      ${!ov.site.ok ? problem(ov.site.error, o.staff, 'the website’s visits') : ''}`;
+  }
+
+  const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">Playing now</span><small>last 30 minutes · updates every minute</small></h2>
+    <div data-realtime="${o.realtimeUrl}">${realtimeBody(rt, { staff: o.staff, land: o.assets.land, game: !!o.scope.game })}</div></div>`;
+
+  let top: Html | string = '';
+  if (!o.scope.game && p) {
+    const rows = p.games.slice(0, 10).map((g) => {
+      const t = o.titleOf(g.slug);
+      return html`<tr><td class="proj">${t.href ? html`<a href="${t.href}"><b>${t.title}</b></a>` : html`<b>${t.title}</b>`}<span>${g.slug}</span></td><td class="r num">${num(g.plays)}</td><td class="r num">${duration(averageSeconds(g))}</td></tr>`;
+    });
+    top = html`<div class="card ga-games"><h2>Top games <small>by plays, ${def.long.toLowerCase()}</small></h2>
+      ${!p.timed ? html`<p class="small muted">Games can be told apart once the custom dimension game_slug is registered in Google Analytics.</p>`
+        : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Plays</th><th class="r">Avg time</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : html`<p class="small muted">No plays in this range yet.</p>`}</div>`;
+  }
+
+  return html`${assets}<div class="ga">${chartCard}${kpis}
+    <div class="grid ${top ? 'ga-split' : ''}">${realtime}${top}</div>${site}
+    <p class="small muted ga-foot">From Google Analytics (the site’s ${p && !p.timed ? 'page views and play counts' : 'play events'}; days are ${o.timeZone.replace(/_/g, ' ')} days). Figures are cached for up to 10 minutes; the realtime map for a minute.</p></div>`;
+}
+
+// ---------- routes ----------
+export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analytics) {
+  const { db } = h;
+  const file = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
+  const css = file('analytics.css'), js = file('analytics.js'), land = file('world-map.svg');
+  const v = (b: Buffer) => createHash('sha256').update(b).digest('hex').slice(0, 10);
+  const assets: Assets = { css: `/assets/analytics.css?v=${v(css)}`, js: `/assets/analytics.js?v=${v(js)}`, land: `/assets/world-map.svg?v=${v(land)}` };
+  const immutable = 'public, max-age=31536000, immutable';
+  app.get('/assets/analytics.css', (c) => c.body(css, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
+  app.get('/assets/analytics.js', (c) => c.body(js, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': immutable }));
+  app.get('/assets/world-map.svg', (c) => c.body(land, 200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': immutable }));
+
+  // Which listings a person may see analytics for: Vault staff any; studio members their own studio's.
+  const canSeeGame = (u: User, l: ListingRow) => h.isStaff(u) || !!h.roleIn(u, db.studioById(l.studio_id)!);
+  const titleOf = (u: User) => (slug: string) => {
+    const l = db.listing(slug) as ListingRow | undefined;
+    return l ? { title: l.published?.title || l.draft.title || slug, href: canSeeGame(u, l) ? `/s/${l.studio_slug}/g/${slug}?tab=analytics` : null } : { title: slug, href: null };
+  };
+
+  async function render(u: User, scope: Scope, range: RangeKey, base: string) {
+    const realtimeUrl = `/portal/analytics/realtime${scope.game ? `?game=${encodeURIComponent(scope.game)}` : ''}`;
+    const [ov, rt] = await Promise.all([analytics.overview(range, scope), analytics.realtime(scope)]);
+    return view(ov, rt, { timeZone: analytics.timeZone, scope, range, staff: h.isStaff(u), base, realtimeUrl, assets, titleOf: titleOf(u) });
+  }
+
+  app.get('/vault/analytics', async (c) => {
+    const u = h.signedIn(c); if (u instanceof Response) return u;
+    if (!h.isStaff(u)) return h.denied(c, 'Only Vault staff can see this page.');
+    const range = rangeOf(c.req.query('range'));
+    const body = await render(u, {}, range, '/vault/analytics');
+    return h.page(c, 'Analytics', html`${head('Analytics', 'Plays of the games on vaultlearninggames.org, and visits to the site. Each game’s page in the portal has the same view for that game.')}${body}`, { active: 'analytics' });
+  });
+
+  // The realtime card's contents, for the page's script to refresh every minute.
+  app.get('/portal/analytics/realtime', async (c) => {
+    const u = h.signedIn(c); if (u instanceof Response) return u;
+    const slug = c.req.query('game');
+    if (slug) {
+      const l = db.listing(slug) as ListingRow | undefined;
+      if (!l || !canSeeGame(u, l)) return c.text('Not found', 404);
+    } else if (!h.isStaff(u)) return c.text('Only Vault staff can see this.', 403);
+    const rt = await analytics.realtime(slug ? { game: slug } : {});
+    return c.html(realtimeBody(rt, { staff: h.isStaff(u), land: assets.land, game: !!slug }).toString(), 200, { 'Cache-Control': 'no-store' });
+  });
+
+  return {
+    // A game's Analytics tab (routes.ts): its listing's plays. A game that isn't on the site has none.
+    async gameTab(u: User, s: Studio, l: ListingRow | null, query: { range?: string }): Promise<Html> {
+      if (!l) return html`<div class="card"><p class="muted">This game isn’t on the site, so there are no plays to show. Analytics count plays from a game’s page on vaultlearninggames.org.</p></div>`;
+      const range = rangeOf(query.range);
+      const body = await render(u, { game: l.slug }, range, `/s/${s.slug}/g/${l.slug}?tab=analytics`);
+      return html`${l.published ? '' : html`<p class="small muted">This game isn’t published on the site yet.</p>`}${body}`;
+    },
+  };
+}
+
+export { Analytics };

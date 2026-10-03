@@ -9,6 +9,7 @@ import { relayoutReleases } from './releases.ts';
 import { createR2Storage } from './storage.ts';
 import { googleSheets } from './forms.ts';
 import { syncStudiosFile } from './studios-file.ts';
+import { Analytics } from './analytics/ga.ts';
 import { buildCatalog } from './catalog.ts';
 import { clearPreviewTemp, hugoRunner, SitePreviewer } from './portal/site-preview.ts';
 
@@ -74,6 +75,7 @@ const app = createApp({
   previewSites: config.previewSites,
   sitePreview,
   taskInvokerEmail: config.taskInvokerEmail,
+  analytics: new Analytics({ propertyId: config.gaPropertyId, timeZone: config.gaTimeZone }),
   forms: {
     allowedOrigins: config.formsAllowedOrigins,
     sheets: { newsletter: config.formsNewsletterSheet, 'submit-game': config.formsSubmitGameSheet },

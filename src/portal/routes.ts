@@ -15,6 +15,7 @@ import { escape, html, raw, type Html } from './html.ts';
 import { listingPieces, registerListingPages, type ListingRow } from './listings.ts';
 import { registerFeaturedApi } from './featured.ts';
 import { registerSiteChecks } from './site-checks.ts';
+import { Analytics, registerAnalytics } from './analytics.ts';
 import { registerListingAssetsApi } from './listing-assets.ts';
 import { registerListingPreview } from './listing-preview.ts';
 import { registerListingMakers } from './listing-makers.ts';
@@ -130,6 +131,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
           <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
           <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Game Catalog</a>
           <a href="/vault/site-checks" class="${active === 'site-checks' ? 'on' : ''}">Site checks</a>
+          <a href="/vault/analytics" class="${active === 'analytics' ? 'on' : ''}">Analytics</a>
           <a href="/vault/studios" class="${active === 'vault-studios' ? 'on' : ''}">Studios</a>
           <a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>
           <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>` : ''}
@@ -211,6 +213,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const LP = listingPieces(listingHelpers);
   // The "Upload builds" page (/s/:studio/register), zip uploads and URL monitors.
   const UP = registerUploads(app, listingHelpers);
+  // Analytics (analytics.ts): Vault → Analytics, and each game's Analytics tab.
+  const AN = registerAnalytics(app, listingHelpers, deps.analytics ?? new Analytics({}));
 
   function page(c: Context, title: string, body: Html, opts: { studio?: Studio; active?: string; status?: number } = {}) {
     const u = currentUser(c)!;
@@ -517,7 +521,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
 
   // A game's page: its site listing and/or its CDN game. Games already on the site that are only hosted at a
   // web address have just a listing; once they're on the Vault CDN, the same page switches them over.
-  app.get('/s/:studio/g/:game', (c) => {
+  app.get('/s/:studio/g/:game', async (c) => {
     const u = signedIn(c); if (u instanceof Response) return u;
     const s = studioFor(c, u); if (s instanceof Response) return s;
     const slug = c.req.param('game');
@@ -537,14 +541,15 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       if (lgs.length === 1) return c.redirect(`/s/${s.slug}/g/${lgs[0].slug}${c.req.query('tab') ? `?tab=${c.req.query('tab')}` : ''}`);
     }
     const asked = c.req.query('tab');
-    const tab = asked === 'cdn' || asked === 'listing' ? asked : l || (g && db.listingsForGame(g.id).length) ? 'listing' : 'cdn';
+    const tab = asked === 'cdn' || asked === 'listing' || asked === 'analytics' ? asked : l || (g && db.listingsForGame(g.id).length) ? 'listing' : 'cdn';
     const title = l?.draft.title || g!.slug;
     const sub = html`${l?.published ? html`<a href="https://vaultlearninggames.org/games/${l.slug}/" target="_blank" rel="noopener">vaultlearninggames.org/games/${l.slug}/</a>` : l ? html`<span class="muted">vaultlearninggames.org/games/${l.slug}/ (not published)</span>` : html`<span class="muted">not on the site</span>`}
       ${g?.repository ? html` · <a href="https://github.com/${g.repository}" title="${g.repository}">GitHub Repo</a>` : ''}`;
-    const tabs = html`<div class="tabs"><a href="?tab=listing" class="${tab === 'listing' ? 'on' : ''}">Site listing</a><a href="?tab=cdn" class="${tab === 'cdn' ? 'on' : ''}">Vault CDN${g ? html` · ${db.currentRelease(g.id)?.version ?? 'no release'}` : ''}</a></div>`;
+    const tabs = html`<div class="tabs"><a href="?tab=listing" class="${tab === 'listing' ? 'on' : ''}">Site listing</a><a href="?tab=cdn" class="${tab === 'cdn' ? 'on' : ''}">Vault CDN${g ? html` · ${db.currentRelease(g.id)?.version ?? 'no release'}` : ''}</a><a href="?tab=analytics" class="${tab === 'analytics' ? 'on' : ''}">Analytics</a></div>`;
     let content: Html | string;
     let dialogs: Html | string = '';
-    if (tab === 'listing') {
+    if (tab === 'analytics') content = await AN.gameTab(u, s, l ?? null, { range: c.req.query('range') });
+    else if (tab === 'listing') {
       if (l) { const ed = LP.editor(u, s, l, g); content = html`<div class="grid g-main">${ed.form}<div class="grid" style="align-content:start">${ed.side}</div></div>`; }
       else {
         const served = db.listingsForGame(g!.id) as ListingRow[];

@@ -645,6 +645,10 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
   and tells them to join `#vault-game-publishing-support`. To point it elsewhere, set the environment's `SUPPORT_URL`
   variable to another link and redeploy (`gh variable set SUPPORT_URL --env production --body https://…`); `none`
   hides the link. Not set, it is the invitation in `src/config.ts`.
+- **Analytics** (Vault → Analytics, and each game's Analytics tab) read Google Analytics as the service's runtime
+  service account. The environment's `GA_PROPERTY_ID` variable is the GA4 property's numeric id; both systems read
+  the production site's property. Setup, the play events and their custom definitions:
+  [docs/analytics.md](analytics.md).
 - **Adding a studio:** a Vault admin creates it in the portal under **Vault → Studios** (name, short name, website
   and, optionally, the GitHub organization whose repositories publish its test versions; the portal looks up the org's
   numeric id on GitHub). Leave the organization empty for a studio whose games Vault uploads (it gets the placeholder

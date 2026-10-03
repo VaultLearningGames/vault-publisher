@@ -94,6 +94,15 @@ jobs:
     # With Hugo installed the tests also render a real preview from site/.
     - run: npm ci && npm run typecheck && npm test
 
+    # Smaller copies of listing images that have none yet (a new upload): made here, stored by the portal on the CDN
+    # and listed in its catalog, which the build below then pulls (src/image-variants.ts). Nothing to do is one request.
+    # It runs before this run's portal rollout starts (no write can land on an instance being replaced). A portal that
+    # can't answer (one without the endpoint yet) is a warning: the site is built with the copies that exist.
+    - name: Make the smaller copies of new listing images
+      env:
+        VAULT_PORTAL: ${{ vars.PORTAL_URL }}
+      run: node scripts/image-variants.ts --portal "$VAULT_PORTAL" --dry-run=false --soft --budget-seconds 600 --summary "$GITHUB_STEP_SUMMARY"
+
     # The website, from this system's published listings. A portal that can't be reached fails the build (there is
     # no catalog in the repository to fall back on). The Join Vault and Submit a Game forms post to this system's
     # portal: Hugo reads config overrides from HUGOx-delimited variables (params.forms.* in site/hugo.toml; the x

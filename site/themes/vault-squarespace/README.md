@@ -45,6 +45,14 @@ fonts or third-party Squarespace plugins are used, and nothing is loaded from Sq
   by a small canvas script (a still frame with "reduce motion" or without JavaScript; a pause button). Its styles
   and script are in that file. It is shown at any address, so it may only use root-relative or absolute addresses
   (the deploy checks). What serves it for a missing address: docs/setup.md, "The 404 page".
+* Images are sent at about the size they are shown (`partials/sq/img.html`): every listing, Game Card, cover,
+  screenshot, featured and background image has a `srcset` of smaller WebP copies and a `sizes` (blocks: from their
+  grid areas, `partials/sq/sizes.html`), with its width and height. Copies of catalog images on the CDN are made by
+  the portal's image-variants task and listed in the catalog's `images`; copies of the snapshot images under
+  `static/sq/img` are made by Hugo at build time (this theme's `hugo.toml` mounts them as assets as well):
+  `partials/sq/srcset.html`. An image with no copies is used as it is. Everything below the top section is
+  `loading="lazy"`; the first section's background (hero layout) or cover image (standard layout) is
+  `fetchpriority="high"`.
 * Play opens the game in the in-page player (`partials/vault-player.html`, a copy of main's).
 * The scripts that took the snapshot (`migration/squarespace/*.py`; they need the Squarespace site up) stayed in
   `VaultLearningGames/vault-hugo-rebuild`, branch `original-squarespace-design`.

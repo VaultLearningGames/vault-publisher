@@ -14,8 +14,9 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-// Pages and feeds change when listings do: a minute. Snapshot images (named NAME-<6 hex of their source address>) and
-// fonts are never changed in place: a month. Everything else an hour: the stylesheet and script are requested as
+// Pages and feeds change when listings do: a minute. Snapshot images (named NAME-<6 hex of their source address>), the
+// smaller copies Hugo makes of them (NAME_hu_<hex>.webp, partials/sq/srcset.html) and fonts are never changed in
+// place: a month. Everything else an hour: the stylesheet and script are requested as
 // "?v=<hash>", so a new one is fetched at once whatever this says.
 export const PAGE_CACHE = 'public, max-age=60';
 export const FIXED_CACHE = 'public, max-age=2592000';
@@ -32,7 +33,7 @@ export function isPage(key: string): boolean {
 }
 
 export function cacheFor(key: string): string {
-  return isPage(key) ? PAGE_CACHE : /-[0-9a-f]{6}\.[a-z0-9]+$/.test(key) || /\.woff2?$/i.test(key) ? FIXED_CACHE : ASSET_CACHE;
+  return isPage(key) ? PAGE_CACHE : /(?:-[0-9a-f]{6}|_hu_[0-9a-f]{8,16})\.[a-z0-9]+$/.test(key) || /\.woff2?$/i.test(key) ? FIXED_CACHE : ASSET_CACHE;
 }
 
 // A file or folder path as the hosting itself writes it in an address: every part through encodeURIComponent.

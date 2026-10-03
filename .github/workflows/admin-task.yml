@@ -2,7 +2,8 @@ name: Admin task
 
 # Runs one Vault-admin operation on a system's site listings (src/admin-tasks.ts), so it doesn't need someone
 # signed in to the portal: import listings, copy site images to the Vault CDN, move a game to another studio, edit
-# and publish listings in bulk, release a test build, or list listings to check the result. The job runs in the
+# and publish listings in bulk, release a test build, make the smaller copies of listing images (image-variants: args
+# {} or {"redo": true}), or list listings to check the result. The job runs in the
 # chosen system's GitHub environment, and its OIDC token is what that system's portal accepts (like check-games and
 # releases); there are no secrets. It is a dry run unless dry_run is unticked: the result (what changed, or would) is in the job summary.
 #
@@ -20,7 +21,7 @@ on:
       task:
         description: What to do
         type: choice
-        options: [list, import, migrate-images, move, update, featured, studios, release]
+        options: [list, import, migrate-images, move, update, featured, studios, release, image-variants]
         required: true
       args:
         description: The task's arguments, as a JSON object
@@ -55,5 +56,14 @@ jobs:
         node-version: 24
 
     # The script asks GitHub for the OIDC token (audience vault-publisher) itself, so each call gets a fresh one.
+    # image-variants resizes images here (sharp, a dev dependency), so it needs the install; the others need nothing.
+    - name: Make the smaller copies of the listing images
+      if: inputs.task == 'image-variants'
+      run: |
+        npm ci
+        redo=$(node -e 'process.stdout.write(JSON.parse(process.env.ARGS || "{}").redo ? "--redo" : "")')
+        node scripts/image-variants.ts --portal "$PORTAL" --dry-run="$DRY_RUN" $redo --summary "$GITHUB_STEP_SUMMARY"
+
     - name: Run the task
+      if: inputs.task != 'image-variants'
       run: node scripts/admin-task.ts --portal "$PORTAL" --task "$TASK" --args "$ARGS" --dry-run="$DRY_RUN" --summary "$GITHUB_STEP_SUMMARY"

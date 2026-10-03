@@ -5,7 +5,9 @@
 {{- $st := printf "--ratio:%s;--radius:%s;--focal:%s" ($b.ratio | default (cond (and $b.w $b.h) (printf "%v/%v" $b.w $b.h) "3/2")) ($b.radius | default "0") ($b.focal | default "50% 50%") }}
 <div class="sq-img fit-{{ $b.fit | default "cover" }}" style="{{ $st | safeCSS }}">
   {{- if $b.href }}<a class="sq-img-in" href="{{ $b.href }}"{{ if $b.blank }} target="_blank" rel="noopener"{{ end }}>{{ else }}<div class="sq-img-in">{{ end -}}
-  <img src="{{ $b.src | relURL }}" alt="{{ $b.alt | default "" }}" loading="lazy" decoding="async">
+  {{- /* Images in the first section are at the top of the page (not lazy); a game's cover image there, when the
+         section has no background picture, is the one fetched first. */}}
+  {{- partial "sq/img.html" (dict "src" $b.src "alt" ($b.alt | default "") "sizes" (partial "sq/sizes.html" $b) "lazy" (not $.first) "priority" (and $.first (not $.bg) (eq $b.role "cover"))) }}
   {{- if $b.href }}</a>{{ else }}</div>{{ end }}
 </div>
 {{- else if eq $b.type "button" }}

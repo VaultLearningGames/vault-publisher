@@ -1,0 +1,34 @@
+{{- /* An image's smaller copies, for <img srcset>: takes an image address as the templates have it (a CDN URL or a site
+       path) and returns dict "src" "srcset" "w" "h" (srcset "" and w/h 0 when it has no copies; src is then the address
+       as given).
+       - A listing image on the Vault CDN: the WebP copies the portal made of it (src/image-variants.ts), listed in the
+         catalog's `images` by its URL. An image without them (a new upload before its copies are made, another host)
+         is used as it is.
+       - A Squarespace snapshot image (/sq/img/..., also mounted as assets/sq/img by the theme's hugo.toml): WebP
+         copies made here by Hugo, at the same widths (and its own, at most 1920px). Listing previews have no image
+         files (src/portal/site-preview.ts), so there they are used as they are.
+       src is the copy nearest 960px wide (for the rare browser without srcset). */ -}}
+{{- $src := . | default "" | string -}}
+{{- $out := dict "src" $src "srcset" "" "w" 0 "h" 0 -}}
+{{- $widths := slice 320 480 640 960 1280 1920 -}}
+{{- $cat := (hugo.Data.catalog | default dict).images | default dict -}}
+{{- $rec := cond (eq $src "") nil (index $cat $src) -}}
+{{- if $rec }}{{ with $rec -}}
+  {{- $set := slice }}{{ $pick := "" -}}
+  {{- range .variants }}{{ $set = $set | append (printf "%s %dw" .url (int .width)) }}{{ if or (not $pick) (le (int .width) 960) }}{{ $pick = .url }}{{ end }}{{ end -}}
+  {{- if $set }}{{ $out = dict "src" $pick "srcset" (delimit $set ", ") "w" (int .width) "h" (int .height) }}{{ end -}}
+{{- end }}{{ else if hasPrefix $src "/sq/img/" -}}
+  {{- with resources.Get (strings.TrimPrefix "/" $src) -}}
+    {{- if in (slice "image/png" "image/jpeg") .MediaType.Type -}}
+      {{- $img := . }}{{ $top := cond (gt $img.Width 1920) 1920 $img.Width -}}
+      {{- $set := slice }}{{ $pick := "" -}}
+      {{- range $w := ($widths | append $top | uniq) }}{{ if le $w $top -}}
+        {{- $r := $img.Resize (printf "%dx webp q80" $w) -}}
+        {{- $set = $set | append (printf "%s %dw" $r.RelPermalink $w) -}}
+        {{- if or (not $pick) (le $w 960) }}{{ $pick = $r.RelPermalink }}{{ end -}}
+      {{- end }}{{ end -}}
+      {{- $out = dict "src" $pick "srcset" (delimit $set ", ") "w" $img.Width "h" $img.Height -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- return $out -}}

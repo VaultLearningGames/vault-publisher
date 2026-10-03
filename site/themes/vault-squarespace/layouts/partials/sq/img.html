@@ -1,0 +1,7 @@
+{{- /* An <img> for a listing or Squarespace image, with its smaller copies (partials/sq/srcset.html) as srcset and the
+       original's width and height (its aspect ratio; the CSS sets the size it is shown at). Params: src, alt, sizes
+       (how wide it is shown, for srcset; default 100vw), style, lazy (below the fold: loading="lazy"), priority (the
+       one image at the top of the page: fetched first, fetchpriority="high"). */ -}}
+{{- $i := partial "sq/srcset.html" .src -}}
+<img src="{{ $i.src | relURL }}"{{ with $i.srcset }} srcset="{{ . }}" sizes="{{ $.sizes | default "100vw" }}"{{ end }}{{ if $i.w }} width="{{ $i.w }}" height="{{ $i.h }}"{{ end }} alt="{{ .alt | default "" }}"{{ with .style }} style="{{ . | safeCSS }}"{{ end }}{{ if .priority }} fetchpriority="high"{{ else if .lazy }} loading="lazy"{{ end }} decoding="async">
+{{- /**/ -}}

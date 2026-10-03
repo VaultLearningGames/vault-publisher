@@ -10,6 +10,8 @@
 //   POST /v1/admin/listings/migrate-images      { base, budget_seconds? }
 //   POST /v1/admin/listings/move                { slug, studio }
 //   POST /v1/admin/listings/update              { updates: [{ slug, fields?, cdn_game? }], publish, publish_pending? }
+//   GET  /v1/admin/image-variants               the listing images on the CDN, and which have their smaller copies
+//   POST /v1/admin/image-variants               { url, width, height, variants: [{ width, webp (base64) }] }
 //
 // Every POST takes dry_run: true, which answers with what would change and writes nothing.
 import type { Context, Hono } from 'hono';
@@ -19,6 +21,8 @@ import { MAX_FEATURED, normalizeFeatured, readFeatured, saveFeatured, sortFeatur
 import { isSlug } from './paths.ts';
 import { studioWebsite } from './db.ts';
 import { changedFields, EMPTY_LISTING, normalize, type ListingFields } from './listings.ts';
+import { IMAGE_CACHE } from './assets.ts';
+import { isOriginalKey, keyOfUrl, listingImageUrls, MAX_VARIANT_BYTES, readVariants, recordVariants, variantKey, variantWidths, webpWidth } from './image-variants.ts';
 import { baseUrl, copySiteImages, draftProblems, importFromExport, moveListingToStudio, saveListing, type ListingRow } from './listing-ops.ts';
 
 // Cloud Run ends a request after its timeout (300 s unless the service sets --timeout), so the image migration
@@ -299,5 +303,52 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
       db.audit(actorOf(id), 'featured.set', games.map((g) => g.slug).join(',') || '(none)', { before: before.games.map((g) => g.slug) });
     }
     return c.json({ dry_run: dry, featured: sortFeatured(games), before: sortFeatured(before.games) });
+  });
+
+  // Smaller copies of the listing images (image-variants.ts), made by scripts/image-variants.ts. GET says which images
+  // need them; POST stores one image's copies (all its widths at once) and records them, so the catalog lists them.
+  app.get('/v1/admin/image-variants', async (c) => {
+    await admin(c);
+    const records = readVariants(db);
+    const images = listingImageUrls(db, deps.prodPublicUrl).map((url) => {
+      const rec = records[keyOfUrl(url, deps.prodPublicUrl)!];
+      return { url, done: !!rec, ...(rec ? { width: rec.w, height: rec.h, widths: rec.widths } : {}) };
+    });
+    return c.json({ count: images.length, missing: images.filter((i) => !i.done).length, images });
+  });
+
+  app.post('/v1/admin/image-variants', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const dry = dryRun(body);
+    const storage = deps.production;
+    if (!storage) fail(503, 'The Vault CDN storage isn’t configured here.');
+    const url = typeof body.url === 'string' ? body.url : '';
+    const key = keyOfUrl(url, deps.prodPublicUrl);
+    if (!key || !isOriginalKey(key)) fail(400, `url must be a listing image on this system’s CDN (${deps.prodPublicUrl}/STUDIO/GAME/_vault-assets/KIND-HASH.EXT)`);
+    const { width, height } = body;
+    if (!Number.isInteger(width) || !Number.isInteger(height) || (width as number) < 1 || (height as number) < 1 || (width as number) > 30_000 || (height as number) > 30_000) fail(400, 'width and height must be the original’s size in pixels');
+    const want = variantWidths(width as number);
+    if (!Array.isArray(body.variants)) fail(400, 'variants must be a list of { width, webp }');
+    const given = new Map<number, Uint8Array>();
+    for (const v of body.variants as { width?: unknown; webp?: unknown }[]) {
+      if (!v || !Number.isInteger(v.width) || typeof v.webp !== 'string') fail(400, 'each variant needs a width and its WebP bytes (webp, base64)');
+      const bytes = new Uint8Array(Buffer.from(v.webp, 'base64'));
+      if (bytes.length > MAX_VARIANT_BYTES) fail(413, `the ${v.width}px copy is over ${MAX_VARIANT_BYTES / 1024 / 1024} MB`);
+      if (webpWidth(bytes) !== v.width) fail(400, `the ${v.width}px copy isn’t a WebP image ${v.width}px wide`);
+      given.set(v.width as number, bytes);
+    }
+    if (given.size !== want.length || !want.every((w) => given.has(w))) fail(400, `a ${width}px-wide image needs copies ${want.join(', ')}px wide, no others`);
+    if (!(await storage.list(key)).some((o) => o.key === key)) fail(404, `${url} isn’t on the CDN`);
+    const keys = want.map((w) => variantKey(key, w));
+    if (!dry) {
+      for (const w of want) {
+        const bytes = given.get(w)!;
+        await storage.put(variantKey(key, w), bytes, bytes.length, { contentType: 'image/webp', cacheControl: IMAGE_CACHE });
+      }
+      recordVariants(db, key, { w: width as number, h: height as number, widths: want });
+      db.audit(`github:${id.actor}`, 'listing.images.variants', key, { widths: want, bytes: [...given.values()].reduce((n, b) => n + b.length, 0) });
+    }
+    return c.json({ dry_run: dry, url, widths: want, keys });
   });
 }

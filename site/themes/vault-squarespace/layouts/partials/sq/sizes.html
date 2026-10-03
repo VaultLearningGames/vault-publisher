@@ -1,0 +1,8 @@
+{{- /* The `sizes` of an image block, from its grid areas (aread: 24 columns from 768px up, in a container at most
+       1500px wide; aream: 8 columns on phones), as "row/col/row/col". Gutters are ignored, so it is a little wider
+       than the block: the browser then never picks a copy too small. */ -}}
+{{- $d := 24 }}{{ $m := 8 -}}
+{{- with .aread }}{{ $p := split . "/" }}{{ if eq (len $p) 4 }}{{ $d = sub (int (index $p 3)) (int (index $p 1)) }}{{ end }}{{ end -}}
+{{- with .aream }}{{ $p := split . "/" }}{{ if eq (len $p) 4 }}{{ $m = sub (int (index $p 3)) (int (index $p 1)) }}{{ end }}{{ end -}}
+{{- $d = math.Min 24 (math.Max 1 $d) }}{{ $m = math.Min 8 (math.Max 1 $m) -}}
+{{- return printf "(min-width: 1500px) %dpx, (min-width: 768px) %.1fvw, %.1fvw" (int (math.Ceil (mul $d 62.5))) (div (mul $d 100.0) 24) (div (mul $m 100.0) 8) -}}

@@ -29,7 +29,7 @@
     {{- $img := partial "sq/card-image.html" $p }}
     {{- $grades := slice }}{{ range $p.Params.grades }}{{ $grades = $grades | append (strings.TrimPrefix "Grades " .) }}{{ end }}
     <div class="gg-item" data-grade="{{ delimit $grades "|" }}" data-subject="{{ delimit ($p.Params.subjects | default slice) "|" }}" data-maker="{{ delimit ($p.Params.makers | default slice) "|" }}" data-text="{{ lower (printf "%s %s" $p.Title $p.Params.short_description) }}">
-      <a class="gg-thumb" href="{{ strings.TrimSuffix "/" $p.RelPermalink }}" aria-label="{{ $p.Title }}">{{ with $img }}<img src="{{ . }}" alt="{{ $p.Title }}" loading="lazy" decoding="async">{{ end }}</a>
+      <a class="gg-thumb" href="{{ strings.TrimSuffix "/" $p.RelPermalink }}" aria-label="{{ $p.Title }}">{{ with $img }}{{ partial "sq/img.html" (dict "src" . "alt" $p.Title "sizes" "(min-width: 1500px) 300px, (min-width: 1359px) 20vw, (min-width: 1087px) 25vw, (min-width: 815px) 34vw, (min-width: 568px) 50vw, 100vw" "lazy" true) }}{{ end }}</a>
       <div class="gg-title" style="{{ printf "--fit:%v" (partial "sq/title-fit.html" (dict "text" $p.Title)) | safeCSS }}"><a href="{{ strings.TrimSuffix "/" $p.RelPermalink }}">{{ $p.Title }}</a></div>
       <div class="gg-excerpt"><p>{{ partial "sq/game-desc.html" $p }}</p></div>
     </div>

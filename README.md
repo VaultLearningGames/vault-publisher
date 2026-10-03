@@ -90,7 +90,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `POST /v1/admin/releases/approve` · `promote` | Approve staging build as release; make current / roll back |
 | | `POST /v1/admin/game-checks` | Post availability-check results |
 | | `POST /v1/admin/site-checks` | A finished [site checks](#site-checks) run from the check-site workflow (`scripts/check-site.ts --out`): validated, counts recomputed, kept (latest 60) → `{ id, counts, url }` |
-| | `GET /v1/admin/listings` · `POST /v1/admin/listings/{import,migrate-images,move,update}` | [Admin tasks](#admin-tasks): the Vault-admin listing operations, for workflows |
+| | `GET /v1/admin/listings` · `POST /v1/admin/listings/{import,migrate-images,move,update}` · `GET`/`POST /v1/admin/image-variants` | [Admin tasks](#admin-tasks): the Vault-admin listing operations, for workflows |
 | | `GET /v1/releases/:studio/:game[/check]` | Read-only: a game's releases, or pre-flight check of a release run |
 | | `GET /v1/catalog` | Public: site listings, studios, featured games |
 | | `GET /v1/site-checks/badge/:name` | Public: the [dashboard](#site-checks-dashboard)'s badges (`all`, `when`, or a check's name) from the latest site checks run, as shields.io endpoint JSON; counts only |
@@ -354,6 +354,7 @@ same code the portal's button runs (`src/listing-ops.ts`), behind `/v1/admin/lis
 | `move` | `{ "slug", "studio" }` | Moves a game to another studio (not while it is hosted on its studio's CDN game). |
 | `update` | `{ "updates": [{ "slug", "fields": {…}, "cdn_game"? }], "publish": true \| false, "publish_pending"? }` | Sets the given listing fields on each draft and, with `publish`, publishes each as Vault. `cdn_game` connects the listing to that CDN game of its studio (`""` disconnects), checked with the fields, so `"cdn_game": "lakeland", "fields": { "play_source": "cdn" }` moves a game to the CDN in one step. |
 | `release` | `{ "studio", "game", "version", "ref"?, "promote"? }` | Approves the test build `ref` (default: the version) as release `version` and, unless `promote: false`, makes it current: the Release workflow's approve-and-promote, run in the chosen system's environment (on staging, the way to release without a signed-in person). Each call copies for at most `budget_seconds` (default 75, inside Cloudflare's 100-second request limit) and answers `done: false` with what remains; the workflow calls again until it is done, so a game of thousands of files (Jo Wilder: 8,400) takes several rounds. Repeating it changes nothing. |
+| `image-variants` | `{}` or `{ "redo": true }` | Makes the smaller WebP copies (320–1920px wide) of every listing and featured image on the CDN that has none yet, next to the original (`…/_vault-assets/KIND-HASH-<W>w.webp`), and records them; `/v1/catalog` lists them as `images` and the site's templates use them as `srcset` (`src/image-variants.ts`). Resizing happens in the job (`scripts/image-variants.ts`, sharp); the portal checks and stores. Every site build also runs it for new uploads. A dry run makes the copies and reports their sizes without storing them. Rebuild the site afterwards. |
 
 ```sh
 # Add Transformations Quest from the site's export (see the note on `import` below)

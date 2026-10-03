@@ -19,6 +19,7 @@ export interface PageData {
   title: string;
   heading: string;
   plays: { wired: string[]; newTab: string[] };   // game addresses: opened in the site's player, and in a new tab
+  refs: Record<string, string>;                    // address → the element that asks for it (the first one, up to 3000)
 }
 
 // Down the page in steps (so lazy images load) and back up. Bounded to about four seconds.
@@ -89,6 +90,30 @@ export function collectPage(): PageData {
     images.push({ src, loaded: !img.complete || img.naturalWidth > 0, natural: [img.naturalWidth, img.naturalHeight], shown: [r.width, r.height] });
   }
 
+  // Which element asks for each file, so a missing one can be found in the page's source.
+  const refs: Record<string, string> = {};
+  let nrefs = 0;
+  const ref = (raw: string | null | undefined, what: string) => {
+    if (!raw || nrefs >= 3000) return;
+    try { const u = new URL(raw.trim(), document.baseURI); u.hash = ''; if (!(u.href in refs)) { refs[u.href] = what; nrefs++; } } catch { /* not an address */ }
+  };
+  const srcset = (v: string | null) => (v ?? '').split(',').map((c) => c.trim().split(/\s+/)[0]).filter(Boolean);
+  for (const e of document.querySelectorAll('img')) {
+    ref(e.getAttribute('src'), 'img'); ref(e.currentSrc, 'img');
+    for (const u of srcset(e.getAttribute('srcset'))) ref(u, 'img srcset');
+  }
+  for (const e of document.querySelectorAll('picture source[srcset]')) for (const u of srcset(e.getAttribute('srcset'))) ref(u, 'picture source');
+  for (const e of document.querySelectorAll('script[src]')) ref(e.getAttribute('src'), 'script');
+  for (const e of document.querySelectorAll('link[href]')) ref(e.getAttribute('href'), `link rel=${(e.getAttribute('rel') ?? '').trim() || '?'}`);
+  for (const e of document.querySelectorAll('video[src], audio[src], source[src], track[src], embed[src], input[type=image][src]')) ref(e.getAttribute('src'), e.tagName.toLowerCase());
+  for (const e of document.querySelectorAll('video[poster]')) ref(e.getAttribute('poster'), 'video poster');
+  for (const e of document.querySelectorAll('object[data]')) ref(e.getAttribute('data'), 'object');
+  for (const e of document.querySelectorAll('iframe[src]')) ref(e.getAttribute('src'), 'iframe');
+  for (const e of document.querySelectorAll('meta[property="og:image"], meta[name="twitter:image"]')) ref(e.getAttribute('content'), `meta ${e.getAttribute('property') ?? e.getAttribute('name')}`);
+  for (const e of document.querySelectorAll('[style*="url("]')) {
+    for (const m of (e.getAttribute('style') ?? '').matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)) ref(m[1], `${e.tagName.toLowerCase()} style`);
+  }
+
   const ids = [...document.querySelectorAll('[id]')].map((e) => e.id).concat([...document.querySelectorAll('a[name]')].map((e) => e.getAttribute('name') ?? ''));
 
   // textContent, not innerText (which skips what is hidden and is slow); but textContent glues blocks together
@@ -116,7 +141,7 @@ export function collectPage(): PageData {
       if (/^https?:$/.test(u.protocol) && u.host !== location.host) plays.newTab.push(u.href);
     } catch { /* not an address */ }
   }
-  return { images, links, ids, text, title: document.title, heading: clean(document.querySelector('h1')?.textContent), plays };
+  return { images, links, ids, text, title: document.title, heading: clean(document.querySelector('h1')?.textContent), plays, refs };
 }
 
 // Whether the game's own document shows something.

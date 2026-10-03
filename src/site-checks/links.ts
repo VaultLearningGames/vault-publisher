@@ -38,7 +38,7 @@ export async function checkLinks(env: LinkEnv, visits: Map<string, Visit>, sitem
   for (const link of all) {
     const problem = hrefProblem(link.raw);
     if (problem === 'skip') continue;
-    if (problem) { findings.push({ check: 'links', level: problem.level, code: 'link.invalid', page: link.page, target: link.raw, message: problem.message }); continue; }
+    if (problem) { findings.push({ check: 'links', level: problem.level, code: 'link.invalid', page: link.page, target: link.raw, message: problem.message, detail: { status: null, kind: link.kind, text: link.text.slice(0, 120), error: null, final: null } }); continue; }
     if (!/^https?:\/\//i.test(link.url)) continue;
     const video = youtubeWatchUrl(link.url);
     const local = video ? null : fromVisit(link, env.origin, visits);

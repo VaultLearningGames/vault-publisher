@@ -9,7 +9,7 @@ import { deflateSync, crc32 } from 'node:zlib';
 import { parseSitemap } from '../src/site-checks/discover.ts';
 import { runSiteChecks } from '../src/site-checks/run.ts';
 import { isFlat, isPageUrl, normalisePath, oembedUrl, pagePathOf, youtubeWatchUrl } from '../src/site-checks/util.ts';
-import type { SiteCheckRun } from '../src/site-checks.ts';
+import type { Finding, SiteCheckRun } from '../src/site-checks.ts';
 
 // ---------- pure helpers ----------
 describe('site-checks helpers', () => {
@@ -162,6 +162,31 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
     assert.ok(has('games', 'game.failed', (f) => f.page === '/noframe/' && /refused to be shown/.test(f.message)));
     assert.ok(!run.findings.some((f) => f.check === 'games' && (f.page === '/game/' || f.page === '/tab/')), JSON.stringify(run.findings.filter((f) => f.check === 'games')));
     assert.equal(run.summaries.find((s) => s.check === 'games')!.checked, 3);
+  });
+
+  test('every finding keeps the details the portal’s tables show', () => {
+    assert.equal(run.detail_version, 2);
+    const find = (check: string, code: string, pred: (f: Finding) => boolean) => run.findings.find((f) => f.check === check && f.code === code && pred(f));
+    const css = find('assets', 'asset.missing', (f) => f.target.endsWith('/css/missing.css'))!;
+    assert.deepEqual([css.detail?.status, css.detail?.type, css.detail?.element], [404, 'stylesheet', 'link rel=stylesheet']);
+    assert.deepEqual(css.pages, ['/broken/']);
+    const png = find('assets', 'asset.missing', (f) => f.target.endsWith('/img/missing.png'))!;
+    assert.deepEqual([png.detail?.status, png.detail?.element], [404, 'img']);
+    assert.equal(find('assets', 'asset.broken-image', (f) => f.target.endsWith('/img/bad.png'))!.detail?.element, 'img');
+    assert.equal(find('assets', 'page.failed', (f) => f.page === '/ghost/')!.detail?.status, 404);
+    const nope = find('links', 'link.broken', (f) => f.target.endsWith('/nope/'))!;
+    assert.deepEqual([nope.detail?.status, nope.detail?.kind, nope.detail?.text], [404, 'link', 'A page that is gone']);
+    assert.equal(find('links', 'link.missing-anchor', (f) => f.target.endsWith('/#nowhere'))!.detail?.text, 'an anchor that is not there');
+    const game = find('games', 'game.failed', (f) => f.page === '/noframe/')!;
+    assert.deepEqual([game.detail?.game, game.detail?.embed], ['Fixture No Frame', true]);
+    assert.match(String(game.detail?.error), /refused to be shown/);
+    assert.match(String(find('spelling', 'spelling.unknown', (f) => f.target === 'sceince')!.detail?.context), /sceince/);
+    const wide = find('responsive', 'responsive.overflow', (f) => f.page === '/narrow/' && f.target.startsWith('phone'))!;
+    assert.deepEqual([wide.detail?.viewport, wide.detail?.width, wide.detail?.selector], ['phone', 360, 'div.wide']);
+    assert.equal(find('responsive', 'responsive.small-text', (f) => f.page === '/narrow/')!.detail?.selector, 'p.tiny');
+    const big = find('performance', 'perf.large-file', (f) => f.target.endsWith('/img/big.png'))!;
+    assert.equal(big.detail?.element, 'img');
+    assert.ok(Number(big.detail?.bytes) > 500_000);
   });
 
   test('only the requested checks run, on the requested paths', async () => {

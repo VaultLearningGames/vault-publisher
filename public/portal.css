@@ -501,3 +501,33 @@ table.site-checks td.where { min-width: 150px; }
 details.more { margin-top: 4px; }
 details.more summary { cursor: pointer; color: var(--ink-3); }
 details.more ul { margin: 6px 0 0; padding-left: 16px; }
+/* A check's row opens the table of what it found (portal.js [data-findings]) */
+table.site-checks tr.has-details { cursor: pointer; }
+table.site-checks tr.has-details:hover > td { background: var(--hover); }
+table.site-checks tr.has-details:has(+ tr.check-details:not([hidden])) > td { border-bottom: 0; background: var(--sunk); }
+.check-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+tr.check-details > td { padding: 4px 12px 14px; cursor: auto; }
+/* The panel takes the summary table's width and never widens it: its own table scrolls sideways instead. */
+tr.check-details > td > .findings, tr.check-details > td > .findings-none { width: 0; min-width: 100%; }
+.findings-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 8px 0 10px; }
+.findings-filter { -webkit-appearance: none; appearance: none; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; width: min(280px, 100%); }
+.findings-acts { display: inline-flex; gap: 6px; margin-left: auto; }
+.findings .tbl-wrap, .card .findings .tbl-wrap { margin: 0; border: 1px solid var(--line); border-radius: 10px; max-height: 70vh; overflow: auto; }
+table.findings-table th { position: sticky; top: 0; z-index: 1; padding: 0; }
+table.findings-table td { padding: 7px 10px; font-size: 13px; }
+table.findings-table td.addr { min-width: 260px; }
+table.findings-table td.what { min-width: 200px; }
+table.findings-table td.name { min-width: 140px; }
+.th-sort { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 8px 10px; cursor: pointer; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
+.th-sort:hover { color: var(--ink); }
+.th-sort:focus-visible { outline: 2px solid var(--slate); outline-offset: -2px; }
+th[aria-sort="ascending"] .th-sort::after { content: " ▲"; }
+th[aria-sort="descending"] .th-sort::after { content: " ▼"; }
+th.r .th-sort { text-align: right; }
+.findings-none { margin: 8px 0 0; }
+@media (max-width: 860px) {
+  /* On a phone the summary table scrolls sideways; its open panel stays in view at the screen's width. */
+  tr.check-details > td > .findings, tr.check-details > td > .findings-none { position: sticky; left: 0; width: calc(100vw - 56px); min-width: 0; }
+  .findings-acts { margin-left: 0; }
+  input[type=search].findings-filter { width: 100%; padding: 8px 12px; }   /* no search icon to clear */
+}

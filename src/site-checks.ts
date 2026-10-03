@@ -51,6 +51,9 @@ export interface CheckSummary {
   warn: number;
   fail: number;
   ms: number;
+  // Problems found but not listed in the run's findings (a check lists at most MAX_PER_CHECK, worst first); they are
+  // included in warn and fail. Absent on runs recorded before the cap, and when nothing was left out.
+  unlisted?: Record<FindingLevel, number>;
 }
 
 export type RunStatus = 'done' | 'error';
@@ -69,6 +72,9 @@ export interface SiteCheckRun {
   findings: Finding[];                // worst first
   counts: Record<FindingLevel, number>;
   error: string | null;               // why the run itself couldn't finish
+  // DETAIL_VERSION when every finding carries its details (the element that asked for a missing file, a link's text,
+  // the browser's error, …), for the portal's details tables. Absent on runs recorded before they did.
+  detail_version?: number;
 }
 
 export interface Progress { phase: string; done: number; total: number }
@@ -120,6 +126,7 @@ export interface PageLoad {
   resources: ResourceSeen[];
   images: ImageSeen[];
   scriptErrors: string[];             // uncaught exceptions
+  refs?: Record<string, string>;      // address → the element on the page that asks for it ('img', 'script', 'link rel=stylesheet', …)
   timing: { ttfb: number | null; domContentLoaded: number | null; load: number | null; lcp: number | null };
 }
 
@@ -194,7 +201,11 @@ export const LIMITS = {
   smallTextPx: 12, tapTargetPx: 24, overflowPx: 2,
 } as const;
 export const MAX_PAGES_LISTED = 20;
-export const MAX_FINDINGS = 2000;
+// Each check lists at most this many findings (worst first, then the most widespread), so one bad run can't bloat the
+// portal's database; the rest are counted (CheckSummary.unlisted).
+export const MAX_PER_CHECK = 500;
+export const MAX_FINDINGS = MAX_PER_CHECK * 6;
+export const DETAIL_VERSION = 2;
 
 const mb = (bytes: number) => (bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.round(bytes / 1000)} KB`);
 const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
@@ -208,6 +219,17 @@ const cancelled = (r: ResourceSeen) => !!r.error && /ERR_ABORTED|NS_BINDING_ABOR
 const failed = (r: ResourceSeen) => (r.status === null ? !!r.error && !cancelled(r) : r.status >= 400);
 const PAGE_PARTS = new Set(['document', 'stylesheet', 'script', 'image', 'font', 'media']);
 
+// The element on the page that asked for an address, or the likeliest asker when no element names it (a font or a
+// background image comes from a stylesheet; anything else from a script).
+export function elementFor(page: Pick<PageLoad, 'refs'>, url: string, type: string): string {
+  const named = page.refs?.[url];
+  if (named) return named;
+  if (type === 'font') return 'a stylesheet (@font-face)';
+  if (type === 'image') return 'a stylesheet or a script';
+  if (type === 'document') return 'the page itself';
+  return 'a script';
+}
+
 export function assetFindings(page: PageLoad, siteOrigin: string): RawFinding[] {
   const out: RawFinding[] = [];
   const seen = new Set<string>();
@@ -217,7 +239,7 @@ export function assetFindings(page: PageLoad, siteOrigin: string): RawFinding[] 
     out.push({ check: 'assets', page: page.path, ...f });
   };
   if (page.error || (page.status !== null && page.status >= 400)) {
-    add({ level: 'fail', code: 'page.failed', target: page.path, message: page.error ? `The page didn't load: ${page.error}` : `The page answers HTTP ${page.status}`, detail: { status: page.status } });
+    add({ level: 'fail', code: 'page.failed', target: page.path, message: page.error ? `The page didn't load: ${page.error}` : `The page answers HTTP ${page.status}`, detail: { status: page.status, error: page.error, element: 'the page itself' } });
     return out;
   }
   for (const r of page.resources) {
@@ -228,15 +250,15 @@ export function assetFindings(page: PageLoad, siteOrigin: string): RawFinding[] 
     add({
       level: serious ? 'fail' : 'warn', code: 'asset.missing', target: r.url,
       message: r.status === null ? `A ${r.type} didn't load (${r.error})` : `A ${r.type} answers HTTP ${r.status}`,
-      detail: { status: r.status, type: r.type },
+      detail: { status: r.status, error: r.status === null ? r.error : null, type: r.type, element: elementFor(page, r.url, r.type) },
     });
   }
   for (const img of page.images) {
     if (img.loaded || !isWeb(img.src)) continue;
-    add({ level: 'fail', code: 'asset.broken-image', target: img.src, message: 'An image on the page is broken' });
+    add({ level: 'fail', code: 'asset.broken-image', target: img.src, message: 'An image on the page is broken', detail: { status: null, error: 'the file is not an image the browser can show', type: 'image', element: page.refs?.[img.src] ?? 'img' } });
   }
   for (const e of page.scriptErrors) {
-    add({ level: 'warn', code: 'asset.script-error', target: short(e, 200), message: 'A script on the page stopped with an error' });
+    add({ level: 'warn', code: 'asset.script-error', target: short(e, 200), message: 'A script on the page stopped with an error', detail: { error: short(e, 500), type: 'script', element: 'script' } });
   }
   return out;
 }
@@ -256,9 +278,9 @@ export function performanceFindings(page: PageLoad): RawFinding[] {
       : r.type === 'media' ? [LIMITS.mediaWarnBytes, Infinity, 'video or audio file']
       : [LIMITS.fileWarnBytes, LIMITS.fileFailBytes, r.type === 'other' ? 'file' : r.type];
     if (r.bytes > warn) {
-      add({ level: r.bytes > fail ? 'fail' : 'warn', code: 'perf.large-file', target: r.url, message: `A ${mb(r.bytes)} ${what}`, detail: { bytes: r.bytes, type: r.type } });
+      add({ level: r.bytes > fail ? 'fail' : 'warn', code: 'perf.large-file', target: r.url, message: `A ${mb(r.bytes)} ${what}`, detail: { bytes: r.bytes, type: r.type, element: elementFor(page, r.url, r.type) } });
     } else if (r.bytes > LIMITS.uncompressedBytes && !r.encoding && COMPRESSIBLE.test(r.mime)) {
-      add({ level: 'warn', code: 'perf.uncompressed', target: r.url, message: `A ${mb(r.bytes)} ${what} is sent without compression`, detail: { bytes: r.bytes, type: r.type } });
+      add({ level: 'warn', code: 'perf.uncompressed', target: r.url, message: `A ${mb(r.bytes)} ${what} is sent without compression`, detail: { bytes: r.bytes, type: r.type, element: elementFor(page, r.url, r.type) } });
     }
   }
   if (total > LIMITS.pageWarnBytes) {
@@ -269,7 +291,7 @@ export function performanceFindings(page: PageLoad): RawFinding[] {
     const bytes = bytesOf.get(img.src) ?? null;
     if (!img.loaded || img.shown[0] < 1 || bytes === null || bytes < LIMITS.oversizedBytes) continue;
     if (img.natural[0] > img.shown[0] * LIMITS.oversizedFactor) {
-      add({ level: 'warn', code: 'perf.oversized-image', target: img.src, message: `A ${img.natural[0]}px-wide image (${mb(bytes)}) is shown ${Math.round(img.shown[0])}px wide`, detail: { bytes, natural: img.natural[0], shown: Math.round(img.shown[0]) } });
+      add({ level: 'warn', code: 'perf.oversized-image', target: img.src, message: `A ${img.natural[0]}px-wide image (${mb(bytes)}) is shown ${Math.round(img.shown[0])}px wide`, detail: { bytes, natural: img.natural[0], shown: Math.round(img.shown[0]), type: 'image', element: 'img' } });
     }
   }
   const { load, lcp, ttfb } = page.timing;
@@ -290,7 +312,7 @@ export function responsiveFindings(view: ViewSeen): RawFinding[] {
   const small = view.viewport === 'phone' || view.viewport === 'tablet';
   const at = `${view.viewport} (${view.width}px)`;
   if (!view.hasViewportMeta && view.viewport === 'phone') {
-    add({ level: 'fail', code: 'responsive.no-viewport', target: 'meta viewport', message: 'The page has no viewport meta tag, so phones show it zoomed out' });
+    add({ level: 'fail', code: 'responsive.no-viewport', target: 'meta viewport', message: 'The page has no viewport meta tag, so phones show it zoomed out', detail: { viewport: view.viewport, width: view.width, selector: 'meta[name=viewport]' } });
   }
   const over = view.scrollWidth - view.width;
   if (over > LIMITS.overflowPx) {
@@ -298,17 +320,17 @@ export function responsiveFindings(view: ViewSeen): RawFinding[] {
     add({
       level: small ? 'fail' : 'warn', code: 'responsive.overflow', target: `${at}: ${culprit}`,
       message: `Scrolls sideways on a ${view.viewport}: the page is ${view.scrollWidth}px wide in a ${view.width}px window (${culprit} sticks out)`,
-      detail: { viewport: view.viewport, width: view.width, scrollWidth: view.scrollWidth },
+      detail: { viewport: view.viewport, width: view.width, scrollWidth: view.scrollWidth, selector: culprit, others: view.offenders.slice(1).map((o) => o.selector).join(', ') },
     });
   }
   if (view.viewport !== 'phone') return out;
   // One finding per kind of element, so a page with forty tiny captions is one line.
   const first = <T extends { selector: string }>(items: T[]) => [...new Map(items.map((i) => [i.selector, i] as const)).values()];
   for (const t of first(view.smallText)) {
-    add({ level: 'warn', code: 'responsive.small-text', target: `${at}: ${t.selector}`, message: `Text is ${t.px}px on a phone: “${short(t.sample, 60)}”`, detail: { px: t.px } });
+    add({ level: 'warn', code: 'responsive.small-text', target: `${at}: ${t.selector}`, message: `Text is ${t.px}px on a phone: “${short(t.sample, 60)}”`, detail: { viewport: view.viewport, width: view.width, selector: t.selector, px: t.px, sample: short(t.sample, 60) } });
   }
   for (const t of first(view.smallTargets)) {
-    add({ level: 'warn', code: 'responsive.small-target', target: `${at}: ${t.selector}`, message: `A ${Math.round(t.width)}×${Math.round(t.height)}px ${t.label ? `“${short(t.label, 40)}” ` : ''}link or button is hard to tap on a phone`, detail: { width: Math.round(t.width), height: Math.round(t.height) } });
+    add({ level: 'warn', code: 'responsive.small-target', target: `${at}: ${t.selector}`, message: `A ${Math.round(t.width)}×${Math.round(t.height)}px ${t.label ? `“${short(t.label, 40)}” ` : ''}link or button is hard to tap on a phone`, detail: { viewport: view.viewport, width: view.width, selector: t.selector, size: `${Math.round(t.width)}×${Math.round(t.height)}`, label: short(t.label, 40) } });
   }
   return out;
 }
@@ -340,7 +362,10 @@ export function linkFinding(link: LinkSeen, probe: LinkProbe, siteOrigin: string
     : link.kind === 'sitemap' ? 'A page in the sitemap' : link.kind === 'meta' ? 'An address in the page’s head' : `The link${link.text ? ` “${short(link.text, 50)}”` : ''}`;
   const f = (level: FindingLevel, code: string, message: string): RawFinding => ({
     check: 'links', level, code, page: link.page, target: link.url + (code === 'link.missing-anchor' ? `#${link.fragment}` : ''), message,
-    detail: { status: probe.status, kind: link.kind },
+    detail: {
+      status: probe.status, kind: link.kind, text: short(link.text, 120), error: probe.error ? `${probe.error.code}${probe.error.message && probe.error.message !== probe.error.code ? `: ${short(probe.error.message, 200)}` : ''}` : null,
+      final: probe.finalUrl && probe.finalUrl !== link.url ? short(probe.finalUrl, 500) : null,
+    },
   });
   if (probe.error) {
     const { code, message } = probe.error;
@@ -367,31 +392,33 @@ export function gameFindings(game: GameLoad): RawFinding[] {
   const add = (check: CheckName, f: Omit<RawFinding, 'check' | 'page'>) => out.push({ check, page: game.page, ...f });
   const name = game.title || game.page;
   const where = game.embed ? 'in the site’s player' : 'in its own tab';
-  const broken = (code: string, message: string) => { add('games', { level: 'fail', code, target: game.url || game.page, message, detail: { status: game.status, embed: game.embed } }); return out; };
+  // What the details table shows for every game finding: which game, how it is opened, and what it answered.
+  const about = { game: short(name, 120), embed: game.embed, status: game.status, error: game.error, ms: game.ms };
+  const broken = (code: string, message: string) => { add('games', { level: 'fail', code, target: game.url || game.page, message, detail: about }); return out; };
   if (game.error) return broken('game.failed', `${name} doesn't load ${where}: ${game.error}`);
   // A game's site that refuses the checker (bot protection) may still let a visitor in.
   if (game.status !== null && REFUSED.has(game.status)) {
-    add('games', { level: 'warn', code: 'game.unverified', target: game.url, message: `${name} refuses automated checks (HTTP ${game.status}); open it to be sure`, detail: { status: game.status, embed: game.embed } });
+    add('games', { level: 'warn', code: 'game.unverified', target: game.url, message: `${name} refuses automated checks (HTTP ${game.status}); open it to be sure`, detail: about });
     return out;
   }
   if (game.status !== null && game.status >= 400) return broken('game.failed', `${name} answers HTTP ${game.status}`);
   if (!game.opened) return broken('game.no-player', game.embed ? `Play didn't open ${name} in the site’s player` : `${name} didn't open`);
   if (!game.hasContent) return broken('game.empty', `${name} opens ${where} but shows nothing`);
 
-  if (game.blank) add('games', { level: 'warn', code: 'game.blank', target: game.url, message: `${name} is still a blank screen after loading` });
+  if (game.blank) add('games', { level: 'warn', code: 'game.blank', target: game.url, message: `${name} is still a blank screen after loading`, detail: about });
   // The game's own files, wherever they are kept; not the calls it makes to someone else's statistics service.
   const missing = game.resources.filter((r) => isWeb(r.url) && failed(r) && (PAGE_PARTS.has(r.type) || sameOrigin(r.url, game.url)));
   for (const r of missing.slice(0, LIMITS.gameMissingListed)) {
-    add('games', { level: 'warn', code: 'game.missing-file', target: r.url, message: `${name} asks for a ${r.type} that ${r.status === null ? `doesn't load (${r.error})` : `answers HTTP ${r.status}`}`, detail: { status: r.status, type: r.type } });
+    add('games', { level: 'warn', code: 'game.missing-file', target: r.url, message: `${name} asks for a ${r.type} that ${r.status === null ? `doesn't load (${r.error})` : `answers HTTP ${r.status}`}`, detail: { ...about, status: r.status, error: r.status === null ? r.error : null, type: r.type } });
   }
   if (missing.length > LIMITS.gameMissingListed) {
-    add('games', { level: 'warn', code: 'game.missing-file', target: `${game.url} (+${missing.length - LIMITS.gameMissingListed} more)`, message: `${name} asks for ${missing.length} files that don't load` });
+    add('games', { level: 'warn', code: 'game.missing-file', target: `${game.url} (+${missing.length - LIMITS.gameMissingListed} more)`, message: `${name} asks for ${missing.length} files that don't load`, detail: about });
   }
-  if (game.ms === null) add('performance', { level: 'warn', code: 'game.slow', target: game.url, message: `${name} hadn't finished loading when the check stopped waiting` });
-  else if (game.ms > LIMITS.gameLoadWarnMs) add('performance', { level: 'warn', code: 'game.slow', target: game.url, message: `${name} takes ${secs(game.ms)} to load`, detail: { ms: game.ms } });
+  if (game.ms === null) add('performance', { level: 'warn', code: 'game.slow', target: game.url, message: `${name} hadn't finished loading when the check stopped waiting`, detail: about });
+  else if (game.ms > LIMITS.gameLoadWarnMs) add('performance', { level: 'warn', code: 'game.slow', target: game.url, message: `${name} takes ${secs(game.ms)} to load`, detail: about });
   const bytes = game.resources.reduce((sum, r) => sum + (r.bytes ?? 0), 0);
   if (bytes > LIMITS.gameWarnBytes) {
-    add('performance', { level: bytes > LIMITS.gameFailBytes ? 'fail' : 'warn', code: 'game.heavy', target: game.url, message: `${name} downloads ${mb(bytes)} before it can be played`, detail: { bytes } });
+    add('performance', { level: bytes > LIMITS.gameFailBytes ? 'fail' : 'warn', code: 'game.heavy', target: game.url, message: `${name} downloads ${mb(bytes)} before it can be played`, detail: { ...about, bytes } });
   }
   return out;
 }
@@ -457,7 +484,7 @@ export function spellingFindings(pages: PageText[], dictionary: Dictionary, allo
   for (const [word, hits] of where) {
     const suggestion = suggested++ < maxSuggested ? dictionary.suggest(word)[0] ?? null : null;
     for (const h of hits) {
-      findings.push({ check: 'spelling', level: 'warn', code: 'spelling.unknown', page: h.page, target: word, message: `“${word}” isn't in the dictionary${suggestion ? ` (${suggestion}?)` : ''}: “…${h.context}…”`, detail: { suggestion } });
+      findings.push({ check: 'spelling', level: 'warn', code: 'spelling.unknown', page: h.page, target: word, message: `“${word}” isn't in the dictionary${suggestion ? ` (${suggestion}?)` : ''}: “…${h.context}…”`, detail: { suggestion, context: short(h.context, 200) } });
     }
   }
   return { findings, words };
@@ -492,18 +519,46 @@ export interface CheckResult { check: CheckName; status: CheckSummary['status'];
 
 // Puts a run together from what each check found. A finding belongs to the check named on it (a game that is slow
 // is reported by the games check but counted under performance), so the counts are taken from the findings.
+// Each check lists at most MAX_PER_CHECK findings, its worst; the rest are counted in its summary's `unlisted`.
 export function finishRun(base: Pick<SiteCheckRun, 'site' | 'checks' | 'started_at' | 'source' | 'started_by' | 'pages' | 'games'>, results: CheckResult[], error: string | null = null): SiteCheckRun {
   const all = groupFindings(results.flatMap((r) => r.findings).filter((f) => base.checks.includes(f.check)));
-  const findings = all.slice(0, MAX_FINDINGS);
+  const kept = new Set<Finding>();
   const summaries = base.checks.map((check): CheckSummary => {
     const r = results.find((x) => x.check === check);
     const mine = all.filter((f) => f.check === check);
-    return {
+    mine.slice(0, MAX_PER_CHECK).forEach((f) => kept.add(f));
+    const summary: CheckSummary = {
       check, status: r?.status ?? 'skipped', note: r ? r.note ?? '' : 'It did not run', checked: r?.checked ?? 0, ms: r?.ms ?? 0,
       ...countFindings(mine),
     };
+    if (mine.length > MAX_PER_CHECK) summary.unlisted = countFindings(mine.slice(MAX_PER_CHECK));
+    return summary;
   });
-  return { ...base, status: error ? 'error' : 'done', finished_at: new Date().toISOString(), summaries, findings, counts: countFindings(all), error };
+  const findings = all.filter((f) => kept.has(f));
+  return { ...base, status: error ? 'error' : 'done', finished_at: new Date().toISOString(), summaries, findings, counts: countFindings(all), error, detail_version: DETAIL_VERSION };
+}
+
+// The portal takes requests of at most 4 MB (bodyLimit on /v1/*). A run that would be bigger as JSON lists fewer
+// findings: the check listing the most gives up its least serious ones (they become `unlisted`) until it fits.
+export const MAX_POST_BYTES = 3_800_000;
+export function fitRun(run: SiteCheckRun, maxBytes = MAX_POST_BYTES): SiteCheckRun {
+  const size = (r: SiteCheckRun) => Buffer.byteLength(JSON.stringify(r));
+  let out = run;
+  while (out.findings.length && size(out) > maxBytes) {
+    const per = new Map<CheckName, number>();
+    for (const f of out.findings) per.set(f.check, (per.get(f.check) ?? 0) + 1);
+    const [check, n] = [...per].sort((a, b) => b[1] - a[1])[0];
+    const keep = Math.floor(n * 0.8);
+    const mine = out.findings.filter((f) => f.check === check);
+    const dropped = new Set(mine.slice(keep));
+    const gone = countFindings([...dropped]);
+    out = {
+      ...out,
+      findings: out.findings.filter((f) => !dropped.has(f)),
+      summaries: out.summaries.map((s) => (s.check !== check ? s : { ...s, unlisted: { warn: (s.unlisted?.warn ?? 0) + gone.warn, fail: (s.unlisted?.fail ?? 0) + gone.fail } })),
+    };
+  }
+  return out;
 }
 
 // ---------- starting a run ----------
@@ -576,6 +631,12 @@ export function parseRun(body: Record<string, unknown>): SiteCheckRun | string {
 
   if (!Array.isArray(body.findings)) return 'findings must be an array';
   if (body.findings.length > MAX_FINDINGS) return `at most ${MAX_FINDINGS} findings`;
+  const perCheck = new Map<unknown, number>();
+  for (const f of body.findings) {
+    const c = isObject(f) ? f.check : undefined;
+    perCheck.set(c, (perCheck.get(c) ?? 0) + 1);
+    if (perCheck.get(c)! > MAX_PER_CHECK) return `at most ${MAX_PER_CHECK} findings for each check`;
+  }
   const findings: Finding[] = [];
   for (const [i, raw] of body.findings.entries()) {
     if (!isObject(raw)) return `findings[${i}] must be an object`;
@@ -624,11 +685,31 @@ export function parseRun(body: Record<string, unknown>): SiteCheckRun | string {
     const checked = amount(raw.checked), ms = amount(raw.ms);
     if (checked === null) return `summaries[${i}].checked must be a number, 0 or more`;
     if (ms === null) return `summaries[${i}].ms must be a number, 0 or more`;
-    summaries.push({ check, status: raw.status, note: text(raw.note, 500), checked, ms, ...countFindings(findings.filter((f) => f.check === check)) });
+    const listed = countFindings(findings.filter((f) => f.check === check));
+    const summary: CheckSummary = { check, status: raw.status, note: text(raw.note, 500), checked, ms, ...listed };
+    // The findings left out of the list can only be counted, so these are the one count taken from the body.
+    if (raw.unlisted !== undefined && raw.unlisted !== null) {
+      const u = raw.unlisted;
+      const warn = isObject(u) ? count(u.warn) : null, fail = isObject(u) ? count(u.fail) : null;
+      if (warn === null || fail === null || warn > 1_000_000 || fail > 1_000_000) return `summaries[${i}].unlisted must be { warn, fail }: whole numbers, 0 or more`;
+      if (warn + fail > 0) {
+        summary.unlisted = { warn, fail };
+        summary.warn += warn;
+        summary.fail += fail;
+      }
+    }
+    summaries.push(summary);
   }
   summaries.sort((a, b) => CHECKS.indexOf(a.check) - CHECKS.indexOf(b.check));
-
-  return { site, status: body.status, checks, started_at: startedAt, finished_at: finishedAt, source: source || null, started_by: '', pages, games, summaries, findings, counts: countFindings(findings), error };
+  const counts = countFindings(findings);
+  for (const s of summaries) if (s.unlisted) { counts.warn += s.unlisted.warn; counts.fail += s.unlisted.fail; }
+  const run: SiteCheckRun = { site, status: body.status, checks, started_at: startedAt, finished_at: finishedAt, source: source || null, started_by: '', pages, games, summaries, findings, counts, error };
+  if (body.detail_version !== undefined && body.detail_version !== null) {
+    const v = count(body.detail_version);
+    if (v === null || v > 1000) return 'detail_version must be a whole number';
+    run.detail_version = v;
+  }
+  return run;
 }
 
 // ---------- reports ----------
@@ -660,7 +741,10 @@ export function runMarkdown(run: SiteCheckRun, portalPage?: string, maxPerCheck 
     if (!mine.length) continue;
     out.push('', `### ${CHECK_LABEL[check]}`, '', '| | Problem | What | Where |', '|---|---|---|---|');
     for (const f of mine.slice(0, maxPerCheck)) out.push(`| ${ICON[f.level]} | ${cell(f.message)} | ${cell(short(f.target, 100))} | ${cell(pagesOf(f))} |`);
-    if (mine.length > maxPerCheck) out.push('', `…and ${mine.length - maxPerCheck} more${portalPage ? ` in the portal` : ''}.`);
+    const u = run.summaries.find((s) => s.check === check)?.unlisted;
+    const unlisted = u ? u.warn + u.fail : 0;
+    if (mine.length > maxPerCheck) out.push('', `…and ${mine.length - maxPerCheck} more${portalPage ? ` in the portal` : ''}${unlisted ? ` (and ${unlisted} not listed)` : ''}.`);
+    else if (unlisted) out.push('', `…and ${unlisted} more not listed.`);
   }
   return out.join('\n') + '\n';
 }

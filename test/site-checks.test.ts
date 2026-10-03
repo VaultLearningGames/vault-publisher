@@ -2,7 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   allowList, annotations, assetFindings, checkBadge, CHECKS, runBadge, whenBadge, finishRun, fingerprint, gameFindings, groupFindings, hrefProblem, issueMarkdown,
-  LIMITS, linkFinding, MAX_FINDINGS, MAX_PAGES_LISTED, parseRun, parseStart, performanceFindings, responsiveFindings, runFails, runMarkdown, spellingFindings, wordsOf,
+  DETAIL_VERSION, elementFor, fitRun, LIMITS, linkFinding, MAX_FINDINGS, MAX_PAGES_LISTED, MAX_PER_CHECK, parseRun, parseStart, performanceFindings, responsiveFindings, runFails, runMarkdown, spellingFindings, wordsOf,
   type CheckSummary, type Dictionary, type GameLoad, type LinkProbe, type LinkSeen, type PageLoad, type RawFinding, type ResourceSeen, type SiteCheckRun, type ViewSeen,
 } from '../src/site-checks.ts';
 
@@ -435,6 +435,92 @@ describe('starting a run', () => {
   });
 });
 
+describe('the details each finding keeps', () => {
+  test('a missing file: its answer, its type and the element that asks for it', () => {
+    const p = page({
+      refs: { [`${SITE}/sq/css/gone.css`]: 'link rel=stylesheet', [`${SITE}/img/x.png`]: 'img srcset' },
+      resources: [res({ url: `${SITE}/sq/css/gone.css`, status: 404 }), res({ url: `${SITE}/img/x.png`, type: 'image', status: 500 }),
+        res({ url: `${SITE}/f.woff2`, type: 'font', status: 404 }), res({ url: 'https://cdn.example.org/a.js', type: 'script', status: null, error: 'net::ERR_NAME_NOT_RESOLVED' })],
+    });
+    const d = assetFindings(p, SITE).map((f) => f.detail);
+    assert.deepEqual(d, [
+      { status: 404, error: null, type: 'stylesheet', element: 'link rel=stylesheet' },
+      { status: 500, error: null, type: 'image', element: 'img srcset' },
+      { status: 404, error: null, type: 'font', element: 'a stylesheet (@font-face)' },
+      { status: null, error: 'net::ERR_NAME_NOT_RESOLVED', type: 'script', element: 'a script' },
+    ]);
+    assert.equal(elementFor({}, 'x', 'image'), 'a stylesheet or a script');
+    assert.deepEqual(assetFindings(page({ status: 404 }), SITE)[0].detail, { status: 404, error: null, element: 'the page itself' });
+  });
+
+  test('a link: its answer, its text, its kind, and the error when there was no answer', () => {
+    const link: LinkSeen = { page: '/about/', url: 'https://gone.example.org/x', fragment: '', raw: 'https://gone.example.org/x', text: 'Our partners', kind: 'link' };
+    const f = linkFinding(link, { status: 404, error: null, finalUrl: 'https://gone.example.org/x/', attempts: 1, anchorFound: null }, SITE)!;
+    assert.deepEqual(f.detail, { status: 404, kind: 'link', text: 'Our partners', error: null, final: 'https://gone.example.org/x/' });
+    const dns = linkFinding(link, { status: null, error: { code: 'ENOTFOUND', message: 'getaddrinfo ENOTFOUND gone.example.org' }, finalUrl: null, attempts: 2, anchorFound: null }, SITE)!;
+    assert.deepEqual([dns.detail?.status, dns.detail?.error], [null, 'ENOTFOUND: getaddrinfo ENOTFOUND gone.example.org']);
+  });
+
+  test('a game: its name, how it opens, its answer and its load time', () => {
+    const g: GameLoad = { page: '/wake/', title: 'Wake', url: 'https://x.example.org/wake/', embed: true, opened: true, status: 200, error: null, hasContent: true, blank: true, ms: 2400, resources: [res({ url: 'https://x.example.org/wake/a.wasm', type: 'other', status: 404 })] };
+    const [blank, missing] = gameFindings(g);
+    assert.deepEqual(blank.detail, { game: 'Wake', embed: true, status: 200, error: null, ms: 2400 });
+    assert.deepEqual([missing.detail?.game, missing.detail?.status, missing.detail?.type], ['Wake', 404, 'other']);
+  });
+
+  test('a word: its suggestion and where it stands; a layout problem: the width and the element', () => {
+    const dictionary: Dictionary = { correct: (w) => w !== 'sceince', suggest: () => ['science'] };
+    const { findings } = spellingFindings([{ path: '/a/', text: 'Learn about sceince with games' }], dictionary, new Set());
+    assert.deepEqual(findings[0].detail, { suggestion: 'science', context: 'Learn about sceince with games' });
+    const [over, small] = responsiveFindings({ path: '/a/', viewport: 'phone', width: 360, hasViewportMeta: true, scrollWidth: 500, offenders: [{ selector: 'div.wide', right: 500 }, { selector: 'img.hero', right: 420 }], smallText: [{ selector: 'p.tiny', px: 10, sample: 'fine print' }], smallTargets: [] });
+    assert.deepEqual(over.detail, { viewport: 'phone', width: 360, scrollWidth: 500, selector: 'div.wide', others: 'img.hero' });
+    assert.deepEqual(small.detail, { viewport: 'phone', width: 360, selector: 'p.tiny', px: 10, sample: 'fine print' });
+  });
+
+  test('a check lists at most MAX_PER_CHECK findings, its worst, and counts the rest', () => {
+    const base = { site: SITE, checks: ['links', 'spelling'] as const, started_at: '2026-10-02T12:00:00.000Z', source: null, started_by: 'cli', pages: 1, games: 0 };
+    const many: RawFinding[] = Array.from({ length: MAX_PER_CHECK + 100 }, (_, i) => ({ check: 'links', level: i % 7 === 0 ? 'fail' : 'warn', code: 'link.broken', page: '/a/', target: `https://x.example/${i}`, message: 'm' }));
+    const words: RawFinding[] = [{ check: 'spelling', level: 'warn', code: 'spelling.unknown', page: '/a/', target: 'teh', message: 'm' }];
+    const run = finishRun({ ...base, checks: [...base.checks] }, [{ check: 'links', status: 'done', checked: 600, ms: 1, findings: many }, { check: 'spelling', status: 'done', checked: 9, ms: 1, findings: words }]);
+    const links = run.findings.filter((f) => f.check === 'links');
+    assert.equal(links.length, MAX_PER_CHECK);
+    const fails = many.filter((f) => f.level === 'fail').length;
+    assert.equal(links.filter((f) => f.level === 'fail').length, fails);       // every failure is listed before a warning
+    const s = run.summaries.find((x) => x.check === 'links')!;
+    assert.deepEqual(s.unlisted, { warn: 100, fail: 0 });
+    assert.deepEqual([s.warn, s.fail], [MAX_PER_CHECK + 100 - fails, fails]);
+    assert.deepEqual(run.counts, { warn: MAX_PER_CHECK + 100 - fails + 1, fail: fails });
+    assert.equal(run.summaries.find((x) => x.check === 'spelling')!.unlisted, undefined);
+    assert.equal(run.findings.filter((f) => f.check === 'spelling').length, 1);
+    assert.equal(run.detail_version, DETAIL_VERSION);
+    // What the portal receives: the same counts, and the same unlisted.
+    const back = parseRun(JSON.parse(JSON.stringify(run))) as SiteCheckRun;
+    assert.deepEqual(back.counts, run.counts);
+    assert.deepEqual(back.summaries, run.summaries);
+    assert.equal(back.detail_version, DETAIL_VERSION);
+    assert.match(runMarkdown(run), /and 100 not listed/);
+  });
+});
+
+describe('a run too big to post', () => {
+  test('lists fewer of the biggest check’s findings, counting the rest, until it fits', () => {
+    const base = { site: SITE, checks: ['links', 'spelling'] as ('links' | 'spelling')[], started_at: '2026-10-02T12:00:00.000Z', source: null, started_by: 'cli', pages: 1, games: 0 };
+    const links: RawFinding[] = Array.from({ length: 400 }, (_, i) => ({ check: 'links', level: i < 10 ? 'fail' : 'warn', code: 'link.broken', page: '/a/', target: `https://x.example/${i}/${'p'.repeat(1500)}`, message: 'm' }));
+    const words: RawFinding[] = Array.from({ length: 20 }, (_, i) => ({ check: 'spelling', level: 'warn', code: 'spelling.unknown', page: '/a/', target: `w${i}`, message: 'm' }));
+    const run = finishRun(base, [{ check: 'links', status: 'done', checked: 1, ms: 1, findings: links }, { check: 'spelling', status: 'done', checked: 1, ms: 1, findings: words }]);
+    assert.equal(fitRun(run, 10_000_000), run);
+    const fit = fitRun(run, 300_000);
+    assert.ok(Buffer.byteLength(JSON.stringify(fit)) <= 300_000);
+    const kept = fit.findings.filter((f) => f.check === 'links');
+    assert.ok(kept.length < 400 && kept.length > 100, String(kept.length));
+    assert.equal(kept.filter((f) => f.level === 'fail').length, 10);
+    assert.deepEqual(fit.summaries.find((s) => s.check === 'links')!.unlisted, { warn: 400 - kept.length, fail: 0 });
+    assert.equal(fit.findings.filter((f) => f.check === 'spelling').length, 20);
+    const back = parseRun(JSON.parse(JSON.stringify(fit))) as SiteCheckRun;
+    assert.deepEqual(back.counts, run.counts);
+  });
+});
+
 describe('receiving a run', () => {
   const good = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
     site: `${SITE}/`, status: 'done', checks: ['links', 'games'], started_at: '2026-10-02T11:47:00Z', finished_at: '2026-10-02T11:58:30.123Z',
@@ -501,6 +587,17 @@ describe('receiving a run', () => {
     assert.deepEqual(run({ summaries: [] }).summaries, []);
   });
 
+  test('unlisted findings are counted; a run without them or without details (an older one) is fine', () => {
+    const r = run({ summaries: [{ check: 'links', status: 'done', note: '', checked: 40, ms: 2000, unlisted: { warn: 30, fail: 2 } }] });
+    assert.deepEqual(r.summaries.find((s) => s.check === 'links')!.unlisted, { warn: 30, fail: 2 });
+    assert.deepEqual(r.counts, { warn: 31, fail: 3 });
+    assert.equal(r.detail_version, undefined);
+    assert.equal(run({ summaries: [{ check: 'links', status: 'done', note: '', checked: 40, ms: 2000, unlisted: { warn: 0, fail: 0 } }] }).summaries[0].unlisted, undefined);
+    for (const unlisted of [{ warn: -1, fail: 0 }, { warn: 1 }, 'lots', { warn: 2_000_000, fail: 0 }]) bad({ summaries: [{ check: 'links', status: 'done', note: '', checked: 1, ms: 1, unlisted }] }, /unlisted/);
+    assert.equal(run({ detail_version: 2 }).detail_version, 2);
+    bad({ detail_version: 'two' }, /detail_version/);
+  });
+
   test('findings: valid check and level, trimmed strings, at most MAX_FINDINGS', () => {
     const f = { check: 'links', level: 'warn', code: 'c', page: '/', target: 't', message: 'm', pages: ['/'], count: 1 };
     bad({ findings: [{ ...f, check: 'spelling' }] }, /findings\[0\]\.check/);
@@ -513,7 +610,8 @@ describe('receiving a run', () => {
     bad({ findings: ['x'] }, /must be an object/);
     bad({ findings: 'many' }, /findings must be an array/);
     bad({ findings: Array.from({ length: MAX_FINDINGS + 1 }, () => f) }, /at most/);
-    assert.equal(run({ findings: Array.from({ length: MAX_FINDINGS }, () => f) }).findings.length, MAX_FINDINGS);
+    bad({ findings: Array.from({ length: MAX_PER_CHECK + 1 }, () => f) }, /at most 500 findings for each check/);
+    assert.equal(run({ findings: Array.from({ length: MAX_PER_CHECK }, () => f) }).findings.length, MAX_PER_CHECK);
     const long = run({ findings: [{ ...f, code: 'c'.repeat(300), page: `/${'p'.repeat(900)}`, target: 't'.repeat(5000), message: 'm'.repeat(3000),
       pages: Array.from({ length: 50 }, (_, i) => `/${i}${'x'.repeat(600)}`), count: 50 }] }).findings[0];
     assert.deepEqual([long.code.length, long.page.length, long.target.length, long.message.length], [100, 500, 2000, 1000]);

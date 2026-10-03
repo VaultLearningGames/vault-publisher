@@ -238,3 +238,82 @@ describe('the portal pages', () => {
     assert.match(await (await rm().get(`/vault/site-checks/${first}`)).text(), /Broken links/);
   });
 });
+
+describe('a check’s details', () => {
+  const missing = (n: number, f: Partial<Finding> = {}): Finding => finding({ check: 'assets', code: 'asset.missing', target: `https://vaultlearninggames.org/img/${n}.png`, message: 'A image answers HTTP 404',
+    page: '/wake/', pages: ['/wake/', '/about/'], count: 2, detail: { status: 404, error: null, type: 'image', element: 'img' }, ...f });
+  const withAssets = (findings: Finding[], more: Record<string, unknown> = {}) => postRun(findings, {
+    checks: ['assets', 'links'], detail_version: 2,
+    summaries: [{ check: 'assets', status: 'done', note: '', checked: 12, ms: 1 }, { check: 'links', status: 'done', note: '', checked: 40, ms: 1 }], ...more,
+  });
+
+  test('each check that found something has a Details button opening a table of its findings, on both pages', async () => {
+    const id = await withAssets([missing(1), missing(2, { level: 'warn', target: '=HYPERLINK("x")', detail: { status: null, error: 'net::ERR_FAILED', type: 'font', element: 'a stylesheet (@font-face)' } }),
+      finding({ detail: { status: 404, kind: 'link', text: 'Our <b>partners</b>', error: null, final: null } })]);
+    for (const path of [`/vault/site-checks/${id}`, '/vault/site-checks']) {
+      const text = await (await rm().get(path)).text();
+      // The row and its button: keyboard-operable, says whether it's open and what it opens.
+      assert.match(text, new RegExp(`<tr id="check-assets" class="has-details" data-details="details-${id}-assets">`));
+      assert.match(text, new RegExp(`<button type="button" class="feat-open" aria-expanded="false" aria-controls="details-${id}-assets"[^>]*>Details`));
+      assert.match(text, new RegExp(`<tr class="feat-edit check-details" id="details-${id}-assets" hidden>`));
+      // The assets table: the file, its answer, the element and the pages, with links that open in a new tab.
+      assert.match(text, /<button type="button" class="th-sort" data-sort="1">File<\/button>[\s\S]*>Answer<[\s\S]*>Asked for by<[\s\S]*>Used on</);
+      assert.match(text, /<a class="mono cut" href="https:\/\/vaultlearninggames\.org\/img\/1\.png" target="_blank" rel="noopener"/);
+      assert.match(text, /data-v="HTTP 404" data-s="404"><span class="mono nowrap">HTTP 404/);
+      assert.match(text, /net::ERR_FAILED/);
+      assert.match(text, /a stylesheet \(@font-face\)/);
+      assert.match(text, /<a href="https:\/\/vaultlearninggames\.org\/about\/" target="_blank" rel="noopener"/);
+      // The links table: the link's text, escaped.
+      assert.match(text, />Link text</);
+      assert.match(text, /Our &lt;b&gt;partners&lt;\/b&gt;/);
+      assert.match(text, /data-filter/);
+      assert.match(text, /data-copy-csv/);
+      assert.match(text, new RegExp(`href="/vault/site-checks/${id}/findings\\.csv\\?check=assets" download`));
+      assert.doesNotMatch(text, /recorded before the checks kept every detail/);
+    }
+  });
+
+  test('a check with nothing found has no Details; the CSV has every column; staff only', async () => {
+    const id = await withAssets([missing(1), missing(2, { target: '=HYPERLINK("x")', message: 'Say "hi", then go' })]);
+    const text = await (await rm().get(`/vault/site-checks/${id}`)).text();
+    assert.doesNotMatch(text, /aria-controls="details-\d+-links"/);
+    const res = await rm().get(`/vault/site-checks/${id}/findings.csv?check=assets`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type')!, /text\/csv/);
+    assert.match(res.headers.get('content-disposition')!, new RegExp(`site-check-${id}-assets\\.csv`));
+    const csv = (await res.text()).split('\r\n');
+    assert.equal(csv[0], 'Level,File,Answer,Asked for by,Problem,Used on,Code');
+    assert.equal(csv[1], 'Failing,https://vaultlearninggames.org/img/1.png,HTTP 404,img,A image answers HTTP 404,/wake/ /about/,asset.missing');
+    assert.equal(csv[2], `Failing,"'=HYPERLINK(""x"")",HTTP 404,img,"Say ""hi"", then go",/wake/ /about/,asset.missing`);   // a formula is text
+    assert.equal(await (await rm().get(`/vault/site-checks/${id}/findings.csv?check=links`)).text(), 'Level,Link to,Answer,Link text,Kind,Problem,On,Code\r\n');
+    assert.equal((await rm().get(`/vault/site-checks/${id}/findings.csv?check=games`)).status, 404);
+    assert.equal((await rm().get(`/vault/site-checks/${id}/findings.csv`)).status, 404);
+    assert.equal((await rm().get('/vault/site-checks/999/findings.csv?check=assets')).status, 404);
+    assert.equal((await h.as('vera', 'none', 'viewer').get(`/vault/site-checks/${id}/findings.csv?check=assets`)).status, 403);
+    assert.equal((await h.app.request(`/vault/site-checks/${id}/findings.csv?check=assets`)).status, 302);
+  });
+
+  test('findings left out by the cap are counted under the table', async () => {
+    const id = await withAssets([missing(1)], { summaries: [{ check: 'assets', status: 'done', note: '', checked: 12, ms: 1, unlisted: { warn: 40, fail: 2 } }] });
+    const text = await (await rm().get(`/vault/site-checks/${id}`)).text();
+    assert.match(text, /And 42 more not listed: a run keeps the 500 worst of each check/);
+    assert.match(text, /3 failing, 40 worth a look/);
+  });
+
+  test('a stored run from before the details: its findings in the table with empty columns, or a note when none were listed', async () => {
+    // As the first version stored it: no detail_version, findings without these details, and (past its cap of 2000)
+    // a check counted but not listed.
+    const old = { ...finishRun({ site: SITE, checks: ['assets', 'links'], started_at: '2026-10-02T11:47:00.000Z', source: null, started_by: 'cli', pages: 12, games: 0 },
+      [{ check: 'assets', status: 'done', checked: 12, ms: 1, findings: [] }, { check: 'links', status: 'done', checked: 40, ms: 1, findings: [] }]) };
+    delete old.detail_version;
+    old.findings = [finding({ check: 'assets', code: 'asset.missing', target: 'https://vaultlearninggames.org/a.css', detail: { status: 404, type: 'stylesheet' } })];
+    old.summaries = old.summaries.map((s) => (s.check === 'links' ? { ...s, fail: 7 } : { ...s, fail: 1 }));
+    const id = db.addSiteCheck(old, 'github:old');
+    const text = await (await rm().get(`/vault/site-checks/${id}`)).text();
+    assert.match(text, /recorded before the checks kept every detail, so some columns are empty/);
+    assert.match(text, /data-v="stylesheet"/);                            // Asked for by: the file's type, the best there is
+    assert.match(text, new RegExp(`aria-controls="details-${id}-links"`));
+    assert.match(text, /Details weren’t recorded for this run: it found 7 things, but didn’t list them/);
+    assert.equal((await rm().get(`/vault/site-checks/${id}/findings.csv?check=links`)).status, 200);
+  });
+});

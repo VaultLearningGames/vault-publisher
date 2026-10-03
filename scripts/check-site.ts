@@ -25,7 +25,7 @@
 import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import {
-  CHECK_LABEL, annotations, issueMarkdown, parseStart, runFails, runMarkdown,
+  CHECK_LABEL, annotations, fitRun, issueMarkdown, parseStart, runFails, runMarkdown,
   type CheckName, type FailOn, type Progress, type RunOptions, type SiteCheckRun,
 } from '../src/site-checks.ts';
 
@@ -130,7 +130,8 @@ export interface Env { GITHUB_ACTIONS?: string }
 export function finish(run: SiteCheckRun, opts: Options, print: (line: string) => void, env: Env = process.env): number {
   print(consoleReport(run));
   if (env.GITHUB_ACTIONS) for (const line of annotations(run)) print(line);
-  if (opts.out) writeFileSync(opts.out, JSON.stringify(run, null, 2) + '\n');
+  // What the workflow posts to the portal: one line, and small enough for its request limit.
+  if (opts.out) writeFileSync(opts.out, JSON.stringify(fitRun(run)) + '\n');
   if (opts.summary) writeFileSync(opts.summary, runMarkdown(run, opts.portalPage ?? undefined));
   if (opts.issue) writeFileSync(opts.issue, issueMarkdown(run, opts.portalPage ?? undefined));
   return exitCodeFor(run, opts.failOn);

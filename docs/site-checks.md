@@ -15,7 +15,13 @@ is unit-tested), `src/site-checks/` (the engine that does the looking), `scripts
 ## The checks
 
 The same problem on many pages (a broken footer link) is one finding listing its pages. Thresholds are `LIMITS` in
-`src/site-checks.ts`.
+`src/site-checks.ts`. Each finding keeps what makes it actionable in its `detail`: a missing file's HTTP status (or
+the browser's error), its type and the element that asks for it (`img`, `script`, `link rel=stylesheet`, `img srcset`,
+`div style`, or the likeliest asker when no element names it, e.g. a stylesheet's `@font-face`); a link's status or
+network error, its text, its kind and where it redirected; a game's name, how it opens, its status, error and load
+time; a word's suggestion and context; a layout problem's width, element and sizes; a large file's bytes and element.
+Each check lists at most 500 findings (its failures first, then the most widespread); the rest are counted in its
+summary's `unlisted` and in the totals.
 
 **Games load** (`games`). Opens every game the site lists, the way its page does: in the site's in-page player, or in a
 new tab for games that don't allow framing. Each game is opened once, from its own page; a network error gets a
@@ -126,15 +132,18 @@ without the feature answers 404 (the workflow says so in a notice and carries on
   is empty or an https link of at most 500 characters; `pages` and `games` are whole numbers, 0 or more; `error` is
   text of at most 1000 characters, or null.
 * `summaries` has at most one entry for each listed check: a valid `check`, `status` (`done`, `skipped` or `error`),
-  `note` (at most 500 characters), and numbers for `checked` and `ms`.
-* `findings` has at most 2000 entries, each with a valid `check` (one of the run's), `level` (`warn` or `fail`), `code`
+  `note` (at most 500 characters), numbers for `checked` and `ms`, and optionally `unlisted: { warn, fail }`, the
+  findings the check found but didn't list.
+* `findings` has at most 500 entries for each check (3000 in all), each with a valid `check` (one of the run's), `level` (`warn` or `fail`), `code`
   (100 characters), `page` (500), `target` (2000), `message` (1000), `pages` (at most 20 paths of 500), a `count` of 1
   or more, and optionally a `detail` of at most 20 keys with text (500 characters), number, true/false or null values.
 * The counts are never taken from the body: the totals and each check's failing and warning numbers are worked out from
-  the findings. Who started the run is not taken from the body either: it is `github:` and the actor in the token.
+  the findings, plus each check's `unlisted`. `detail_version` (2) marks a run whose findings carry the details above;
+  runs stored before it show what they have. Who started the run is not taken from the body either: it is `github:` and the actor in the token.
 
 The portal keeps the latest 60 runs and writes an audit entry (`site_checks.post`) with the counts and the workflow
-run's address. A full run is about 300 KB, well inside the 4 MB limit on requests.
+run's address. A full run is about 300 KB; `check-site.ts --out` writes it on one line, and if it would still be over
+3.8 MB (the portal takes at most 4 MB) the check listing the most findings lists fewer, counting the rest as `unlisted`.
 
 ## Where results appear
 
@@ -144,8 +153,12 @@ run's address. A full run is about 300 KB, well inside the 4 MB limit on request
 * **A tracking issue** per system, *Site checks (staging)* / *(production)*, label `site-checks`: it lists the failing
   findings, is opened or updated whenever something fails, gets a comment when the set of failures changes, and is
   closed when nothing fails (a run that couldn't finish never closes it). Warnings alone don't open one.
-* **The portal:** **Vault → Site checks** shows the latest run and the recent ones, with every finding and the pages it
-  is on, for Vault staff. Its **Run the checks** button opens the workflow in GitHub.
+* **The portal:** **Vault → Site checks** shows the latest run and the recent ones, for Vault staff. Each check that
+  found something opens (its **Details** button, or a click on its row) a table of its findings with the columns that
+  check needs (for missing assets: the file, its answer, the element that asks for it, the problem and the pages that
+  use it), filterable, sortable by column, with links that open the page or the file in a new tab, **Copy as CSV**
+  (the rows shown) and **Download CSV** (`/vault/site-checks/ID/findings.csv?check=NAME`, every row). A run's own
+  page opens a check from its address, e.g. `/vault/site-checks/12#check-links`. Its **Run the checks** button opens the workflow in GitHub.
 * **The artifact** `site-checks-ENVIRONMENT`: the whole run as `site-checks.json` (`SiteCheckRun` in
   `src/site-checks.ts`).
 

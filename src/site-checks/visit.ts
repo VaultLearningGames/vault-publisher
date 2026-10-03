@@ -100,7 +100,7 @@ export async function visitPage(env: VisitEnv, path: string): Promise<Visit> {
       if (first && !asked.has(url)) resources.push({ ...first, ms: null, inFrame: false });
     }
     visit = {
-      load: { path, status, error: null, timing, images: data.images, scriptErrors, resources },
+      load: { path, status, error: null, timing, images: data.images, scriptErrors, resources, refs: data.refs },
       links: data.links.map((l) => ({ ...l, page: path })),
       ids: new Set(data.ids), text: data.text, title: data.heading || data.title, plays: data.plays, views,
     };

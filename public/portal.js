@@ -336,6 +336,70 @@
     }
   });
 
+  // Site checks: a click anywhere on a check's row (not on a link or a control) opens its details like its button, and
+  // a #check-NAME address opens that check's. Each details table ([data-findings]) filters as you type, sorts by a
+  // column (its header button; again for the other way), and copies the rows it shows as CSV.
+  document.addEventListener('click', (e) => {
+    const row = e.target.closest('tr[data-details]');
+    if (!row || e.target.closest('a, button, input, summary, details')) return;
+    const btn = row.querySelector('button.feat-open');
+    if (btn) btn.click();
+  });
+  if (/^#check-[a-z]+$/.test(location.hash)) {
+    const btn = document.querySelector(`${location.hash}[data-details] button.feat-open`);
+    if (btn && btn.getAttribute('aria-expanded') !== 'true') btn.click();
+  }
+  document.querySelectorAll('[data-findings]').forEach((box) => {
+    const body = box.querySelector('tbody');
+    const rows = [...body.rows];
+    const count = box.querySelector('[data-count]');
+    const value = (td) => td.dataset.v || '';
+    const shown = () => rows.filter((r) => !r.hidden);
+    const say = (n) => { count.textContent = n === rows.length ? `${n} ${n === 1 ? 'thing' : 'things'}` : `${n} of ${rows.length}`; };
+    box.querySelector('[data-filter]').addEventListener('input', (e) => {
+      const words = e.target.value.toLowerCase().split(/\s+/).filter(Boolean);
+      for (const r of rows) {
+        const text = [...r.cells].map(value).join(' ').toLowerCase();
+        r.hidden = !words.every((w) => text.includes(w));
+      }
+      say(shown().length);
+    });
+    box.querySelectorAll('[data-sort]').forEach((btn) => btn.addEventListener('click', () => {
+      const i = Number(btn.dataset.sort);
+      const th = btn.closest('th');
+      const dir = th.getAttribute('aria-sort') === 'ascending' ? 'descending' : 'ascending';
+      th.closest('tr').querySelectorAll('th').forEach((h) => h.setAttribute('aria-sort', 'none'));
+      th.setAttribute('aria-sort', dir);
+      const key = (r) => { const td = r.cells[i]; return td.dataset.s !== undefined ? Number(td.dataset.s) : value(td).toLowerCase(); };
+      const sorted = rows.slice().sort((a, b) => {
+        const x = key(a), y = key(b);
+        const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true });
+        return dir === 'ascending' ? c : -c;
+      });
+      body.append(...sorted);
+    }));
+    const copy = box.querySelector('[data-copy-csv]');
+    copy.addEventListener('click', async () => {
+      const field = (s) => { const t = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s; return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+      const head = [...box.querySelectorAll('thead th')].map((th) => field(th.textContent.trim()));
+      const list = shown();
+      const csv = [head.join(','), ...list.map((r) => [...r.cells].map((td) => field(value(td))).join(','))].join('\r\n') + '\r\n';
+      const label = copy.dataset.label || (copy.dataset.label = copy.textContent);
+      try {
+        if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(csv);
+        else {
+          const t = document.createElement('textarea');
+          t.value = csv; t.style.position = 'fixed'; t.style.opacity = '0';
+          document.body.append(t); t.select(); document.execCommand('copy'); t.remove();
+        }
+        copy.textContent = `Copied ${list.length} ${list.length === 1 ? 'row' : 'rows'}`;
+      } catch (_) {
+        copy.textContent = 'Couldn’t copy';
+      }
+      setTimeout(() => { copy.textContent = label; }, 2500);
+    });
+  });
+
   // Dialogs: buttons with data-open="id" fill the dialog's ref fields and open it.
   document.addEventListener('click', (e) => {
     const open = e.target.closest('[data-open]');

@@ -1,6 +1,7 @@
-# The theme's own folders, plus its Squarespace snapshot images as assets too, so the templates can make smaller WebP
-# copies of them at build time (partials/sq/srcset.html). The images are still published as they are, at
-# /sq/img/... (static/), for anything that names them directly (og:image, the player's logo).
+# The theme's own folders (assets/: the Play gate's script, which partials/vault-player.html inlines), plus its
+# Squarespace snapshot images as assets too, so the templates can make smaller WebP copies of them at build time
+# (partials/sq/srcset.html). The images are still published as they are, at /sq/img/... (static/), for anything
+# that names them directly (og:image, the player's logo).
 [module]
   [[module.mounts]]
     source = 'layouts'
@@ -11,3 +12,6 @@
   [[module.mounts]]
     source = 'static/sq/img'
     target = 'assets/sq/img'
+  [[module.mounts]]
+    source = 'assets'
+    target = 'assets'

@@ -23,6 +23,16 @@ disableKinds = ['taxonomy', 'term', 'rss']
     # HUGOxPARAMSxANALYTICSxGOOGLE (production: the property the Squarespace site used).
     google = ""
 
+  [params.play]
+    # The Play gate (themes/vault-squarespace/layouts/partials/vault-player.html): the smallest play area (CSS pixels:
+    # the space Vault's player gives a game below its bar) a game needs, for games whose listing doesn't set its own
+    # (the listing editor's "Smallest play area"). With less room, Play explains what's needed instead of starting the
+    # game, and offers "Try anyway". 960 x 540 is what a 1024 x 768 screen leaves a game in a browser window (1024 wide,
+    # ~560 high below the browser's and the player's bars), the display David asked for; of the 94 games measured
+    # (data/play-minimums.json) 70 fit it. It only applies to games nobody could measure.
+    min_width = 960
+    min_height = 540
+
   [params.forms]
     # Where the Join Vault sign-up and the Submit a Game form post: the Vault Studio Portal's /v1/forms/newsletter and
     # /v1/forms/submit-game. Left empty here; the deploy workflow sets them from the environment's VAULT_PORTAL through

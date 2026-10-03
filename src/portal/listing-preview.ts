@@ -12,7 +12,7 @@ import { randomBytes } from 'node:crypto';
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
 import { catalogGame, catalogStudios } from '../catalog.ts';
-import { normalize, problems, type ListingFields } from '../listings.ts';
+import { normalize, problems, VAULT_ONLY, type ListingFields } from '../listings.ts';
 import type { PreviewSite } from '../config.ts';
 import { html, type Html } from './html.ts';
 import { listingPieces, type ListingHelpers, type ListingRow } from './listings.ts';
@@ -56,7 +56,7 @@ export class PreviewStore {
 // problems a save would. Shared with the save endpoint's rules: only Vault sets the player fit.
 export function formToDraft(b: Record<string, unknown>, base: ListingFields, canPublish: boolean, cdnReady: boolean): ListingFields {
   if (typeof b.embed === 'string') b.embed = b.embed === 'true';
-  if (!canPublish) delete b.fit;
+  if (!canPublish) for (const k of VAULT_ONLY) delete b[k];
   const draft = normalize(b, base);
   const bad = problems(draft, { forPublish: false, cdnReady });
   if (bad.length) fail(400, bad.join(' '));

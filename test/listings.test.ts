@@ -5,7 +5,7 @@ import { createApp } from '../src/app.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db } from '../src/db.ts';
 import { fieldsFromPage } from '../src/listings-import.ts';
-import { normalize, problems } from '../src/listings.ts';
+import { changedFields, normalize, problems } from '../src/listings.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import { signSession } from '../src/portal/session.ts';
 import { browseKeys, type Storage } from '../src/storage.ts';
@@ -87,6 +87,21 @@ describe('listing fields', () => {
     assert.ok(p.some((m) => m.includes('Player fit')));
     assert.ok(p.some((m) => m.includes('title')));
   });
+  test('the smallest play area: whole pixels in range, or empty for the site default', () => {
+    assert.deepEqual([normalize({ min_width: '1024', min_height: ' 600 ' }).min_width, normalize({ min_width: '1024', min_height: ' 600 ' }).min_height], [1024, 600]);
+    assert.deepEqual([normalize({ min_width: 800, min_height: null }).min_width, normalize({ min_width: 800, min_height: null }).min_height], [800, null]);
+    assert.equal(normalize({ min_width: '' }).min_width, null, 'empty: the site default');
+    assert.equal(normalize({}, { ...normalize({ min_width: 900 }) }).min_width, 900, 'kept when the form doesn’t send it');
+    const ok = (f: Record<string, unknown>) => !problems(normalize(f), { forPublish: false, cdnReady: false }).some((m) => m.includes('minimum play'));
+    assert.ok(ok({ min_width: '640', min_height: '400' }) && ok({ min_width: '', min_height: '' }) && ok({ min_width: 3840 }));
+    for (const bad of ['abc', '1024.5', '-5', '0', '199', '5000', 1.5, true]) assert.ok(!ok({ min_width: bad }), `min_width ${bad} is refused`);
+    assert.ok(!ok({ min_height: '12px' }));
+    // A listing saved before the fields existed has none: that's not a change.
+    const old = normalize({ title: 'Old' }) as Partial<ReturnType<typeof normalize>>;
+    delete old.min_width; delete old.min_height;
+    assert.deepEqual(changedFields(old as ReturnType<typeof normalize>, normalize({ title: 'Old' })), []);
+    assert.equal(normalize({ title: 'x' }, old as ReturnType<typeof normalize>).min_width, null);
+  });
   test('Hugo front matter maps to listing fields, with overrides', () => {
     const f = fieldsFromPage({ slug: 'wake', title: 'Wake', params: { about_this_game: 'A kelp game', makers: ['Field Day Lab'], standards: '', game_url: 'https://old', grades: ['Grades 5-8'], screenshots: ['/games/wake/img/1.webp'] } },
       { play_url: 'https://new/', embed: false });
@@ -114,7 +129,7 @@ describe('studios edit, Vault publishes', () => {
     assert.deepEqual(g.studio, { slug: 'fieldday', name: 'Field Day Lab', url: null });
     assert.deepEqual(g.makers, ['Field Day Lab']);
     assert.deepEqual(g.grades, ['Grades 5-8']);
-    assert.deepEqual(g.play, { url: 'https://fielddaylab.wisc.edu/play/wake/', source: 'url', release: null, embed: true, fit: null });
+    assert.deepEqual(g.play, { url: 'https://fielddaylab.wisc.edu/play/wake/', source: 'url', release: null, embed: true, fit: null, min_width: null, min_height: null });
     // Later edits don't reach the site until they're published.
     await mia.post(`${L}/wake`, { short_description: 'Changed' });
     assert.equal((await catalog())[0].short_description, 'Kelp!');
@@ -147,6 +162,29 @@ describe('studios edit, Vault publishes', () => {
     assert.deepEqual(await catalog(), []);
   });
 
+  test('only Vault sets the smallest play area; studios see it; the catalog publishes it', async () => {
+    const boss = as('boss', 'release_manager'), mia = as('mia', 'none', 'maintainer');
+    await boss.post(L, { slug: 'wake', title: 'Wake' });
+    await mia.post(`${L}/wake`, { play_url: 'https://x.test/', min_width: '320', min_height: '240', submit: true });
+    assert.deepEqual([db.listing('wake')!.draft.min_width, db.listing('wake')!.draft.min_height], [null, null], 'ignored from a studio member');
+    const bad = await boss.post(`${L}/wake`, { min_width: '90', publish: true });
+    assert.equal(bad.status, 400);
+    assert.match(((await bad.json()) as { error: string }).error, /minimum play width must be a whole number of pixels from 200 to 3840/);
+    assert.equal((await boss.post(`${L}/wake`, { min_width: '960', min_height: '540', publish: true })).status, 200);
+    assert.deepEqual([(await catalog())[0].play.min_width, (await catalog())[0].play.min_height], [960, 540]);
+    // The editor: Vault edits the two numbers; the studio sees them, disabled.
+    const bossPage = await (await boss.get('/s/fieldday/g/wake')).text();
+    assert.match(bossPage, /Smallest play area \(Vault\)[\s\S]*name="min_width"[^>]*value="960"(?![^>]*disabled)/);
+    const miaPage = await (await mia.get('/s/fieldday/g/wake')).text();
+    assert.match(miaPage, /Smallest play area<\/span>[\s\S]*name="min_width"[^>]*value="960"[^>]*disabled/);
+    assert.match(miaPage, /name="min_height"[^>]*value="540"[^>]*disabled/);
+    // A studio save doesn't clear it; Vault clears it back to the site default with empty fields.
+    await mia.post(`${L}/wake`, { short_description: 'Kelp', submit: true });
+    assert.equal(db.listing('wake')!.draft.min_width, 960);
+    await boss.post(`${L}/wake`, { min_width: '', min_height: '', publish: true });
+    assert.deepEqual([(await catalog())[0].play.min_width, (await catalog())[0].play.min_height], [null, null]);
+  });
+
   test('a listing plays from its connected CDN game’s current release, plus an optional folder', async () => {
     const boss = as('boss', 'release_manager');
     await boss.post(L, { slug: 'aquatic-lab', title: 'Aqualab' });
@@ -159,7 +197,7 @@ describe('studios edit, Vault publishes', () => {
     assert.match(page, /Switch to the Vault CDN \(v1\.0\)/);
     assert.equal((await boss.get('/s/fieldday/g/aqualab')).headers.get('location'), '/s/fieldday/g/aquatic-lab', 'the CDN game’s page is the listing’s page');
     assert.equal((await boss.post(`${L}/aquatic-lab`, { play_source: 'cdn', cdn_path: 'lab', publish: '1' })).status, 200);
-    assert.deepEqual((await catalog())[0].play, { url: 'https://prod.test/fieldday/aqualab/lab/', source: 'cdn', release: 'v1.0', embed: true, fit: null });
+    assert.deepEqual((await catalog())[0].play, { url: 'https://prod.test/fieldday/aqualab/lab/', source: 'cdn', release: 'v1.0', embed: true, fit: null, min_width: null, min_height: null });
     assert.equal((await boss.post(`${L}/aquatic-lab/link`, { game: '' })).status, 400, 'can’t disconnect while playing from it');
   });
 });

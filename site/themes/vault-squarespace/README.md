@@ -53,7 +53,17 @@ fonts or third-party Squarespace plugins are used, and nothing is loaded from Sq
   `partials/sq/srcset.html`. An image with no copies is used as it is. Everything below the top section is
   `loading="lazy"`; the first section's background (hero layout) or cover image (standard layout) is
   `fetchpriority="high"`.
-* Play opens the game in the in-page player (`partials/vault-player.html`, a copy of main's).
+* Play opens the game in the in-page player (`partials/vault-player.html`, a copy of main's), as does a direct link to
+  a game page's `#play`.
+* The Play gate: a game page carries the smallest play area its game needs (`<meta name="vault:min-size">`: the
+  listing's "Smallest play area", `play.min_width`/`min_height` in the catalog, else `params.play` in `hugo.toml`).
+  The play area is what the player gives the game: the window less the player's 56 px bar (48 px up to 520 px wide).
+  When it's smaller, the player shows, instead of the game, what's needed and what this browser has, and the way out
+  that fits: turn the device (phones and tablets), play full screen (when the whole screen is big enough), make the
+  window bigger, or that it needs a bigger screen; always "Try anyway" and "Back to the game page". It checks again on
+  every resize or turn and offers to start once the game fits. Games that open in a new tab get the same check before
+  the tab opens. The decision is `assets/js/play-gate.js` (inlined into the player; tested by `test/play-gate.test.ts`).
+  Without JavaScript, Play is a plain link, as before. How the minimums were measured: `data/play-minimums.json`.
 * The scripts that took the snapshot (`migration/squarespace/*.py`; they need the Squarespace site up) stayed in
   `VaultLearningGames/vault-hugo-rebuild`, branch `original-squarespace-design`.
 * Addresses a script builds must be absolute (`absURL`, as the player's logo is): listing previews are served from

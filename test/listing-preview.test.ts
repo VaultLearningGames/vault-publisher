@@ -66,7 +66,7 @@ describe('listing previews', () => {
     t.db.linkListing(t.db.listing('wake')!.id, g.id);
     const p = (await (await t.as('mia', 'none', 'maintainer').post(`${L}/wake/preview`, { play_source: 'cdn', cdn_path: 'deep' })).json()) as Preview;
     const { game } = (await (await t.app.request(`/v1/listing-previews/${p.token}`, { headers: { Accept: 'application/json' } })).json()) as { game: any };
-    assert.deepEqual(game.play, { url: 'https://prod.test/fieldday/wake/deep/', source: 'cdn', release: 'm3.1', embed: true, fit: null });
+    assert.deepEqual(game.play, { url: 'https://prod.test/fieldday/wake/deep/', source: 'cdn', release: 'm3.1', embed: true, fit: null, min_width: null, min_height: null });
     assert.equal(game.studio.url, t.db.studioBySlug('fieldday')!.website);
     assert.match(game.studio.url, /^https:\/\/fielddaylab\.wisc\.edu/);
   });

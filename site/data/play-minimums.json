@@ -1,0 +1,1533 @@
+{
+ "about": "The smallest play area (CSS px: the space Vault’s player gives a game below its bar) each game is playable in, measured 2026-10-03 on vaultlearninggames-staging.org with Playwright/Chromium. Seeded into the listings (Smallest play area); the listings, not this file, are what the site uses. null: not measurable, the site default (hugo.toml params.play) applies.",
+ "how": [
+  "Each game was opened in Vault’s player and the window was shrunk step by step, width at a 1000 px tall window (1600 down to 375) and height at a 1600 px wide one (1000 down to 320), plus 1024x768, 768x1024, 1280x720, 1366x768, 844x390, 390x844, 820x1180 and 1180x820. Games that size themselves only when they load were measured again with a fresh load at each size.",
+  "Broken: the game’s content runs out of its frame (scrollbars or a cut-off canvas inside the player), or the game shows its own rotate / too-small message.",
+  "Too small: a game that scales itself is drawn at less than 2/3 of its intended size (a Player fit’s rectangle; a fixed drawing resolution up to 1366 px wide; PhET’s 1024 x 618 layout; otherwise its size on a 1366 x 768 laptop). At 2/3, text that is 14-16 px at full size is 9.5-10.5 px, the smallest that stays readable on a school screen. Visible page text below 10 px counts too.",
+  "The minimum is the smallest step above which nothing broke, interpolated for scaling games, rounded up to 10 px; widths and heights are measured separately. Where the automatic rules misread a game, the value was judged from the screenshots (method: judged)."
+ ],
+ "default": {
+  "min_width": 960,
+  "min_height": 540
+ },
+ "games": {
+  "addition-blocks": {
+   "min_width": 534,
+   "min_height": 400,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 800 x 600 rectangle is scaled to the play area; at 2/3 scale it needs 534 x 400."
+   ]
+  },
+  "agrinautica": {
+   "min_width": 534,
+   "min_height": 400,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 800 x 600 rectangle is scaled to the play area; at 2/3 scale it needs 534 x 400."
+   ]
+  },
+  "angle-jungle": {
+   "min_width": 640,
+   "min_height": 400,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 960 x 600 rectangle is scaled to the play area; at 2/3 scale it needs 640 x 400."
+   ]
+  },
+  "antibiotic-resistance": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "aquation": {
+   "min_width": 640,
+   "min_height": 680,
+   "method": "judged",
+   "evidence": [
+    "A 960 x 600 game canvas under the publisher’s page header; it scales with the width, and below ~680 px of height the bottom of the game is cut off (the page scrolls).",
+    "automatic: width: below 640px (at 568x944): drawn at 59% (scaling canvas, 960 x 600 on a 1366 x 768 laptop)",
+    "automatic: height: below 764px (at 1600x712): content 30px taller than its frame; canvas 960x600 cut off by its 1600x712 frame"
+   ],
+   "devices": {
+    "1024x768": "no",
+    "768x1024": "ok",
+    "1280x720": "no",
+    "1366x768": "no",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "area-builder": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "argument-wars": {
+   "min_width": 960,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame; content 37px taller than its frame",
+    "height: below 604px (at 1600x544): content 90px wider than its frame; content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "atom-touch": {
+   "min_width": 854,
+   "min_height": 480,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 1280 x 720 rectangle is scaled to the play area; at 2/3 scale it needs 854 x 480."
+   ]
+  },
+  "balancing-act": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "battleship-numberline": {
+   "min_width": 850,
+   "min_height": 480,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 850px (at 820x944): drawn at 65% (scaling canvas, 1266 x 712 on a 1366 x 768 laptop)",
+    "height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1266 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "beast-box": {
+   "min_width": null,
+   "min_height": null,
+   "method": "unmeasured",
+   "evidence": [
+    "The page stayed black in headless Chromium (its WebGL game never drew)."
+   ]
+  },
+  "bending-light": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "blockly-games": {
+   "min_width": 640,
+   "min_height": 400,
+   "method": "judged",
+   "evidence": [
+    "A responsive page (the probe sees no canvas); the game list reflows down to phones, but the games themselves need a desk-sized area; 640 x 400 judged from the screenshots.",
+    "automatic: width: fine down to 375px",
+    "automatic: height: fine down to 264px",
+    "automatic: inconclusive: no canvas, text or overflow visible to the probe"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "ok",
+    "390x844": "ok",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "bloom-the-saga-of-the-poop-economy": {
+   "min_width": 920,
+   "min_height": 480,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 920px (at 900x944): drawn at 66% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)",
+    "height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "branches-of-power": {
+   "min_width": 960,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame; content 37px taller than its frame",
+    "height: below 604px (at 1600x544): content 90px wider than its frame; content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "brief-the-chief": {
+   "min_width": 640,
+   "min_height": 400,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 960 x 600 rectangle is scaled to the play area; at 2/3 scale it needs 640 x 400."
+   ]
+  },
+  "carbon-cycle-game": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "cast-your-vote": {
+   "min_width": 960,
+   "min_height": 600,
+   "method": "judged",
+   "evidence": [
+    "Fresh load at each size: a fixed 960 x 600 canvas, cut off by anything smaller.",
+    "automatic: width: below 1024px (at 900x944): canvas 960x600 cut off by its 900x563 frame",
+    "automatic: height: below 604px (at 1600x544): canvas 960x600 cut off by its 870x544 frame"
+   ],
+   "devices": {
+    "1366x768": "ok",
+    "1024x768": "ok",
+    "844x390": "no",
+    "390x844": "no"
+   }
+  },
+  "cat-insanity": {
+   "min_width": 360,
+   "min_height": 480,
+   "method": "judged",
+   "evidence": [
+    "Scales to the window in either orientation; below ~480 px of height (a phone held sideways) the Begin button is cut off.",
+    "automatic: width: fine down to 375px",
+    "automatic: height: fine down to 264px",
+    "automatic: inconclusive: no canvas, text or overflow visible to the probe"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "ok",
+    "390x844": "ok",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "circuit-construction-kit-dc": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "color-vision": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "concentration": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "constitutional-compromise": {
+   "min_width": 800,
+   "min_height": 534,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 1200 x 800 rectangle is scaled to the play area; at 2/3 scale it needs 800 x 534."
+   ]
+  },
+  "convene-the-council": {
+   "min_width": 640,
+   "min_height": 400,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 960 x 600 rectangle is scaled to the play area; at 2/3 scale it needs 640 x 400."
+   ]
+  },
+  "counties-work-texas": {
+   "min_width": 960,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame; content 37px taller than its frame",
+    "height: below 604px (at 1600x544): content 90px wider than its frame; content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "counties-work": {
+   "min_width": 960,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame; content 37px taller than its frame",
+    "height: below 604px (at 1600x544): content 90px wider than its frame; content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "court-quest": {
+   "min_width": 960,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame; content 37px taller than its frame",
+    "height: below 604px (at 1600x544): content 90px wider than its frame; content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "cozy-river-valley": {
+   "min_width": 960,
+   "min_height": 544,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 30px wider than its frame",
+    "height: below 544px (at 1600x484): content 28px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "creature-caverns": {
+   "min_width": 960,
+   "min_height": 540,
+   "method": "judged",
+   "evidence": [
+    "A ~960 px wide page around the game: 60 px cut off at 900 px wide; height judged (the page scrolls).",
+    "automatic: width: below 960px (at 900x944): content 60px wider than its frame",
+    "automatic: height: fine down to 264px"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "crystal-cave": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "curse-reverse": {
+   "min_width": 692,
+   "min_height": 390,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 1038 x 584 rectangle is scaled to the play area; at 2/3 scale it needs 692 x 390."
+   ]
+  },
+  "do-i-have-a-right": {
+   "min_width": 960,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame; content 37px taller than its frame",
+    "height: below 604px (at 1600x544): content 90px wider than its frame; content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "docduck-rock-cycle": {
+   "min_width": 850,
+   "min_height": 480,
+   "method": "judged",
+   "evidence": [
+    "Letterboxed and scaling (its first frame was still loading, which hid this from the automatic rule); 2/3 of its size on a 1366 x 768 laptop.",
+    "automatic: width: fine down to 375px",
+    "automatic: height: fine down to 264px"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "ok",
+    "390x844": "ok",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "earthquake": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "ecokingdoms": {
+   "min_width": 683,
+   "min_height": 512,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 1024 x 768 rectangle is scaled to the play area; at 2/3 scale it needs 683 x 512."
+   ]
+  },
+  "electric-shocktopus": {
+   "min_width": null,
+   "min_height": null,
+   "method": "unmeasured",
+   "evidence": [
+    "testtubegames.com answers automated browsers with a Cloudflare “verify you are human” check (not bypassed)."
+   ]
+  },
+  "energy-skate-park-basics": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "evolution-of-trust": {
+   "min_width": 960,
+   "min_height": 500,
+   "method": "judged",
+   "evidence": [
+    "Fresh load at each size: content 60 px wider than the frame at 900 px; drawn at 2/3 of its laptop size at ~920 x 500.",
+    "automatic: width: below 1024px (at 900x944): content 60px wider than its frame; drawn at 66% (scaling canvas, 1366 x 652 on a 1366 x 768 laptop)",
+    "automatic: height: below 500px (at 1600x484): drawn at 65% (scaling canvas, 1366 x 652 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1366x768": "ok",
+    "1024x768": "ok",
+    "844x390": "no",
+    "390x844": "no"
+   }
+  },
+  "executive-command": {
+   "min_width": 627,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 940 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 627 x 440."
+   ]
+  },
+  "fiscal-ship": {
+   "min_width": 850,
+   "min_height": 480,
+   "method": "judged",
+   "evidence": [
+    "Scales to fit (its 1820 x 1024 drawing resolution is a quality setting); 2/3 of its size on a 1366 x 768 laptop.",
+    "automatic: width: below 850px (at 820x944): drawn at 65% (scaling canvas, 1265 x 712 on a 1366 x 768 laptop)",
+    "automatic: height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1265 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "flap-to-the-future": {
+   "min_width": null,
+   "min_height": null,
+   "method": "unmeasured",
+   "evidence": [
+    "The page stayed black in headless Chromium (its WebGL game never drew)."
+   ]
+  },
+  "game-over-gopher": {
+   "min_width": 820,
+   "min_height": 600,
+   "method": "judged",
+   "evidence": [
+    "A fixed ~800 x 600 game: 32 px cut off at 768 px wide; below 600 px of height only the credits line under it is cut.",
+    "automatic: width: below 820px (at 768x944): content 32px wider than its frame",
+    "automatic: height: below 664px (at 1600x604): content 12px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "gate": {
+   "min_width": 587,
+   "min_height": 330,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 495 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 330."
+   ]
+  },
+  "graphing-lines": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "headlines-and-high-water": {
+   "min_width": 920,
+   "min_height": 480,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 920px (at 900x944): drawn at 66% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)",
+    "height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "hot-air-balloon": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "immigration-nation": {
+   "min_width": 960,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame; content 37px taller than its frame",
+    "height: below 604px (at 1600x544): content 90px wider than its frame; content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "infosphere-invaders": {
+   "min_width": 640,
+   "min_height": 400,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 960 x 600 rectangle is scaled to the play area; at 2/3 scale it needs 640 x 400."
+   ]
+  },
+  "jo-wilder-and-the-capitol-case": {
+   "min_width": 880,
+   "min_height": 660,
+   "method": "judged",
+   "evidence": [
+    "Fresh load at each size: content 112 px wider than the frame at 768 px wide, 56 px taller at 604 px high.",
+    "automatic: width: below 900px (at 768x944): content 112px wider than its frame",
+    "automatic: height: below 712px (at 1600x604): content 56px taller than its frame"
+   ],
+   "devices": {
+    "1366x768": "ok",
+    "1024x768": "ok",
+    "844x390": "no",
+    "390x844": "no"
+   }
+  },
+  "lakeland": {
+   "min_width": 683,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 1024 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 683 x 440."
+   ]
+  },
+  "lawcraft": {
+   "min_width": 960,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame; content 37px taller than its frame",
+    "height: below 604px (at 1600x544): content 90px wider than its frame; content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "lost-at-the-forever-mine": {
+   "min_width": 920,
+   "min_height": 480,
+   "method": "judged",
+   "evidence": [
+    "Letterboxed and scaling (the overflow the probe saw is a page element, not the game); 2/3 of its laptop size.",
+    "automatic: width: below 1024px (at 960x944): content 64px wider than its frame",
+    "automatic: height: below 664px (at 1600x604): content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "magnet-hunt": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "magneto-bowling": {
+   "min_width": 640,
+   "min_height": 420,
+   "method": "judged",
+   "evidence": [
+    "A Flash game run by Ruffle, scaled to fit; its text is small to begin with, so 640 x 420 is judged from the screenshots.",
+    "automatic: width: fine down to 375px",
+    "automatic: height: fine down to 264px",
+    "automatic: inconclusive: no canvas, text or overflow visible to the probe"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "ok",
+    "390x844": "ok",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "magneto-mini-golf": {
+   "min_width": 640,
+   "min_height": 420,
+   "method": "judged",
+   "evidence": [
+    "A Flash game run by Ruffle, scaled to fit; its text is small to begin with, so 640 x 420 is judged from the screenshots.",
+    "automatic: width: fine down to 375px",
+    "automatic: height: fine down to 264px",
+    "automatic: inconclusive: no canvas, text or overflow visible to the probe"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "ok",
+    "390x844": "ok",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "matter-sorter": {
+   "min_width": 920,
+   "min_height": 480,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 920px (at 900x944): drawn at 66% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)",
+    "height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "mission-to-the-mesozoic": {
+   "min_width": 760,
+   "min_height": 480,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 760px (at 720x944): drawn at 63% (scaling canvas, 1139 x 712 on a 1366 x 768 laptop)",
+    "height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1139 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "molecules-and-light": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "money-magic": {
+   "min_width": 850,
+   "min_height": 480,
+   "method": "judged",
+   "evidence": [
+    "Scales to fit; 2/3 of its laptop size. It also says “ROTATE DEVICE” whenever the area is narrower than about 1.4:1 (e.g. 1280 x 944), whatever its size.",
+    "automatic: width: below 1366px (at 1280x944): the game says “ROTATE DEVICE”",
+    "automatic: height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "monster-school-bus": {
+   "min_width": 534,
+   "min_height": 343,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 800 x 514 rectangle is scaled to the play area; at 2/3 scale it needs 534 x 343."
+   ]
+  },
+  "morphy": {
+   "min_width": 640,
+   "min_height": 480,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 960 x 720 rectangle is scaled to the play area; at 2/3 scale it needs 640 x 480."
+   ]
+  },
+  "multiplication-blocks": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "neighborhood-good": {
+   "min_width": 640,
+   "min_height": 400,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 960 x 600 rectangle is scaled to the play area; at 2/3 scale it needs 640 x 400."
+   ]
+  },
+  "newsfeed-defenders": {
+   "min_width": 960,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame; content 37px taller than its frame",
+    "height: below 604px (at 1600x544): content 90px wider than its frame; content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "nitrogen-cycle-game": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "outbreak-squad": {
+   "min_width": 854,
+   "min_height": 480,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 1280 x 720 rectangle is scaled to the play area; at 2/3 scale it needs 854 x 480."
+   ]
+  },
+  "pearl-diver": {
+   "min_width": 920,
+   "min_height": 560,
+   "method": "judged",
+   "evidence": [
+    "Fills the area and crops at very wide shapes; at 1600 x 604 its menu is cut off, at 1366 x 712 and 1024 x 712 it is whole.",
+    "automatic: width: below 920px (at 900x944): drawn at 66% (scaling canvas, 1366 x 768 on a 1366 x 768 laptop)",
+    "automatic: height: below 944px (at 1600x844): content 56px taller than its frame; canvas 1600x900 cut off by its 1600x844 frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "no",
+    "1366x768": "no",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "pendulum-lab": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "peoples-pie": {
+   "min_width": 640,
+   "min_height": 400,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 960 x 600 rectangle is scaled to the play area; at 2/3 scale it needs 640 x 400."
+   ]
+  },
+  "pick-your-plate": {
+   "min_width": null,
+   "min_height": null,
+   "method": "unmeasured",
+   "evidence": [
+    "Its Unity loader never finished in headless Chromium."
+   ]
+  },
+  "plastic-pipeline": {
+   "min_width": 375,
+   "min_height": 480,
+   "method": "judged",
+   "evidence": [
+    "A portrait game made for phones: scales into the middle of the area; fine down to a phone held upright, too small on a phone held sideways.",
+    "automatic: width: fine down to 375px",
+    "automatic: height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 361 x 641 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "ok",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "project-hercules": {
+   "min_width": 920,
+   "min_height": 480,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 920px (at 900x944): drawn at 66% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)",
+    "height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "projectile-motion": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "quandary": {
+   "min_width": null,
+   "min_height": null,
+   "method": "unmeasured",
+   "evidence": [
+    "Opens in a new tab at its landing page; the game itself is behind its Play page, which wasn’t started."
+   ]
+  },
+  "race-to-ratify": {
+   "min_width": 960,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame",
+    "height: below 604px (at 1600x544): content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "ratio-rumble": {
+   "min_width": 820,
+   "min_height": 604,
+   "method": "unknown",
+   "evidence": [
+    "width: below 820px (at 768x944): content 32px wider than its frame",
+    "height: below 604px (at 1600x544): content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "robo-sellers": {
+   "min_width": null,
+   "min_height": null,
+   "method": "unmeasured",
+   "evidence": [
+    "Shows only its own big Play button until clicked (not clicked: no starting games)."
+   ]
+  },
+  "shady-sam": {
+   "min_width": 640,
+   "min_height": 320,
+   "method": "judged",
+   "evidence": [
+    "Made for phones held sideways: it says “ROTATE YOUR DEVICE” when the area is taller than wide, which is what the width sweep (at 944 px high) hit.",
+    "automatic: width: below 960px (at 900x944): the game says “ROTATE YOUR DEVICE”",
+    "automatic: height: fine down to 264px"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "ok",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "states-of-matter": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "tamis-tower": {
+   "min_width": 854,
+   "min_height": 480,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 1280 x 720 rectangle is scaled to the play area; at 2/3 scale it needs 854 x 480."
+   ]
+  },
+  "thats-your-right": {
+   "min_width": 920,
+   "min_height": 480,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 920px (at 900x944): drawn at 66% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)",
+    "height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "the-legend-of-the-lost-emerald": {
+   "min_width": 720,
+   "min_height": 480,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 720px (at 640x944): drawn at 59% (scaling canvas, 1079 x 712 on a 1366 x 768 laptop)",
+    "height: below 480px (at 1600x424): drawn at 59% (scaling canvas, 1079 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "theme-park-kitchen": {
+   "min_width": 960,
+   "min_height": 544,
+   "method": "unknown",
+   "evidence": [
+    "width: below 960px (at 900x944): content 60px wider than its frame",
+    "height: below 544px (at 1600x484): content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "thermolab": {
+   "min_width": 920,
+   "min_height": 480,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 920px (at 900x944): drawn at 66% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)",
+    "height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "transformations-quest": {
+   "min_width": 768,
+   "min_height": 480,
+   "method": "judged",
+   "evidence": [
+    "Fills the area and crops its title art at the sides; the buttons stay whole down to phones; judged from the screenshots.",
+    "automatic: width: fine down to 375px",
+    "automatic: height: fine down to 264px",
+    "automatic: inconclusive: no canvas, text or overflow visible to the probe"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "ok",
+    "390x844": "ok",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "uncovering-loyalties": {
+   "min_width": 800,
+   "min_height": 534,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 1200 x 800 rectangle is scaled to the play area; at 2/3 scale it needs 800 x 534."
+   ]
+  },
+  "unit-rates": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "velocity-raptor": {
+   "min_width": null,
+   "min_height": null,
+   "method": "unmeasured",
+   "evidence": [
+    "testtubegames.com answers automated browsers with a Cloudflare “verify you are human” check (not bypassed)."
+   ]
+  },
+  "wake-tales-from-the-aqualab": {
+   "min_width": 920,
+   "min_height": 480,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 920px (at 900x944): drawn at 66% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)",
+    "height: below 480px (at 1600x424): drawn at 60% (scaling canvas, 1366 x 712 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "walden-civil-disobedience": {
+   "min_width": 980,
+   "min_height": 720,
+   "method": "judged",
+   "evidence": [
+    "Fresh load at each size (Walden, a game for Walden… pages share one layout; measured on Self-Reliance): the publisher’s page holds the game in a fixed 960 x 640 frame under its header, with its own scrollbar at the side; narrower than ~980 px the game is cut off, and the whole game shows from ~720 px of height (the page scrolls below that). A Player fit would bring it down to about 640 x 400.",
+    "automatic: its canvas (960x600) never follows the window: sized at load, needs a reload measurement",
+    "automatic: width: below 960px (at 900x944): canvas 960x600 cut off by its 900x640 frame",
+    "automatic: height: below 764px (at 1600x712): content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "no",
+    "768x1024": "no",
+    "1280x720": "no",
+    "1366x768": "no",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "walden-self-reliance": {
+   "min_width": 980,
+   "min_height": 720,
+   "method": "judged",
+   "evidence": [
+    "Fresh load at each size (Walden, a game for Walden… pages share one layout; measured on Self-Reliance): the publisher’s page holds the game in a fixed 960 x 640 frame under its header, with its own scrollbar at the side; narrower than ~980 px the game is cut off, and the whole game shows from ~720 px of height (the page scrolls below that). A Player fit would bring it down to about 640 x 400.",
+    "automatic: width: below 1024px (at 900x944): canvas 960x600 cut off by its 900x640 frame",
+    "automatic: height: below 944px (at 1600x712): content 56px taller than its frame"
+   ],
+   "devices": {
+    "1366x768": "no",
+    "1024x768": "no",
+    "844x390": "no",
+    "390x844": "no"
+   }
+  },
+  "walden-the-natural-world": {
+   "min_width": 980,
+   "min_height": 720,
+   "method": "judged",
+   "evidence": [
+    "Fresh load at each size (Walden, a game for Walden… pages share one layout; measured on Self-Reliance): the publisher’s page holds the game in a fixed 960 x 640 frame under its header, with its own scrollbar at the side; narrower than ~980 px the game is cut off, and the whole game shows from ~720 px of height (the page scrolls below that). A Player fit would bring it down to about 640 x 400.",
+    "automatic: its canvas (960x600) never follows the window: sized at load, needs a reload measurement",
+    "automatic: width: below 960px (at 900x944): canvas 960x600 cut off by its 900x640 frame",
+    "automatic: height: below 764px (at 1600x712): content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "no",
+    "768x1024": "no",
+    "1280x720": "no",
+    "1366x768": "no",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "walden-what-i-lived-for": {
+   "min_width": 980,
+   "min_height": 720,
+   "method": "judged",
+   "evidence": [
+    "Fresh load at each size (Walden, a game for Walden… pages share one layout; measured on Self-Reliance): the publisher’s page holds the game in a fixed 960 x 640 frame under its header, with its own scrollbar at the side; narrower than ~980 px the game is cut off, and the whole game shows from ~720 px of height (the page scrolls below that). A Player fit would bring it down to about 640 x 400.",
+    "automatic: its canvas (960x600) never follows the window: sized at load, needs a reload measurement",
+    "automatic: width: below 960px (at 900x944): canvas 960x600 cut off by its 900x640 frame",
+    "automatic: height: below 764px (at 1600x712): content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "no",
+    "768x1024": "no",
+    "1280x720": "no",
+    "1366x768": "no",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "walden-where-i-lived": {
+   "min_width": 980,
+   "min_height": 720,
+   "method": "judged",
+   "evidence": [
+    "Fresh load at each size (Walden, a game for Walden… pages share one layout; measured on Self-Reliance): the publisher’s page holds the game in a fixed 960 x 640 frame under its header, with its own scrollbar at the side; narrower than ~980 px the game is cut off, and the whole game shows from ~720 px of height (the page scrolls below that). A Player fit would bring it down to about 640 x 400.",
+    "automatic: its canvas (960x600) never follows the window: sized at load, needs a reload measurement",
+    "automatic: width: below 960px (at 900x944): canvas 960x600 cut off by its 900x640 frame",
+    "automatic: height: below 764px (at 1600x712): content 56px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "no",
+    "768x1024": "no",
+    "1280x720": "no",
+    "1366x768": "no",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "water-cycle-game": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "wave-combinator": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "wave-on-a-string": {
+   "min_width": 690,
+   "min_height": 420,
+   "method": "phet",
+   "evidence": [
+    "width: below 690px (at 640x944): drawn at 63% (PhET layout 1024 x 618)",
+    "height: below 420px (at 1600x364): drawn at 59% (PhET layout 1024 x 618)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "win-the-white-house": {
+   "min_width": 640,
+   "min_height": 410,
+   "method": "fixed-canvas",
+   "evidence": [
+    "width: below 640px (at 568x944): drawn at 59% (fixed canvas resolution 960 x 600)",
+    "height: below 410px (at 1600x364): drawn at 61% (fixed canvas resolution 960 x 600)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "ok",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  },
+  "wind-simulator": {
+   "min_width": 587,
+   "min_height": 440,
+   "method": "fit",
+   "evidence": [
+    "Player fit: the game's 880 x 660 rectangle is scaled to the play area; at 2/3 scale it needs 587 x 440."
+   ]
+  },
+  "wisdom-or-madness-of-crowds": {
+   "min_width": 920,
+   "min_height": 500,
+   "method": "scaling-canvas",
+   "evidence": [
+    "width: below 920px (at 900x944): drawn at 66% (scaling canvas, 1366 x 652 on a 1366 x 768 laptop)",
+    "height: below 500px (at 1600x484): drawn at 65% (scaling canvas, 1366 x 652 on a 1366 x 768 laptop)"
+   ],
+   "devices": {
+    "1024x768": "ok",
+    "768x1024": "no",
+    "1280x720": "ok",
+    "1366x768": "ok",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "no",
+    "1180x820": "ok"
+   }
+  },
+  "ztype": {
+   "min_width": 400,
+   "min_height": 560,
+   "method": "judged",
+   "evidence": [
+    "Its page shows “Play ZType” until clicked (not clicked: no starting games); the game is a portrait canvas that scales; judged.",
+    "automatic: width: below 480px (at 414x952): content 66px wider than its frame; canvas 480x720 cut off by its 414x952 frame",
+    "automatic: height: below 764px (at 1600x712): content 6px taller than its frame"
+   ],
+   "devices": {
+    "1024x768": "no",
+    "768x1024": "ok",
+    "1280x720": "no",
+    "1366x768": "no",
+    "844x390": "no",
+    "390x844": "no",
+    "820x1180": "ok",
+    "1180x820": "ok"
+   }
+  }
+ }
+}

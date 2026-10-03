@@ -114,10 +114,13 @@ export function install(win = window) {
   // The player says when it opens and closes (partials/vault-player.html).
   doc.addEventListener('vault-player:open', () => tracker.start('player'));
   doc.addEventListener('vault-player:close', () => tracker.close());
+  doc.addEventListener('vault-player:new-tab', () => tracker.start('new_tab'));
   // A Play button the player leaves alone opens the game in a new tab (games that can't be shown in a frame).
   doc.addEventListener('click', (e) => {
     const a = e.target.closest?.('a[href]');
-    if (!a || a.hasAttribute('data-vault-play') || !PLAY_LABEL.test(a.textContent || '')) return;
+    // (Held back by the Play gate when the screen is too small: e.defaultPrevented; it says "vault-player:new-tab" if
+    // the visitor opens the game from there.)
+    if (e.defaultPrevented || !a || a.hasAttribute('data-vault-play') || !PLAY_LABEL.test(a.textContent || '')) return;
     let url;
     try { url = new URL(a.getAttribute('href'), win.location.href); } catch { return; }
     if (url.host !== win.location.host && /^https?:$/.test(url.protocol)) tracker.start('new_tab');

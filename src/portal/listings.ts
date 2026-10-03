@@ -7,7 +7,7 @@ import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
 import type { Db, Game, Listing, Studio, StudioRole, User } from '../db.ts';
 import { draftProblems, importFromExport, moveListingToStudio, publishListing, saveListing } from '../listing-ops.ts';
-import { changedFields, FIELD_LABEL, GRADES, isListingSlug, normalize, type ListingFields } from '../listings.ts';
+import { changedFields, FIELD_LABEL, GRADES, isListingSlug, MIN_SIZE_RANGE, normalize, VAULT_ONLY, type ListingFields } from '../listings.ts';
 import { getHosting, hostingCell } from './hosting.ts';
 import { html, type Html } from './html.ts';
 import { ago, head, pill, who } from './routes.ts';
@@ -18,6 +18,15 @@ import type { PortalDeps } from './routes.ts';
 import { imageField } from './listing-assets.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
 import { addMaker, createProposedStudios, makersField, proposedLine, pruneMakerProposals } from './listing-makers.ts';
+
+// "Smallest screen" (min_width × min_height): editable by Vault, shown read-only to the studio. Empty: the site default.
+function minSizeField(f: ListingFields, editable: boolean): Html {
+  const dis = editable ? '' : 'disabled';
+  const num = (name: 'min_width' | 'min_height', label: string) => html`<input type="number" name="${name}" inputmode="numeric" min="${MIN_SIZE_RANGE.min}" max="${MIN_SIZE_RANGE.max}" step="1" value="${f[name] ?? ''}" placeholder="default" aria-label="${label}" ${dis} style="width:7.5em">`;
+  return html`<div class="field"><span class="lab">Smallest play area${editable ? ' (Vault)' : ''}</span>
+    <span class="inline-form">${num('min_width', 'Minimum play width in pixels')} × ${num('min_height', 'Minimum play height in pixels')} px</span>
+    <span class="hint">The smallest space (width × height, below Vault’s player bar) the game is playable in. On a smaller screen Play says what’s needed and offers to try anyway. Empty: the site’s default.${editable ? '' : ' Set by Vault; ask Vault to change it.'}</span></div>`;
+}
 
 export interface ListingHelpers {
   db: Db;
@@ -139,6 +148,7 @@ export function listingPieces(h: ListingHelpers) {
           <option value="true" ${f.embed ? 'selected' : ''}>Vault’s player (the game’s page allows framing)</option>
           <option value="false" ${f.embed ? '' : 'selected'}>A new tab (the game’s page refuses to be framed)</option></select></label>
         ${vault ? txt('fit', 'Player fit (Vault)', 'For fixed-size games: page width, page height, x, y, width, height of the game on that page.') : ''}
+        ${minSizeField(f, vault && edit)}
       </div>
       ${edit ? html`<div class="form-foot">${saveControls(vault, l)}${previewButtons(api, h.deps.previewSites)}${err}</div>` : ''}
     </form>`;
@@ -311,7 +321,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     if (!P.canEdit(u, s)) fail(403, 'Only studio maintainers, admins and Vault staff can edit site listings.');
     const b = await jsonBody(c);
     if (typeof b.embed === 'string') b.embed = b.embed === 'true';
-    if (!P.canPublish(u)) delete b.fit;                         // player fit is Vault's call
+    if (!P.canPublish(u)) for (const k of VAULT_ONLY) delete b[k];  // player fit and minimum size are Vault's call
     const draft = normalize(b, l.draft);
     const flag = (v: unknown) => v === true || v === '1' || v === 'on';
     const wantsPublish = flag(b.publish) && P.canPublish(u);

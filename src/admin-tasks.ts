@@ -56,6 +56,10 @@ function fieldProblems(fields: Record<string, unknown>, draft: ListingFields): s
     if (!FIELDS.includes(f)) { out.push(`Unknown field “${k}” (fields: ${FIELDS.join(', ')}).`); continue; }
     if (f === 'embed') { if (typeof v !== 'boolean') out.push('embed must be true or false.'); continue; }
     if (f === 'play_source') { if (v !== 'url' && v !== 'cdn') out.push('play_source must be "url" or "cdn".'); continue; }
+    if (f === 'min_width' || f === 'min_height') {
+      if (v !== null && !(typeof v === 'number' && Number.isInteger(v))) out.push(`${k} must be a whole number of pixels, or null for the site’s default.`);
+      continue;                                                  // its range is checked by the save's own rules
+    }
     if (LIST_FIELDS.includes(f)) {
       if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) { out.push(`${k} must be a list of strings.`); continue; }
       if (JSON.stringify(draft[f]) !== JSON.stringify(v.map((x) => x.trim()))) out.push(`${k} has empty, repeated or over-long items, or too many of them.`);

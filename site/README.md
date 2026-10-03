@@ -11,6 +11,7 @@ same addresses. This folder is where the site is edited; it moved here from `Vau
 | `hugo.toml` | Configuration. `params.fonts.adobe_kit` is the Adobe Fonts kit; `params.forms.*` are set by the deploy |
 | `content/` | The fixed pages' front matter, and the content adapters that make game pages and `/game-cards` from the catalog |
 | `data/squarespace/` | The fixed pages' layout and text (`pages.json`), per-game layout and art (`games.json`), filters, and `asset-hashes.json` |
+| `data/play-minimums.json` | How small a play area each game was measured to work in (2026-10-03), and how; the values themselves live in the listings (Smallest play area). The site default is `params.play` in `hugo.toml` |
 | `data/catalog.json` | The portal's published listings: pulled by `npm run site:catalog`, never committed |
 | `themes/vault-squarespace/` | Templates, CSS, JS, fonts and the Squarespace snapshot images (`static/sq/img`, 16 MB) |
 | `static/files/` | `keys-to-the-vault.pdf` |

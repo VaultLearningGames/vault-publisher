@@ -27,13 +27,23 @@ export interface ListingFields {
   cdn_path: string;            // optional folder inside the linked CDN game, e.g. "earthquake/" for one game of The Yard
   embed: boolean;              // false: the game's site refuses to be framed, so Play opens a new tab
   fit: string;                 // optional player fit, "pageWidth,pageHeight,x,y,width,height" (Vault staff only)
+  // The smallest game area (Vault's player below its bar, in CSS pixels) the game is playable in; null: the site's
+  // default (hugo.toml params.play). Below it, Play explains what's needed instead of starting the game (Vault staff set it).
+  min_width: number | null;
+  min_height: number | null;
 }
 
 export const EMPTY_LISTING: ListingFields = {
   title: '', short_description: '', about: '', makers: [], grades: [], subjects: [], topics: [], standards: [],
   related_curriculum: '', gameplay_video: '', hero_image: '', thumb_image: '', screenshots: [],
-  play_source: 'url', play_url: '', cdn_path: '', embed: true, fit: '',
+  play_source: 'url', play_url: '', cdn_path: '', embed: true, fit: '', min_width: null, min_height: null,
 };
+
+// Fields only Vault staff set; a studio member's save or preview leaves them as they are.
+export const VAULT_ONLY = ['fit', 'min_width', 'min_height'] as const;
+
+// Bounds for min_width / min_height: below 200 px nothing is a game area; above 4K nobody could play it.
+export const MIN_SIZE_RANGE = { min: 200, max: 3840 } as const;
 
 const MAX_TEXT = 5000, MAX_LIST = 40;
 const str = (v: unknown, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -52,12 +62,21 @@ function cleanPath(s: string) {
   const parts = s.split('/').filter(Boolean);
   return parts.every((p) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(p)) && parts.length ? parts.join('/') + '/' : '';
 }
+// A minimum play size from a form ("1024", "", " 768 px"?) or JSON (1024, null). Empty: null (the site default);
+// anything else that isn't a whole number is kept as NaN so problems() can say so (it never reaches a save).
+function minSize(v: unknown): number | null {
+  if (v === null || v === undefined || v === '' || (typeof v === 'string' && !v.trim())) return null;
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? Number(v) : NaN;
+  return Number.isInteger(n) ? n : NaN;
+}
+const isMinSize = (n: number | null | undefined) => n == null || (Number.isInteger(n) && n >= MIN_SIZE_RANGE.min && n <= MIN_SIZE_RANGE.max);
 const isFit = (s: string) => s === '' || (/^\d+(,\d+){5}$/.test(s) && s.split(',').map(Number).every((n) => n >= 0));
 
 // Clean up whatever a form or an import sends into a ListingFields. Never throws; see problems() for what's wrong.
 export function normalize(input: Record<string, unknown>, base: ListingFields = EMPTY_LISTING): ListingFields {
   const has = (k: string) => Object.prototype.hasOwnProperty.call(input, k);
-  const pick = <K extends keyof ListingFields>(k: K, value: ListingFields[K]) => (has(k) ? value : base[k]);
+  // (A listing saved before a field existed has no value for it: the field's empty value.)
+  const pick = <K extends keyof ListingFields>(k: K, value: ListingFields[K]) => (has(k) ? value : base[k] ?? EMPTY_LISTING[k]);
   // Grades may also come from checkboxes named "grades:Grades 3-5".
   const gradeBoxes = Object.keys(input).filter((k) => k.startsWith('grades:'));
   const grades = gradeBoxes.length ? gradeBoxes.filter((k) => input[k] === true || input[k] === 'on').map((k) => k.slice(7)) : null;
@@ -84,6 +103,8 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
     cdn_path: pick('cdn_path', cleanPath(str(input.cdn_path, 200))),
     embed: pick('embed', input.embed === false || input.embed === 'false' ? false : true),
     fit: pick('fit', str(input.fit, 60).replace(/\s+/g, '')),
+    min_width: pick('min_width', minSize(input.min_width)),
+    min_height: pick('min_height', minSize(input.min_height)),
   };
 }
 
@@ -97,6 +118,9 @@ export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady
     if (!isImageRef(v)) out.push(`The ${name} “${v}” must be an image path on the site or an https link.`);
   }
   if (!isFit(f.fit)) out.push('Player fit must be six whole numbers: page width, page height, x, y, width, height.');
+  for (const [name, v] of [['width', f.min_width], ['height', f.min_height]] as const) {
+    if (!isMinSize(v)) out.push(`The minimum play ${name} must be a whole number of pixels from ${MIN_SIZE_RANGE.min} to ${MIN_SIZE_RANGE.max}, or empty for the site’s default.`);
+  }
   for (const g of f.grades) if (!(GRADES as readonly string[]).includes(g)) out.push(`Unknown grade band “${g}”.`);
   if (f.play_source === 'cdn' && !opts.cdnReady) out.push('To be hosted on the Vault CDN, the game needs a CDN game with a current release.');
   if (opts.forPublish) {
@@ -112,7 +136,7 @@ export function isListingSlug(v: unknown): v is string {
 
 // Field-by-field differences, for "what will change on the site".
 export function changedFields(a: ListingFields | null, b: ListingFields): (keyof ListingFields)[] {
-  return (Object.keys(EMPTY_LISTING) as (keyof ListingFields)[]).filter((k) => JSON.stringify(a?.[k] ?? EMPTY_LISTING[k]) !== JSON.stringify(b[k]));
+  return (Object.keys(EMPTY_LISTING) as (keyof ListingFields)[]).filter((k) => JSON.stringify(a?.[k] ?? EMPTY_LISTING[k]) !== JSON.stringify(b[k] ?? EMPTY_LISTING[k]));
 }
 
 export const FIELD_LABEL: Record<keyof ListingFields, string> = {
@@ -120,6 +144,7 @@ export const FIELD_LABEL: Record<keyof ListingFields, string> = {
   subjects: 'Subjects', topics: 'Topics', standards: 'Standards', related_curriculum: 'Related curriculum',
   gameplay_video: 'Gameplay video', hero_image: 'Hero image', thumb_image: 'Thumbnail', screenshots: 'Screenshots',
   play_source: 'Hosted by', play_url: 'Play URL', cdn_path: 'CDN folder', embed: 'Opens in', fit: 'Player fit',
+  min_width: 'Minimum play width', min_height: 'Minimum play height',
 };
 
 // The public catalog entry for a published listing. `cdn` is the linked game's current production URL and release,
@@ -147,6 +172,9 @@ export function catalogEntry(
       release: fromCdn ? cdn.release : null,
       embed: fromCdn ? true : f.embed,
       fit: fromCdn || !f.fit ? null : f.fit.split(',').map(Number),
+      // The smallest game area it plays in (CSS px); null: the site's default. Whoever hosts it.
+      min_width: f.min_width ?? null,
+      min_height: f.min_height ?? null,
     },
     published_at: l.published_at,
   };

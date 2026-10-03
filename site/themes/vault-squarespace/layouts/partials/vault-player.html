@@ -53,6 +53,59 @@
   .vault-player__frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
   .vault-player__frame.is-fit { inset: auto; left: 0; top: 0; transform-origin: 0 0; }
   html.vault-player-open, html.vault-player-open body { overflow: hidden !important; }
+  /* The Play gate: shown in the stage instead of the game when the game's smallest play area doesn't fit (below). */
+  .vault-gate { position: absolute; inset: 0; overflow: auto; display: flex; padding: 24px 20px; color: #fff;
+    background: radial-gradient(ellipse at 50% 30%, #12201d 0%, #000 70%);
+    font: 400 16px/1.5 var(--body, "Montserrat"), system-ui, sans-serif; }
+  .vault-gate__in { margin: auto; max-width: 34em; text-align: center; }
+  .vault-gate__tv { position: relative; width: 132px; height: 104px; margin: 0 auto 22px; padding: 10px 26px 12px 10px;
+    box-sizing: border-box; border: 3px solid var(--accent, #67ffcf); border-radius: 14px; }
+  .vault-gate__tv::before, .vault-gate__tv::after { content: ""; position: absolute; right: 8px; width: 9px; height: 9px;
+    border: 2px solid var(--accent, #67ffcf); border-radius: 50%; box-sizing: border-box; }
+  .vault-gate__tv::before { top: 14px; } .vault-gate__tv::after { top: 30px; }
+  .vault-gate__screen { position: relative; height: 100%; border-radius: 9px / 11px; overflow: hidden; background-color: #333;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='72'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='4'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 2.6 0 0 0 -.75'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' fill='%23222'/%3E%3Crect width='100%25' height='100%25' fill='%23eee' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: cover; box-shadow: inset 0 0 10px 3px rgba(0,0,0,.75); }
+  .vault-gate__osd { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 4px; text-align: center;
+    font: 700 12px/1.1 var(--heading, "base-9-sans"), system-ui, sans-serif; letter-spacing: .04em; color: var(--accent, #67ffcf);
+    text-shadow: 0 0 2px #000, 0 0 6px #000; background: rgba(0,0,0,.35); }
+  /* "Turn your device": the television turns the way the device should, from how it's held now. */
+  .vault-gate.to-landscape .vault-gate__tv { animation: vault-gate-to-landscape 3s ease-in-out infinite; }
+  .vault-gate.to-portrait .vault-gate__tv { animation: vault-gate-to-portrait 3s ease-in-out infinite; }
+  @keyframes vault-gate-to-landscape { 0%, 25% { transform: rotate(90deg); } 50%, 90% { transform: rotate(0); } 100% { transform: rotate(90deg); } }
+  @keyframes vault-gate-to-portrait { 0%, 25% { transform: rotate(0); } 50%, 90% { transform: rotate(90deg); } 100% { transform: rotate(0); } }
+  @media (prefers-reduced-motion: reduce) {
+    .vault-gate.to-landscape .vault-gate__tv { animation: none; }
+    .vault-gate.to-portrait .vault-gate__tv { animation: none; transform: rotate(90deg); }
+  }
+  .vault-gate__title { margin: 0 0 12px; color: var(--accent, #67ffcf); font: 400 clamp(24px, 4.4vw, 38px)/1.1 var(--heading, "base-9-sans"), system-ui, sans-serif;
+    letter-spacing: -.02em; text-transform: uppercase; }
+  .vault-gate__text { margin: 0 0 8px; }
+  .vault-gate__text b { font-weight: 600; white-space: nowrap; }
+  .vault-gate__hint { margin: 0; color: rgba(255,255,255,.7); font-size: 14px; }
+  .vault-gate__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 14px; margin-top: 24px; }
+  .vault-gate__btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 24px;
+    border: 3px solid var(--accent, #67ffcf); border-radius: 0 45px 45px 45px; background: transparent; color: var(--accent, #67ffcf);
+    font: 500 15px/1.2 var(--meta, "Archivo"), system-ui, sans-serif; text-transform: uppercase; text-decoration: none; cursor: pointer; }
+  .vault-gate__btn.is-primary { background: var(--accent, #67ffcf); color: #000; }
+  .vault-gate__btn:hover { opacity: .85; }
+  .vault-gate__btn:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+  .vault-player.has-gate [data-act="fs"] { display: none; }   /* nothing to show full screen yet */
+  @media (max-height: 560px) {
+    .vault-gate { padding: 12px 20px; }
+    .vault-gate__tv { width: 92px; height: 72px; margin-bottom: 10px; padding: 7px 19px 8px 7px; }
+    .vault-gate__tv::before { top: 9px; } .vault-gate__tv::after { top: 21px; }
+    .vault-gate__osd { font-size: 9px; }
+    .vault-gate__title { font-size: 24px; margin-bottom: 6px; }
+    .vault-gate__text { font-size: 15px; }
+    .vault-gate__actions { margin-top: 14px; }
+    .vault-gate__btn { min-height: 42px; }
+  }
+  /* A phone held sideways: no room for the television; the words and the buttons come first. */
+  @media (max-height: 420px) {
+    .vault-gate__tv, .vault-gate__hint { display: none; }
+    .vault-gate__in { max-width: 40em; }
+  }
   @media (max-width: 520px) {
     .vault-player__bar { height: 48px; gap: 8px; }
     .vault-player__home img { height: 20px; }
@@ -62,6 +115,7 @@
     .vault-player__btn { width: 36px; height: 36px; }
   }
 </style>
+<script>{{ (resources.Get "js/play-gate.js").Content | safeJS }}</script>
 <script>
 (function () {
   var LABEL = /^\s*(play( game| now)?|launch game)\s*$/i;
@@ -117,6 +171,7 @@
   ];
   var games = [];            // index -> game URL; kept out of the DOM
   var player, stage, frame, fit, title, studioEl, progress, lastFocus;
+  var gate = null;          // the Play gate while it stands in for the game: {el, i, url, tab, key}
 
   var LOGO = '{{ "sq/img/site/vault-game-library.png" | absURL }}';
   var ICON = {
@@ -158,9 +213,31 @@
     document.body.appendChild(player);
   }
 
-  function open(i) {
+  // Open the player for game i. Unless `now`, the Play gate first checks the game fits (below).
+  function open(i, now) {
+    show();
+    if (!now && blocked(false)) return showGate({ i: i, url: games[i], tab: false });
+    start(i);
+  }
+
+  // The player itself, with the game's title and studio, and the #play history entry.
+  function show() {
     if (!player) build();
+    if (player.classList.contains('is-open')) return;
     lastFocus = document.activeElement;
+    player.classList.add('is-open');
+    var h1 = document.querySelector('h1');
+    title.textContent = (h1 && h1.textContent.trim()) || document.title.split(/\s+[—-]\s+/)[0];
+    studioEl.textContent = '';
+    findStudio(function (name) { if (studioEl) studioEl.textContent = name ? 'by ' + name : ''; });
+    document.documentElement.classList.add('vault-player-open');
+    if (!(history.state && history.state.vaultPlayer)) history.pushState({ vaultPlayer: true }, '', '#play');
+  }
+
+  // Load game i into the player.
+  function start(i) {
+    hideGate();
+    if (frame) { frame.remove(); frame = null; }
     // A fresh iframe each time, so closing really stops the game (and its audio).
     frame = document.createElement('iframe');
     frame.className = 'vault-player__frame';
@@ -188,20 +265,120 @@
       frame.setAttribute('scrolling', 'no');
     }
     stage.appendChild(frame);
-    player.classList.add('is-open');
     layout();
-    var h1 = document.querySelector('h1');
-    title.textContent = (h1 && h1.textContent.trim()) || document.title.split(/\s+[—-]\s+/)[0];
-    studioEl.textContent = '';
-    findStudio(function (name) { if (studioEl) studioEl.textContent = name ? 'by ' + name : ''; });
-    document.documentElement.classList.add('vault-player-open');
-    if (!(history.state && history.state.vaultPlayer)) history.pushState({ vaultPlayer: true }, '', '#play');
     frame.focus();
     announce('open');
   }
 
+  // ---- The Play gate ----
+  // A game page says the smallest play area its game needs: <meta name="vault:min-size" content="width,height">
+  // (the listing's minimum, or the site's default). When the player's area is smaller, the player shows what's needed
+  // and what would help (turn the device, full screen, a bigger window) instead of the game, with "Try anyway" and the
+  // way back; it checks again whenever the window changes, and offers to start once the game fits. The decision is
+  // VaultPlayGate.decide (assets/js/play-gate.js, inlined above). Games that open in a new tab get the same check first.
+  function need() {
+    var m = document.querySelector('meta[name="vault:min-size"]');
+    return window.VaultPlayGate && m ? VaultPlayGate.parseSize(m.getAttribute('content')) : null;
+  }
+  // The player's area: its stage while it's open; before, the window less the bar (as the CSS sizes it).
+  function area() {
+    if (player && player.classList.contains('is-open')) return { w: stage.clientWidth, h: stage.clientHeight };
+    return { w: window.innerWidth, h: window.innerHeight - (window.innerWidth <= 520 ? 48 : 56) };
+  }
+  function verdict(tab) {
+    var n = need();
+    if (!n) return { verdict: 'play' };
+    var mq = function (q) { return !!(window.matchMedia && window.matchMedia(q).matches); };
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var sw = screen.width, sh = screen.height;
+    if ((sw > sh) !== (vw > vh)) { var t = sw; sw = sh; sh = t; }     // iOS reports the screen as held upright
+    var chromeW = window.outerWidth ? Math.max(0, window.outerWidth - vw) : 0, chromeH = window.outerHeight ? Math.max(0, window.outerHeight - vh) : 0;
+    var have = area();
+    var r = VaultPlayGate.decide(n, have, {
+      bar: Math.max(0, vh - have.h),
+      turnable: mq('(hover: none) and (pointer: coarse)'),
+      screen: { w: sw, h: sh },
+      largest: { w: (screen.availWidth || sw) - chromeW, h: (screen.availHeight || sh) - chromeH },
+      fullscreen: !tab && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled) && !!(document.body.requestFullscreen || document.body.webkitRequestFullscreen)
+    });
+    r.need = n; r.have = have;
+    return r;
+  }
+  // Would the gate stop the game now?
+  function blocked(tab) { return verdict(tab).verdict !== 'play'; }
+  function showGate(g) {
+    show();
+    hideGate();
+    gate = g;
+    gate.el = document.createElement('div');
+    gate.el.className = 'vault-gate';
+    gate.el.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('[data-gate]');
+      if (b) gateAction(b.getAttribute('data-gate'));
+    });
+    stage.appendChild(gate.el);
+    player.classList.add('has-gate');
+    renderGate(true);
+  }
+  function hideGate() { if (gate) { gate.el.remove(); gate = null; } if (player) player.classList.remove('has-gate'); }
+  var esc = function (v) { return String(v).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  function renderGate(first) {
+    if (!gate) return;
+    var r = verdict(gate.tab), n = r.need || { w: 0, h: 0 }, have = r.have || area();
+    var key = r.verdict + ' ' + have.w + 'x' + have.h;
+    if (key === gate.key) return;
+    gate.key = key;
+    var game = esc(title.textContent || 'This game'), x = ' × ';
+    var needs = '<b>' + n.w + x + n.h + '</b>', has = '<b>' + have.w + x + have.h + '</b>';
+    var btn = function (act, label, primary) { return '<button type="button" class="vault-gate__btn' + (primary ? ' is-primary' : '') + '" data-gate="' + act + '">' + label + '</button>'; };
+    var back = btn('back', 'Back to the game page', r.verdict === 'small');
+    var t, text, hint = '', acts;
+    if (r.verdict === 'play') {
+      t = 'Ready to play'; text = 'There’s room for ' + game + ' now.'; acts = btn('start', gate.tab ? 'Open the game' : 'Start the game', true) + back;
+    } else if (r.verdict === 'rotate') {
+      t = r.to === 'landscape' ? 'Turn your device sideways' : 'Turn your device upright';
+      text = game + ' needs a play area of at least ' + needs + ' pixels. Held this way, your screen has room for ' + has + '; turned, it has enough.';
+      acts = btn('start', 'Try anyway') + back;
+    } else if (r.verdict === 'fullscreen') {
+      t = 'This game needs more room';
+      text = game + ' needs a play area of at least ' + needs + ' pixels. This window has room for ' + has + ', but your screen is big enough in full screen.';
+      hint = 'You can leave full screen at any time with Esc.';
+      acts = btn('fullscreen', 'Play full screen', true) + btn('start', 'Try anyway') + back;
+    } else if (r.verdict === 'resize') {
+      t = 'Make the window bigger';
+      text = game + ' needs a play area of at least ' + needs + ' pixels. This window has room for ' + has + '. Make it bigger (or maximize it) and the game can start.';
+      acts = btn('start', 'Try anyway') + back;
+    } else {
+      t = 'This game needs a bigger screen';
+      text = game + ' needs a screen with a play area of at least ' + needs + ' pixels. This one has room for ' + has + '.';
+      hint = 'Try it on a computer or a tablet. It may still work here, but parts of it could be too small or cut off.';
+      acts = btn('start', 'Try anyway') + back;
+    }
+    var focused = document.activeElement && gate.el.contains(document.activeElement) ? document.activeElement.getAttribute('data-gate') : null;
+    gate.el.className = 'vault-gate is-' + r.verdict + (r.to ? ' to-' + r.to : '');
+    gate.el.innerHTML = '<div class="vault-gate__in" role="group" aria-labelledby="vault-gate-title">' +
+      '<div class="vault-gate__tv" aria-hidden="true"><div class="vault-gate__screen"><span class="vault-gate__osd">' + (r.verdict === 'play' ? 'READY' : n.w + x + n.h) + '</span></div></div>' +
+      '<h2 class="vault-gate__title" id="vault-gate-title">' + t + '</h2>' +
+      '<p class="vault-gate__text" aria-live="polite">' + text + '</p>' + (hint ? '<p class="vault-gate__hint">' + hint + '</p>' : '') +
+      '<div class="vault-gate__actions">' + acts + '</div></div>';
+    var f = (focused && gate.el.querySelector('[data-gate="' + focused + '"]')) || (first || focused ? gate.el.querySelector('[data-gate]') : null);
+    if (f) f.focus({ preventScroll: true });
+  }
+  function gateAction(act) {
+    if (!gate) return;
+    if (act === 'back') return dismiss();
+    if (act === 'fullscreen') (stage.requestFullscreen || stage.webkitRequestFullscreen).call(stage);
+    if (gate.tab) {
+      window.open(gate.url, '_blank', 'noopener');
+      announce('new-tab');
+      return dismiss();
+    }
+    start(gate.i);
+  }
+
   // Scale and position a FIT game so its rectangle is as large as possible and centred in the stage.
   function layout() {
+    if (gate) renderGate();
     if (!frame || !fit || !stage) return;
     var sw = stage.clientWidth, sh = stage.clientHeight;
     if (!sw || !sh) return;
@@ -213,6 +390,7 @@
   function close() {
     if (!player || !player.classList.contains('is-open')) return;
     if (frame) { frame.remove(); frame = null; fit = null; }
+    hideGate();
     showProgress(null);
     player.classList.remove('is-open');
     document.documentElement.classList.remove('vault-player-open');
@@ -221,7 +399,8 @@
     announce('close');
   }
 
-  // "vault-player:open" / "vault-player:close" on document, for play analytics (sq/js/vault-play-analytics.js).
+  // "vault-player:open" / "vault-player:close" on document, for play analytics (sq/js/vault-play-analytics.js); and
+  // "vault-player:new-tab" when the Play gate opens a new-tab game.
   function announce(what) {
     try { document.dispatchEvent(new CustomEvent('vault-player:' + what)); } catch (e) {}
   }
@@ -273,8 +452,9 @@
       if (a.hasAttribute('data-vault-play') || !LABEL.test(a.textContent)) continue;
       var url;
       try { url = new URL(a.getAttribute('href'), location.href); } catch (e) { continue; }
-      if (url.hash === '#noembed' || url.host === location.host || !/^https?:$/.test(url.protocol)) continue;
-      if (NO_EMBED.some(function (p) { return url.href.indexOf(p) === 0; })) continue;
+      if (url.host === location.host || !/^https?:$/.test(url.protocol)) continue;
+      // A game that opens in a new tab keeps its link; the Play gate still checks it fits first (the click handler).
+      if (url.hash === '#noembed' || NO_EMBED.some(function (p) { return url.href.indexOf(p) === 0; })) { a.setAttribute('data-vault-tab', ''); continue; }
       var i = games.push(url.href) - 1;
       a.setAttribute('data-vault-play', i);
       a.setAttribute('href', '#play');
@@ -284,11 +464,18 @@
   }
 
   document.addEventListener('click', function (e) {
+    var tab = e.target.closest && e.target.closest('a[data-vault-tab]');
+    if (tab && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      if (blocked(true)) { e.preventDefault(); showGate({ url: tab.href, tab: true }); }
+      return;
+    }
     var a = e.target.closest && e.target.closest('a[data-vault-play]');
     if (!a) return;
     e.preventDefault();
     open(+a.getAttribute('data-vault-play'));
   }, true);
+  window.addEventListener('resize', function () { if (gate) renderGate(); });
+  window.addEventListener('orientationchange', function () { setTimeout(function () { if (gate) renderGate(); }, 250); });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && player && player.classList.contains('is-open') && !document.fullscreenElement) dismiss();
   });
@@ -313,7 +500,13 @@
   function init() {
     wire();
     if (games.length) findStudio(function () {});   // look it up early so the bar is ready when a game opens
-    if (location.hash === '#play') history.replaceState(null, '', location.pathname + location.search);
+    // A direct link to the game (page#play) opens the player, through the Play gate as a click does.
+    if (location.hash === '#play') {
+      history.replaceState(null, '', location.pathname + location.search);
+      var tabLink = document.querySelector('a[data-vault-tab]');
+      if (games.length) open(0);
+      else if (tabLink && blocked(true)) showGate({ url: tabLink.href, tab: true });
+    }
     // Squarespace can render or swap blocks after load; catch late buttons too.
     new MutationObserver(function () { wire(); }).observe(document.body, { childList: true, subtree: true });
   }

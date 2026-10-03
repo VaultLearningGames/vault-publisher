@@ -401,8 +401,8 @@ Notes on each task:
   (a second gets HTTP 409). A dry run downloads nothing: it lists the images a run would try.
 * **`update`** takes any listing fields (`title`, `short_description`, `about`, `makers`, `grades`, `subjects`,
   `topics`, `standards`, `related_curriculum`, `gameplay_video`, `hero_image`, `thumb_image`, `screenshots`,
-  `play_source`, `play_url`, `cdn_path`, `embed`, `fit`); lists are JSON arrays, and fields left out keep their
-  value. It is **all or nothing**: every update is checked first, with the rules of a save in the portal (plus
+  `play_source`, `play_url`, `cdn_path`, `embed`, `fit`, `min_width`, `min_height`); lists are JSON arrays,
+  `min_width`/`min_height` whole pixels or `null` (the site's default), and fields left out keep their value. It is **all or nothing**: every update is checked first, with the rules of a save in the portal (plus
   unknown fields, wrong types and over-long text), and if any is refused nothing is written and the answer (HTTP
   400) lists every problem per listing. Publishing puts the whole draft on the site, so with `publish: true` a
   listing that has other unpublished draft changes (e.g. a studio's edits waiting for review), or isn't on the site

@@ -354,6 +354,20 @@ describe('admin task: update', () => {
     assert.equal(audits('listing.save')[0].actor, 'github:octo');
   });
 
+  test('sets the smallest play area (numbers, or null for the site default)', async () => {
+    const set = (min_width: unknown, min_height: unknown) => post('update', { publish: true, updates: [{ slug: 'bloom', fields: { min_width, min_height } }] });
+    const { status, json } = await set(1024, 600);
+    assert.equal(status, 200);
+    assert.deepEqual(json.updated[0].changed, ['min_width', 'min_height']);
+    assert.deepEqual([t.db.listing('bloom')!.published!.min_width, t.db.listing('bloom')!.published!.min_height], [1024, 600]);
+    const refused = await set('1024', 50);
+    assert.equal(refused.status, 400);
+    assert.match(refused.json.detail[0].problems.join('\n'), /min_width must be a whole number of pixels, or null/);
+    assert.match((await set(1024, 50)).json.detail[0].problems.join('\n'), /minimum play height must be a whole number of pixels from 200/);
+    assert.equal((await set(null, null)).status, 200);
+    assert.equal(t.db.listing('bloom')!.published!.min_width, null);
+  });
+
   test('all or nothing: every problem comes back, and nothing is written', async () => {
     const before = snapshot();
     const { status, json } = await post('update', {

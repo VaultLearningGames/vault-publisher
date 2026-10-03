@@ -15,6 +15,11 @@
 <meta name="vault:game" content="{{ .Params.catalog_slug }}">
 {{- with .Params.studio }}<meta name="vault:studio-slug" content="{{ .slug }}">{{ end }}
 {{- with .Params.play }}{{ with .fit }}<meta name="vault:fit" content="{{ delimit . "," }}">{{ end }}{{ end }}
+{{- /* The Play gate (partials/vault-player.html): the smallest play area the game needs, from its listing, else the
+       site's default (hugo.toml params.play). */ -}}
+{{- $play := .Params.play | default dict }}
+{{- $minW := $play.min_width | default site.Params.play.min_width }}{{ $minH := $play.min_height | default site.Params.play.min_height }}
+{{- if and $minW $minH }}<meta name="vault:min-size" content="{{ $minW }},{{ $minH }}">{{ end }}
 {{- end }}
 {{- define "scripts" }}{{ partial "vault-player.html" . }}{{ partial "vault-play-analytics.html" . }}{{ end }}
 {{- define "main" }}

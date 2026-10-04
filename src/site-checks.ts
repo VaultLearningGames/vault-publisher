@@ -22,7 +22,7 @@ export const CHECKS = ['games', 'assets', 'links', 'spelling', 'performance', 'r
 export type CheckName = (typeof CHECKS)[number];
 export const CHECK_LABEL: Record<CheckName, string> = {
   games: 'Games load', assets: 'Missing assets', links: 'Broken links', spelling: 'Spelling',
-  performance: 'Large files and slow loading', responsive: 'Responsive design', services: 'Game services',
+  performance: 'Website size and speed', responsive: 'Responsive design', services: 'Game services',
 };
 
 export type FindingLevel = 'warn' | 'fail';
@@ -197,16 +197,18 @@ export interface Dictionary { correct(word: string): boolean; suggest(word: stri
 
 // ---------- limits ----------
 export const LIMITS = {
-  imageWarnBytes: 500_000, imageFailBytes: 2_000_000,
-  fileWarnBytes: 1_000_000, fileFailBytes: 5_000_000,       // scripts, stylesheets, fonts, anything else
-  mediaWarnBytes: 10_000_000,                               // video and audio
-  pageWarnBytes: 3_000_000, pageFailBytes: 10_000_000,      // everything one page loads
+  // The website's own files: much smaller than a game's (pages weighed 0.4-1 MB on 2026-10-04).
+  imageWarnBytes: 250_000, imageFailBytes: 1_000_000,
+  fileWarnBytes: 250_000, fileFailBytes: 1_000_000,         // scripts, stylesheets, fonts, anything else
+  mediaWarnBytes: 5_000_000,                                // video and audio
+  pageWarnBytes: 1_500_000, pageFailBytes: 4_000_000,       // everything one page loads
   loadWarnMs: 3000, loadFailMs: 8000,
   lcpWarnMs: 2500, lcpFailMs: 4000,                         // largest contentful paint (web.dev's "good" and "poor")
   ttfbWarnMs: 800,
   uncompressedBytes: 20_000,                                // text files this big should be sent compressed
   oversizedFactor: 3, oversizedBytes: 100_000,              // an image with over 3x the pixels across that it is shown at
-  gameLoadWarnMs: 15_000, gameWarnBytes: 50_000_000, gameFailBytes: 200_000_000,
+  // Games, judged apart from the website: they may be large, so their size and load time only ever warn.
+  gameLoadWarnMs: 15_000, gameWarnBytes: 50_000_000,
   gameMissingListed: 5,
   smallTextPx: 12, tapTargetPx: 24, overflowPx: 2,
   serviceWarnMs: 3000,                                      // a game service that takes longer than this to answer
@@ -425,11 +427,11 @@ export function gameFindings(game: GameLoad): RawFinding[] {
   if (missing.length > LIMITS.gameMissingListed) {
     add('games', { level: 'warn', code: 'game.missing-file', target: `${game.url} (+${missing.length - LIMITS.gameMissingListed} more)`, message: `${name} asks for ${missing.length} files that don't load`, detail: about });
   }
-  if (game.ms === null) add('performance', { level: 'warn', code: 'game.slow', target: game.url, message: `${name} hadn't finished loading when the check stopped waiting`, detail: about });
-  else if (game.ms > LIMITS.gameLoadWarnMs) add('performance', { level: 'warn', code: 'game.slow', target: game.url, message: `${name} takes ${secs(game.ms)} to load`, detail: about });
+  if (game.ms === null) add('games', { level: 'warn', code: 'game.slow', target: game.url, message: `${name} hadn't finished loading when the check stopped waiting`, detail: about });
+  else if (game.ms > LIMITS.gameLoadWarnMs) add('games', { level: 'warn', code: 'game.slow', target: game.url, message: `${name} takes ${secs(game.ms)} to load`, detail: about });
   const bytes = game.resources.reduce((sum, r) => sum + (r.bytes ?? 0), 0);
   if (bytes > LIMITS.gameWarnBytes) {
-    add('performance', { level: bytes > LIMITS.gameFailBytes ? 'fail' : 'warn', code: 'game.heavy', target: game.url, message: `${name} downloads ${mb(bytes)} before it can be played`, detail: { ...about, bytes } });
+    add('games', { level: 'warn', code: 'game.heavy', target: game.url, message: `${name} downloads ${mb(bytes)} before it can be played`, detail: { ...about, bytes } });
   }
   return out;
 }

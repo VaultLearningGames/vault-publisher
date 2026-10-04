@@ -70,15 +70,15 @@ describe('performance', () => {
     const f = performanceFindings(page({ resources: [
       res({ url: `${SITE}/a.png`, type: 'image', bytes: LIMITS.imageWarnBytes + 1, mime: 'image/png', encoding: '' }),
       res({ url: `${SITE}/b.png`, type: 'image', bytes: LIMITS.imageFailBytes + 1, mime: 'image/png', encoding: '' }),
-      res({ url: `${SITE}/c.js`, type: 'script', bytes: LIMITS.imageWarnBytes + 1, mime: 'text/javascript' }),
+      res({ url: `${SITE}/c.js`, type: 'script', bytes: LIMITS.fileWarnBytes, mime: 'text/javascript' }),
       res({ url: `${SITE}/d.js`, type: 'script', bytes: LIMITS.fileWarnBytes + 1, mime: 'text/javascript' }),
     ] }));
     assert.deepEqual(f.filter((x) => x.code === 'perf.large-file').map((x) => `${x.level} ${x.target.slice(-5)}`), ['warn a.png', 'fail b.png', 'warn /d.js']);
-    assert.match(f[1].message, /2\.0 MB image/);
+    assert.match(f[1].message, /1\.0 MB image/);
   });
 
   test('a heavy page counts everything the page itself loads, not what its frames load', () => {
-    const big = (i: number, inFrame = false) => res({ url: `${SITE}/${i}.jpg`, type: 'image', bytes: 400_000, mime: 'image/jpeg', encoding: '', inFrame });
+    const big = (i: number, inFrame = false) => res({ url: `${SITE}/${i}.jpg`, type: 'image', bytes: 200_000, mime: 'image/jpeg', encoding: '', inFrame });
     assert.deepEqual(codes(performanceFindings(page({ resources: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => big(i)) }))), ['warn:perf.heavy-page']);
     assert.deepEqual(performanceFindings(page({ resources: [1, 2, 3, 4].map((i) => big(i)).concat([5, 6, 7, 8].map((i) => big(i, true))) })), []);
   });
@@ -96,10 +96,10 @@ describe('performance', () => {
     const src = `${SITE}/hero.jpg`;
     const withImg = (natural: number, shown: number, bytes: number) => performanceFindings(page({
       resources: [res({ url: src, type: 'image', bytes, mime: 'image/jpeg', encoding: '' })], images: [{ src, loaded: true, natural: [natural, 100], shown: [shown, 50] }] }));
-    assert.deepEqual(codes(withImg(3000, 300, 300_000)), ['warn:perf.oversized-image']);
-    assert.deepEqual(withImg(600, 300, 300_000), []);      // twice the pixels is what a sharp screen wants
+    assert.deepEqual(codes(withImg(3000, 300, 200_000)), ['warn:perf.oversized-image']);
+    assert.deepEqual(withImg(600, 300, 200_000), []);      // twice the pixels is what a sharp screen wants
     assert.deepEqual(withImg(3000, 300, 30_000), []);      // a small file isn't worth it
-    assert.deepEqual(withImg(3000, 0, 300_000), []);       // not shown at this width
+    assert.deepEqual(withImg(3000, 0, 200_000), []);       // not shown at this width
   });
 
   test('slow pages: load time first, then main content, then the server; one finding', () => {
@@ -244,12 +244,13 @@ describe('games', () => {
     assert.deepEqual(codes(gameFindings(game({ resources: [res({ url: 'https://cdn.example.org/engine.js', type: 'script', status: 404 })] }))), ['warn:game.missing-file']);
   });
 
-  test('slow and heavy games are performance findings', () => {
+  test('slow and heavy games are games findings, and only ever warnings', () => {
     const f = gameFindings(game({ ms: 22_000, resources: [res({ url: 'https://x.example/Build/game.data', type: 'fetch', bytes: 80_000_000 })] }));
-    assert.deepEqual(f.map((x) => `${x.check} ${x.level}:${x.code}`), ['performance warn:game.slow', 'performance warn:game.heavy']);
+    assert.deepEqual(f.map((x) => `${x.check} ${x.level}:${x.code}`), ['games warn:game.slow', 'games warn:game.heavy']);
     assert.match(f[1].message, /80\.0 MB/);
     assert.deepEqual(codes(gameFindings(game({ ms: null }))), ['warn:game.slow']);
-    assert.equal(gameFindings(game({ resources: [res({ bytes: 250_000_000 })] }))[0].level, 'fail');
+    assert.deepEqual(codes(gameFindings(game({ resources: [res({ bytes: 900_000_000 })] }))), ['warn:game.heavy']);
+    assert.deepEqual(gameFindings(game({ resources: [res({ bytes: 49_000_000 })] })), []);
   });
 });
 
@@ -426,7 +427,7 @@ describe('the dashboard’s badges', () => {
     assert.deepEqual([checkBadge('links', summary({ fail: 2, warn: 3 })).message, checkBadge('links', summary({ fail: 2 })).message], ['2 failing · 3 to look at', '2 failing']);
     assert.equal(checkBadge('links', summary({ fail: 2 })).color, 'red');
     assert.deepEqual([checkBadge('games', undefined).message, checkBadge('games', summary({ status: 'error' })).message, checkBadge('games', summary({ status: 'skipped' })).message], ['no runs yet', 'could not run', 'did not run']);
-    assert.equal(checkBadge('performance', undefined).label, 'large files and slow loading');
+    assert.equal(checkBadge('performance', undefined).label, 'website size and speed');
   });
 
   test('the run as a whole, and when it ran', () => {

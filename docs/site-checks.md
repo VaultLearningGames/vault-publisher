@@ -56,7 +56,7 @@ emails, anything with a digit, single letters, short ALL-CAPS words (NGSS, STEM)
 (iCivics, PhET). One finding per word, with its context and the dictionary's best suggestion.
 See [accepting a word](#accepting-a-word).
 
-**Large files and slow loading** (`performance`). From the same page loads, plus the games' own loads. The pages share
+**Website size and speed** (`performance`). The website's own files only, from the same page loads; games are judged separately under Games load (below the table). The pages share
 one browser cache, so each file is downloaded once per run; a page's weight still counts every file it uses at the
 size it had when first fetched. Timings come in two steps: the visit gives a first look, then every page that looked
 slow or is over `pageWarnBytes` (the 30 heaviest) is loaded again alone with an empty cache, as a first-time visitor
@@ -64,15 +64,17 @@ gets it, and that time is the one reported.
 
 | | Warning | Failure |
 | --- | --- | --- |
-| An image | over `imageWarnBytes` 500 KB | over `imageFailBytes` 2 MB |
-| A script, stylesheet, font or other file | over `fileWarnBytes` 1 MB | over `fileFailBytes` 5 MB |
-| A video or audio file | over `mediaWarnBytes` 10 MB | |
-| Everything one page loads | over `pageWarnBytes` 3 MB | over `pageFailBytes` 10 MB |
+| An image | over `imageWarnBytes` 250 KB | over `imageFailBytes` 1 MB |
+| A script, stylesheet, font or other file | over `fileWarnBytes` 250 KB | over `fileFailBytes` 1 MB |
+| A video or audio file | over `mediaWarnBytes` 5 MB | |
+| Everything one page loads | over `pageWarnBytes` 1.5 MB | over `pageFailBytes` 4 MB |
 | Page load | over `loadWarnMs` 3 s | over `loadFailMs` 8 s |
 | Largest contentful paint | over `lcpWarnMs` 2.5 s | over `lcpFailMs` 4 s |
 | Time to first byte | over `ttfbWarnMs` 0.8 s | |
-| A game's load time | over `gameLoadWarnMs` 15 s (or not finished when the check stopped waiting) | |
-| What a game downloads before it can be played | over `gameWarnBytes` 50 MB | over `gameFailBytes` 200 MB |
+
+Games are counted apart from the website, under **Games load**, and their size and speed only ever warn: a game's
+load time over `gameLoadWarnMs` 15 s (or not finished when the check stopped waiting), and what a game downloads
+before it can be played over `gameWarnBytes` 50 MB. A game's files never count toward a page's weight.
 
 Also warnings: a text file over `uncompressedBytes` 20 KB sent without compression, and an image with more than
 `oversizedFactor` 3 times the pixels across that it is shown at (when the file is over `oversizedBytes` 100 KB). Only

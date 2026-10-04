@@ -67,9 +67,11 @@ const frameOf = (req: Request): Frame | null => { try { return req.frame(); } ca
 export type KnownSizes = Map<string, ResourceSeen>;
 
 // Records every request the page makes, with the frame that made it. Call settle() before reading `seen`: the
-// response details arrive asynchronously.
-export function watchRequests(page: Page, known?: KnownSizes): { seen: Seen[]; settle(): Promise<void> } {
+// response details arrive asynchronously. `asked` has every address as it is asked for, finished or not.
+export function watchRequests(page: Page, known?: KnownSizes): { seen: Seen[]; asked: Set<string>; settle(): Promise<void> } {
   const seen: Seen[] = [];
+  const asked = new Set<string>();
+  page.on('request', (req) => { asked.add(req.url()); });
   const pending = new Set<Promise<void>>();
   const track = (work: Promise<void>) => { pending.add(work); work.finally(() => pending.delete(work)); };
   page.on('requestfinished', (req) => track((async () => {
@@ -100,7 +102,7 @@ export function watchRequests(page: Page, known?: KnownSizes): { seen: Seen[]; s
       res: { url: req.url(), type: req.resourceType(), status, error: status === null ? req.failure()?.errorText ?? 'failed' : null, bytes: null, mime: '', encoding: '', ms: null, inFrame: false },
     });
   })()));
-  return { seen, settle: async () => { await Promise.allSettled([...pending]); } };
+  return { seen, asked, settle: async () => { await Promise.allSettled([...pending]); } };
 }
 
 // Whether `frame` is `root` or inside it.

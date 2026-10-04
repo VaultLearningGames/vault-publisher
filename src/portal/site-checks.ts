@@ -108,6 +108,12 @@ const COLUMNS: Record<CheckName, Column[]> = {
     PROBLEM,
     { label: 'Size', cls: 'r', get: (f) => { const b = num(f, 'bytes'); return b === null ? { ...NONE, sort: -1 } : { text: String(b), html: html`<span class="nowrap">${size(b)}</span>`, sort: b }; } },
     { label: 'Time', cls: 'r', get: (f) => { const ms = num(f, 'ms'); return ms === null ? { ...NONE, sort: -1 } : { text: String(ms), html: html`<span class="nowrap">${secs(ms)}</span>`, sort: ms }; } },
+    // A heavy page's biggest files, or whose file this is when it isn't the site's own.
+    { label: 'What to fix first', get: (f) => {
+      const biggest = str(f, 'biggest');
+      if (biggest) { const lines = biggest.split('\n'); return { text: lines.join('; '), html: html`<ul class="small mono plain">${lines.map((l) => html`<li>${cut(l, 120)}</li>`)}</ul>` }; }
+      return detail(f, 'thirdParty') === true ? plain(`another site’s file (${str(f, 'host') ?? '?'})`, 'small') : NONE;
+    } },
     WHERE('Where'),
   ],
   responsive: [

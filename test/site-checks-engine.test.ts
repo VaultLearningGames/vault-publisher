@@ -8,7 +8,7 @@ import { after, before, describe, test } from 'node:test';
 import { deflateSync, crc32 } from 'node:zlib';
 import { parseSitemap } from '../src/site-checks/discover.ts';
 import { runSiteChecks } from '../src/site-checks/run.ts';
-import { isFlat, isPageUrl, normalisePath, oembedUrl, pagePathOf, youtubeWatchUrl } from '../src/site-checks/util.ts';
+import { isFlat, isPageUrl, normalisePath, oembedUrl, pagePathOf, templateOf, youtubeWatchUrl } from '../src/site-checks/util.ts';
 import type { Finding, Service, SiteCheckRun } from '../src/site-checks.ts';
 
 // ---------- pure helpers ----------
@@ -27,6 +27,15 @@ describe('site-checks helpers', () => {
     assert.equal(isPageUrl(new URL('https://x.org/a/?page=2')), false);
     assert.equal(pagePathOf('/wake#x', 'https://x.org'), '/wake/');
     assert.equal(pagePathOf('https://other.org/wake/', 'https://x.org'), null);
+  });
+  test('kinds of page, so the throttled timing covers each', () => {
+    assert.equal(templateOf('/', false), 'home');
+    assert.equal(templateOf('/about', false), '/about/');
+    assert.equal(templateOf('/game-cards/', false), '/game-cards/');
+    assert.equal(templateOf('/wake/', true), 'a game page');
+    assert.equal(templateOf('/ztype/', true), 'a game page');
+    assert.equal(templateOf('/game-cards/wake/', false), '/game-cards/*');
+    assert.equal(templateOf('/game-cards/tag/Culinary+Arts', false), '/game-cards/tag/*');
   });
   test('YouTube addresses map to oEmbed', () => {
     const watch = 'https://www.youtube.com/watch?v=abcdefghijk';
@@ -136,7 +145,7 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
     site = http.createServer(async (req, res) => {
       const path = (req.url ?? '/').split('?')[0];
       if (path === '/img/bad.png') { res.writeHead(200, { 'content-type': 'image/png' }); res.end('this is not a png'); return; }
-      if (path === '/img/big.png') { res.writeHead(200, { 'content-type': 'image/png' }); res.end(png); return; }
+      if (path === '/img/big.png' || /^\/img\/noise-\d\.png$/.test(path)) { res.writeHead(200, { 'content-type': 'image/png' }); res.end(png); return; }
       let file = path === '/' ? 'index.html' : path.endsWith('/') ? `${path.slice(1)}index.html` : path.slice(1);
       if (!/^[\w./-]+$/.test(file) || file.includes('..')) file = '';
       try {
@@ -157,7 +166,7 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
   test('the run finishes with a summary for every check', () => {
     assert.equal(run.status, 'done', run.error ?? '');
     assert.deepEqual(run.summaries.map((s) => [s.check, s.status]), [['games', 'done'], ['assets', 'done'], ['links', 'done'], ['spelling', 'done'], ['performance', 'done'], ['responsive', 'done']]);
-    assert.equal(run.pages, 10);                    // home, 7 pages, /ghost/ from the sitemap and /nope/ from a link (both 404)
+    assert.equal(run.pages, 11);                    // home, 8 pages, /ghost/ from the sitemap and /nope/ from a link (both 404)
     assert.ok(run.summaries.find((s) => s.check === 'responsive')!.checked >= 4 * 8);
   });
 
@@ -191,6 +200,26 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
   test('performance: the large image', () => {
     assert.ok(has('performance', 'perf.large-file', (f) => f.target.endsWith('/img/big.png') && f.page === '/big/'));
     assert.ok(has('performance', 'perf.oversized-image', (f) => f.target.endsWith('/img/big.png')));
+  });
+
+  test('performance: the first view leaves out lazy images below the fold; the whole page counts them', () => {
+    const find = (code: string) => run.findings.find((f) => f.check === 'performance' && f.code === code && f.target === '/lazy/');
+    const first = find('perf.first-view')!, whole = find('perf.heavy-page')!;
+    assert.ok(first && whole, JSON.stringify(run.findings.filter((f) => f.page === '/lazy/')));
+    assert.equal(first.level, 'warn');               // the top picture, about 720 KB
+    assert.ok(Number(first.detail?.bytes) > 700_000 && Number(first.detail?.bytes) < 1_000_000, String(first.detail?.bytes));
+    assert.match(String(first.detail?.biggest), /^7\d\d KB \/img\/noise-1\.png$/m);
+    assert.doesNotMatch(String(first.detail?.biggest), /noise-[23]/);
+    assert.equal(whole.level, 'fail');               // all three, after scrolling
+    assert.ok(Number(whole.detail?.bytes) > 2_000_000, String(whole.detail?.bytes));
+  });
+
+  test('performance: timings come from a throttled load (Slow 4G)', () => {
+    // 720 KB at about 1.4 Mbps takes over four seconds, which the runner's own connection never would.
+    const slow = run.findings.find((f) => f.check === 'performance' && f.code === 'perf.slow-paint' && f.target === '/lazy/');
+    assert.ok(slow, JSON.stringify(run.findings.filter((f) => f.check === 'performance' && f.code.startsWith('perf.slow'))));
+    assert.match(slow.message, /on Slow 4G$/);
+    assert.ok(Number(slow.detail?.ms) > 4000);
   });
 
   test('games: one opens in the player, one refuses framing, one opens in a new tab', () => {

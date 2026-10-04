@@ -22,6 +22,21 @@ export interface PageData {
   refs: Record<string, string>;                    // address → the element that asks for it (the first one, up to 3000)
 }
 
+// The first view, before any scrolling: every file the page has used so far, and the lazy images below the fold
+// (which the browser may already have fetched, being near the window, but which a visitor who doesn't scroll
+// doesn't need). An image shown anywhere else on the page, or not marked lazy, is part of the first view.
+export function firstView(): { used: string[]; lazyBelow: string[] } {
+  const used = performance.getEntriesByType('resource').map((e) => e.name);
+  const needed = new Set<string>(), below = new Set<string>();
+  for (const img of document.querySelectorAll('img')) {
+    const src = img.currentSrc || img.src;
+    if (!src) continue;
+    if (img.loading === 'lazy' && img.getBoundingClientRect().top + scrollY >= innerHeight) below.add(src);
+    else needed.add(src);
+  }
+  return { used, lazyBelow: [...below].filter((s) => !needed.has(s)) };
+}
+
 // Down the page in steps (so lazy images load) and back up. Bounded to about four seconds.
 export function scrollThrough(): Promise<void> {
   return new Promise((resolve) => {

@@ -62,58 +62,117 @@ describe('assets', () => {
 });
 
 describe('performance', () => {
+  const img = (name: string, bytes: number, more: Partial<ResourceSeen> = {}) => res({ url: `${SITE}/img/${name}`, type: 'image', bytes, mime: 'image/webp', encoding: '', ...more });
+  const js = (url: string, bytes: number, more: Partial<ResourceSeen> = {}) => res({ url, type: 'script', bytes, mime: 'text/javascript', ...more });
+  const perf = (p: Partial<PageLoad>) => performanceFindings(page(p), SITE);
+
   test('a quick, light page has no findings', () => {
-    assert.deepEqual(performanceFindings(page({ resources: [res(), res({ url: `${SITE}/a.jpg`, type: 'image', bytes: 200_000, mime: 'image/jpeg', encoding: '' })] })), []);
+    assert.deepEqual(perf({ resources: [res(), img('a.webp', 100_000)] }), []);
   });
 
-  test('large files: warn and fail sizes differ for images and other files', () => {
-    const f = performanceFindings(page({ resources: [
-      res({ url: `${SITE}/a.png`, type: 'image', bytes: LIMITS.imageWarnBytes + 1, mime: 'image/png', encoding: '' }),
-      res({ url: `${SITE}/b.png`, type: 'image', bytes: LIMITS.imageFailBytes + 1, mime: 'image/png', encoding: '' }),
-      res({ url: `${SITE}/c.js`, type: 'script', bytes: LIMITS.fileWarnBytes, mime: 'text/javascript' }),
-      res({ url: `${SITE}/d.js`, type: 'script', bytes: LIMITS.fileWarnBytes + 1, mime: 'text/javascript' }),
-    ] }));
-    assert.deepEqual(f.filter((x) => x.code === 'perf.large-file').map((x) => `${x.level} ${x.target.slice(-5)}`), ['warn a.png', 'fail b.png', 'warn /d.js']);
-    assert.match(f[1].message, /1\.0 MB image/);
+  test('the limits are sized for a classroom: 30 students sharing about 30 Mbps', () => {
+    assert.deepEqual([LIMITS.firstViewWarnBytes, LIMITS.firstViewFailBytes, LIMITS.pageWarnBytes, LIMITS.pageFailBytes], [500_000, 1_000_000, 1_000_000, 2_000_000]);
+    assert.deepEqual([LIMITS.imageWarnBytes, LIMITS.imageFailBytes, LIMITS.fileWarnBytes, LIMITS.fileFailBytes, LIMITS.codeWarnBytes, LIMITS.codeFailBytes], [150_000, 500_000, 100_000, 300_000, 170_000, 350_000]);
+    assert.deepEqual([LIMITS.lcpWarnMs, LIMITS.lcpFailMs, LIMITS.mediaWarnBytes], [2500, 4000, 5_000_000]);
   });
 
-  test('a heavy page counts everything the page itself loads, not what its frames load', () => {
-    const big = (i: number, inFrame = false) => res({ url: `${SITE}/${i}.jpg`, type: 'image', bytes: 200_000, mime: 'image/jpeg', encoding: '', inFrame });
-    assert.deepEqual(codes(performanceFindings(page({ resources: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => big(i)) }))), ['warn:perf.heavy-page']);
-    assert.deepEqual(performanceFindings(page({ resources: [1, 2, 3, 4].map((i) => big(i)).concat([5, 6, 7, 8].map((i) => big(i, true))) })), []);
+  test('large files: warn and fail sizes differ for images and other files; video only warns', () => {
+    const f = perf({ resources: [
+      img('a.png', LIMITS.imageWarnBytes + 1),
+      img('b.png', LIMITS.imageFailBytes + 1),
+      js(`${SITE}/c.js`, LIMITS.fileWarnBytes),
+      js(`${SITE}/d.js`, LIMITS.fileWarnBytes + 1),
+      js(`${SITE}/e.js`, LIMITS.fileFailBytes + 1),
+      res({ url: `${SITE}/f.woff2`, type: 'font', bytes: LIMITS.fileWarnBytes + 1, mime: 'font/woff2', encoding: '' }),
+      res({ url: `${SITE}/v.mp4`, type: 'media', bytes: 50_000_000, mime: 'video/mp4', encoding: '' }),
+    ] });
+    assert.deepEqual(f.filter((x) => x.code === 'perf.large-file').map((x) => `${x.level} ${x.target.split('/').pop()}`), ['warn a.png', 'fail b.png', 'warn d.js', 'fail e.js', 'warn f.woff2', 'warn v.mp4']);
+    assert.match(f[1].message, /^A 500 KB image$/);
+    assert.equal(f[1].detail?.thirdParty, false);
+  });
+
+  test('a third party’s file counts the same, and says it is someone else’s', () => {
+    const gtag = js('https://www.googletagmanager.com/gtag/js?id=G-X', 179_000);
+    const f = perf({ resources: [gtag] });
+    assert.deepEqual(codes(f), ['warn:perf.large-file', 'warn:perf.heavy-code']);
+    assert.equal(f[0].message, 'A 179 KB script from another site (www.googletagmanager.com)');
+    assert.deepEqual([f[0].detail?.thirdParty, f[0].detail?.host], [true, 'www.googletagmanager.com']);
+    assert.match(f[1].message, /179 KB www\.googletagmanager\.com\/gtag\/js\?id=G-X \(third-party\)/);
+    assert.equal(f[1].detail?.thirdPartyBytes, 179_000);
+    // Another host of the site's own domain (its CDN) is the site's own.
+    assert.equal(performanceFindings(page({ resources: [js('https://cdn.vaultlearninggames.org/a.js', 120_000)] }), SITE)[0].detail?.thirdParty, false);
+  });
+
+  test('the first view counts what loaded before scrolling, and names the biggest files', () => {
+    const above = [1, 2, 3, 4].map((i) => img(`hero${i}.webp`, 140_000, { firstView: true }));
+    const below = [5, 6, 7, 8].map((i) => img(`lazy${i}.webp`, 140_000, { firstView: false }));
+    const f = perf({ resources: [res({ firstView: true }), ...above, ...below] });
+    assert.deepEqual(codes(f), ['warn:perf.first-view', 'warn:perf.heavy-page']);
+    const first = f[0];
+    assert.equal(first.target, '/wake/');
+    assert.equal(first.detail?.bytes, 572_000);
+    assert.equal(first.detail?.files, 5);
+    assert.equal(first.detail?.biggest, ['140 KB /img/hero1.webp', '140 KB /img/hero2.webp', '140 KB /img/hero3.webp', '140 KB /img/hero4.webp', '12 KB /sq/css/site.css'].join('\n'));
+    assert.match(first.message, /^The first view \(before any scrolling\) loads 572 KB; the biggest: 140 KB \/img\/hero1\.webp, 140 KB \/img\/hero2\.webp, 140 KB \/img\/hero3\.webp$/);
+    assert.equal(f[1].detail?.bytes, 1_132_000);
+    // Over 1 MB before scrolling fails.
+    assert.deepEqual(codes(perf({ resources: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => img(`h${i}.webp`, 130_000, { firstView: true })) })), ['fail:perf.first-view', 'warn:perf.heavy-page']);
+    // Not measured (no resource says either way): no first-view finding.
+    assert.deepEqual(codes(perf({ resources: [1, 2, 3, 4].map((i) => img(`h${i}.webp`, 140_000)) })), []);
+  });
+
+  test('the whole page counts everything the page itself loads, once per address, not what its frames load', () => {
+    const big = (i: number, inFrame = false) => img(`${i}.webp`, 140_000, { inFrame });
+    assert.deepEqual(codes(perf({ resources: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => big(i)) })), ['warn:perf.heavy-page']);
+    assert.deepEqual(codes(perf({ resources: Array.from({ length: 15 }, (_, i) => big(i)) })), ['fail:perf.heavy-page']);
+    assert.deepEqual(perf({ resources: [1, 2, 3, 4].map((i) => big(i)).concat([5, 6, 7, 8].map((i) => big(i, true))) }), []);
+    assert.deepEqual(perf({ resources: [1, 1, 1, 1, 1, 1, 1, 1].map((i) => big(i)) }), []);
+    assert.match(perf({ resources: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => big(i)) })[0].message, /^The whole page, scrolled to the bottom, loads 1\.1 MB; the biggest: /);
+  });
+
+  test('all the JavaScript and CSS together', () => {
+    const code = (n: number, each: number) => Array.from({ length: n }, (_, i) => js(`${SITE}/js/${i}.js`, each));
+    assert.deepEqual(perf({ resources: code(2, 85_000) }), []);
+    assert.deepEqual(codes(perf({ resources: code(2, 90_000) })), ['warn:perf.heavy-code']);
+    assert.deepEqual(codes(perf({ resources: [...code(4, 90_000), res({ bytes: 1 })] })), ['fail:perf.heavy-code']);
+    assert.equal(perf({ resources: [...code(2, 90_000), res()] })[0].detail?.bytes, 192_000);
   });
 
   test('text sent without compression', () => {
-    const f = performanceFindings(page({ resources: [
-      res({ url: `${SITE}/big.js`, type: 'script', bytes: 90_000, mime: 'text/javascript; charset=utf-8', encoding: '' }),
-      res({ url: `${SITE}/small.js`, type: 'script', bytes: 2000, mime: 'text/javascript', encoding: '' }),
-      res({ url: `${SITE}/photo.jpg`, type: 'image', bytes: 90_000, mime: 'image/jpeg', encoding: '' }),
-    ] }));
+    const f = perf({ resources: [
+      js(`${SITE}/big.js`, 90_000, { mime: 'text/javascript; charset=utf-8', encoding: '' }),
+      js(`${SITE}/small.js`, 2000, { encoding: '' }),
+      img('photo.jpg', 90_000),
+    ] });
     assert.deepEqual(f.map((x) => `${x.code} ${x.target}`), [`perf.uncompressed ${SITE}/big.js`]);
   });
 
   test('an image with far more pixels than it is shown at', () => {
     const src = `${SITE}/hero.jpg`;
-    const withImg = (natural: number, shown: number, bytes: number) => performanceFindings(page({
-      resources: [res({ url: src, type: 'image', bytes, mime: 'image/jpeg', encoding: '' })], images: [{ src, loaded: true, natural: [natural, 100], shown: [shown, 50] }] }));
-    assert.deepEqual(codes(withImg(3000, 300, 200_000)), ['warn:perf.oversized-image']);
-    assert.deepEqual(withImg(600, 300, 200_000), []);      // twice the pixels is what a sharp screen wants
+    const withImg = (natural: number, shown: number, bytes: number) => perf({
+      resources: [res({ url: src, type: 'image', bytes, mime: 'image/jpeg', encoding: '' })], images: [{ src, loaded: true, natural: [natural, 100], shown: [shown, 50] }] });
+    assert.deepEqual(codes(withImg(3000, 300, 140_000)), ['warn:perf.oversized-image']);
+    assert.deepEqual(withImg(600, 300, 140_000), []);      // twice the pixels is what a sharp screen wants
     assert.deepEqual(withImg(3000, 300, 30_000), []);      // a small file isn't worth it
-    assert.deepEqual(withImg(3000, 0, 200_000), []);       // not shown at this width
+    assert.deepEqual(withImg(3000, 0, 140_000), []);       // not shown at this width
   });
 
-  test('slow pages: load time first, then main content, then the server; one finding', () => {
-    const t = (timing: Partial<PageLoad['timing']>) => codes(performanceFindings(page({ timing: { ttfb: 80, domContentLoaded: 400, load: 900, lcp: 700, ...timing } })));
-    assert.deepEqual(t({ load: 3500 }), ['warn:perf.slow-page']);
-    assert.deepEqual(t({ load: 9000, lcp: 5000, ttfb: 2000 }), ['fail:perf.slow-page']);
+  test('slow pages, judged only on the throttled load: the worst of paint, load and first byte', () => {
+    const t = (timing: Partial<PageLoad['timing']>) => codes(perf({ timing: { ttfb: 80, domContentLoaded: 400, load: 900, lcp: 700, throttled: true, ...timing } }));
     assert.deepEqual(t({ lcp: 3000 }), ['warn:perf.slow-paint']);
-    assert.deepEqual(t({ lcp: 4500 }), ['fail:perf.slow-paint']);
-    assert.deepEqual(t({ ttfb: 1200 }), ['warn:perf.slow-server']);
+    assert.deepEqual(t({ lcp: 4500, load: 12_000 }), ['fail:perf.slow-paint']);
+    assert.deepEqual(t({ lcp: 3000, load: 12_000 }), ['fail:perf.slow-page']);
+    assert.deepEqual(t({ load: 6000 }), ['warn:perf.slow-page']);
+    assert.deepEqual(t({ ttfb: 2000 }), ['warn:perf.slow-server']);
+    assert.deepEqual(t({ ttfb: 1200, load: 4000, lcp: 2400 }), []);
     assert.deepEqual(t({ load: null, lcp: null, ttfb: null }), []);
+    // The visit pass's timings, on the runner's fast connection, are not judged.
+    assert.deepEqual(t({ lcp: 9000, load: 20_000, ttfb: 3000, throttled: false }), []);
+    assert.equal(perf({ timing: { ttfb: 80, domContentLoaded: 400, load: 900, lcp: 3100, throttled: true } })[0].message, 'The page\'s main content takes 3.1 s to appear on Slow 4G');
   });
 
   test('a page that failed is left to the assets check', () => {
-    assert.deepEqual(performanceFindings(page({ status: 500, timing: { ttfb: 9000, domContentLoaded: null, load: 9000, lcp: null } })), []);
+    assert.deepEqual(perf({ status: 500, timing: { ttfb: 9000, domContentLoaded: null, load: 9000, lcp: null, throttled: true } }), []);
   });
 });
 

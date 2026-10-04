@@ -1,10 +1,10 @@
 // The visit pass: loads each page the way a visitor would and reports what it saw as the contract's plain records.
 import type { Browser, BrowserContext, Page } from 'playwright';
-import { LIMITS, VIEWPORTS } from '../site-checks.ts';
+import { LIMITS, THROTTLE, VIEWPORTS } from '../site-checks.ts';
 import type { LinkSeen, PageLoad, ViewportName, ViewSeen } from '../site-checks.ts';
 import { newContext, watchRequests } from './browser.ts';
 import type { HostGuard, KnownSizes } from './browser.ts';
-import { collectPage, LCP_SCRIPT, measureView, navigationTiming, PLAY_SCRIPT, scrollThrough, waitForImages } from './inpage.ts';
+import { collectPage, firstView, LCP_SCRIPT, measureView, navigationTiming, PLAY_SCRIPT, scrollThrough, waitForImages } from './inpage.ts';
 import { UA, UA_MOBILE, shortError, sleep, withTimeout } from './util.ts';
 
 export interface Visit {
@@ -74,7 +74,16 @@ export async function visitPage(env: VisitEnv, path: string): Promise<Visit> {
       return { ...empty(emptyLoad(path, status, null)), links: [{ page: path, url: landed.href, fragment: '', raw: landed.href, text: 'redirect', kind: 'link' }] };
     }
     const timing = await withTimeout(page.evaluate(navigationTiming), 10_000, 'reading timings').catch(() => emptyLoad(path, 200, null).timing);
+    // The first view: what the page has asked for once it has loaded and the network has gone quiet, before any
+    // scrolling, less the lazy images below the fold.
+    let first: Set<string> | null = null;
     if (env.deep) {
+      await quiet(page, 4000);
+      const fv = await withTimeout(page.evaluate(firstView), 10_000, 'reading the first view').catch(() => null);
+      if (fv) {
+        first = new Set([...watch.asked, ...fv.used]);
+        for (const src of fv.lazyBelow) first.delete(src);
+      }
       await withTimeout(page.evaluate(scrollThrough), 10_000, 'scrolling').catch(() => {});
       await quiet(page, 4000);
       await withTimeout(page.evaluate(waitForImages, 6000), 8000, 'waiting for images').catch(() => {});
@@ -90,14 +99,15 @@ export async function visitPage(env: VisitEnv, path: string): Promise<Visit> {
       } catch { /* a page that can't be measured just has no view */ }
     }
     const main = page.mainFrame();
-    const resources = watch.seen.map((s) => ({ ...s.res, inFrame: s.frame !== main }));
+    const inFirst = (url: string) => (first ? { firstView: first.has(url) } : {});
+    const resources = watch.seen.map((s) => ({ ...s.res, inFrame: s.frame !== main, ...inFirst(s.res.url) }));
     // Files the browser took from its cache without asking (an image another page already showed) still belong to
     // this page's weight.
     const asked = new Set(resources.map((r) => r.url));
     const used = await withTimeout(page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name)), 10_000, 'reading what the page used').catch(() => [] as string[]);
     for (const url of new Set(used)) {
-      const first = env.known.get(url);
-      if (first && !asked.has(url)) resources.push({ ...first, ms: null, inFrame: false });
+      const known = env.known.get(url);
+      if (known && !asked.has(url)) resources.push({ ...known, ms: null, inFrame: false, ...inFirst(url) });
     }
     visit = {
       load: { path, status, error: null, timing, images: data.images, scriptErrors, resources, refs: data.refs },
@@ -117,19 +127,33 @@ export async function newLaptopContext(browser: Browser, guard: HostGuard | null
   return newContext(browser, { viewport: { width: v.width, height: v.height }, userAgent: UA }, guard);
 }
 
-// One page loaded by itself with an empty cache, as a first-time visitor gets it, for its timings only. The visit
-// pass loads several pages at once with a shared cache, so its timings are only a first look: too slow when pages
-// compete for the connection, too quick when another page already fetched this one's images.
+// One page loaded by itself with an empty cache, as a first-time visitor gets it, on an emulated Slow 4G connection
+// (THROTTLE), for its timings only. The visit pass loads several pages at once with a shared cache on the runner's
+// fast connection, so its timings are only a first look. A page that hasn't finished loading when the wait runs out
+// still reports what it reached (its paint, its first byte), and the wait as its load time.
+const THROTTLED_TIMEOUT = 60_000;
 export async function timePage(env: VisitEnv, path: string): Promise<PageLoad['timing'] | null> {
   const laptop = viewport('laptop');
   const ctx = await newContext(env.browser, { viewport: { width: laptop.width, height: laptop.height }, userAgent: UA }, env.guard);
   try {
     const page = await ctx.newPage();
     await page.addInitScript(LCP_SCRIPT);
-    const response = await page.goto(env.origin + path, { timeout: NAV_TIMEOUT, waitUntil: 'load' });
-    if (!response || response.status() >= 400) return null;
-    await sleep(300);
-    return await withTimeout(page.evaluate(navigationTiming), 10_000, 'reading timings');
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Network.enable');
+    await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
+    await cdp.send('Network.emulateNetworkConditions', {
+      offline: false, latency: THROTTLE.latencyMs,
+      downloadThroughput: THROTTLE.downloadBitsPerSec / 8, uploadThroughput: THROTTLE.uploadBitsPerSec / 8,
+    });
+    let finished = true;
+    const response = await page.goto(env.origin + path, { timeout: THROTTLED_TIMEOUT, waitUntil: 'load' }).catch(() => { finished = false; return null; });
+    if (finished && (!response || response.status() >= 400)) return null;
+    // The largest paint can come after the load event (an image a script adds); give it a moment.
+    if (finished) await quiet(page, 3000);
+    const timing = await withTimeout(page.evaluate(navigationTiming), 10_000, 'reading timings');
+    if (!finished && timing.ttfb === null) return null;
+    // Not loaded within the wait: at least that long.
+    return { ...timing, load: finished ? timing.load : THROTTLED_TIMEOUT, throttled: true };
   } catch {
     return null;
   } finally {

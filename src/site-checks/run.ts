@@ -13,12 +13,12 @@ import { checkLinks } from './links.ts';
 import { checkServices } from './services.ts';
 import { errorOf, makeConnection, makeGetter, OfflineError } from './net.ts';
 import { checkSpelling } from './spelling.ts';
-import { normalisePath, pagePathOf, runPool } from './util.ts';
+import { normalisePath, pagePathOf, runPool, templateOf } from './util.ts';
 import { newLaptopContext, newPhoneContext, timePage, visitPage, visitPhone } from './visit.ts';
 import type { Visit } from './visit.ts';
 
 const DEFAULT_LIMIT = 1500;
-const RETIMED_PAGES = 30;
+const RETIMED_PAGES = 24;
 
 export const runSiteChecks: Engine = async (options) => {
   const started = Date.now();
@@ -112,20 +112,34 @@ export const runSiteChecks: Engine = async (options) => {
     base.pages = visits.size;
     const all = [...visits.values()];
 
-    // Honest timings: pages that looked slow in the visit pass, and heavy pages (whose images another page may have
-    // put in the cache), are loaded again one at a time with an empty cache, and that time is the one reported.
-    // Heaviest first, and only so many: each is a full download.
+    // Honest timings, judged on a classroom-like connection: pages are loaded again one at a time with an empty
+    // cache on emulated Slow 4G, and only that time is judged. First the heaviest page of each kind (home, a game
+    // page, /game-cards/, /about/, …), then pages that looked slow or are heavy, heaviest first; only so many, as
+    // each takes several seconds.
     if (wants('performance')) {
+      const loaded = all.filter((v) => v.load.status !== null && v.load.status < 400 && !v.load.error && v.load.resources.length > 0);
       const weight = (v: Visit) => v.load.resources.reduce((sum, r) => sum + (r.inFrame ? 0 : r.bytes ?? 0), 0);
-      const looksSlow = ({ load: { timing: t } }: Visit) => (t.load ?? 0) > LIMITS.loadWarnMs || (t.lcp ?? 0) > LIMITS.lcpWarnMs || (t.ttfb ?? 0) > LIMITS.ttfbWarnMs;
-      const again = all.map((v) => ({ v, bytes: weight(v) })).filter(({ v, bytes }) => looksSlow(v) || bytes > LIMITS.pageWarnBytes)
-        .sort((a, b) => b.bytes - a.bytes).slice(0, RETIMED_PAGES);
+      const firstWeight = (v: Visit) => v.load.resources.reduce((sum, r) => sum + (r.inFrame || !r.firstView ? 0 : r.bytes ?? 0), 0);
+      const byWeight = loaded.map((v) => ({ v, bytes: weight(v) })).sort((a, b) => b.bytes - a.bytes || a.v.load.path.localeCompare(b.v.load.path));
+      const again: Visit[] = [];
+      const kinds = new Set<string>();
+      for (const { v } of byWeight) {
+        const kind = templateOf(v.load.path, v.plays.wired.length + v.plays.newTab.length > 0);
+        if (!kinds.has(kind)) { kinds.add(kind); again.push(v); }
+      }
+      // The visit pass is on a fast connection: these are a fraction of the throttled limits.
+      const looksSlow = ({ load: { timing: t } }: Visit) => (t.lcp ?? 0) > LIMITS.lcpWarnMs / 3 || (t.load ?? 0) > LIMITS.loadWarnMs / 3;
+      for (const { v, bytes } of byWeight) {
+        if (again.length >= RETIMED_PAGES) break;
+        if (!again.includes(v) && (looksSlow(v) || bytes > LIMITS.pageWarnBytes || firstWeight(v) > LIMITS.firstViewWarnBytes)) again.push(v);
+      }
+      again.splice(RETIMED_PAGES);
       let done = 0;
-      for (const { v } of again) {
+      for (const v of again) {
         if (aborted()) break;
-        options.onProgress?.({ phase: 'timing slow pages', done: done++, total: again.length });
+        options.onProgress?.({ phase: 'timing pages on Slow 4G', done: done++, total: again.length });
         const alone = await timePage(env, v.load.path);
-        if (alone && alone.load !== null) v.load.timing = alone;
+        if (alone) v.load.timing = alone;
       }
     }
     if (aborted()) return stop('cancelled');
@@ -137,7 +151,7 @@ export const runSiteChecks: Engine = async (options) => {
       catch (e) { if (aborted() || e instanceof OfflineError) throw e; results.push({ check, status: 'error', note: e instanceof Error ? e.message : String(e), checked: 0, ms: Date.now() - t, findings: [] }); }
     };
     if (wants('assets')) await run('assets', async () => ({ checked: all.length, findings: all.flatMap((v) => assetFindings(v.load, origin)) }), visitMs);
-    if (wants('performance')) await run('performance', async () => ({ checked: all.length, findings: all.flatMap((v) => performanceFindings(v.load)) }), visitMs);
+    if (wants('performance')) await run('performance', async () => ({ checked: all.length, findings: all.flatMap((v) => performanceFindings(v.load, origin)) }), visitMs);
     if (wants('responsive')) {
       await run('responsive', async () => {
         const views = all.flatMap((v) => v.views);

@@ -111,6 +111,9 @@ export interface ResourceSeen {
   encoding: string;                   // Content-Encoding, '' for none
   ms: number | null;
   inFrame: boolean;                   // asked for by an embedded frame (a video player), not by the page itself
+  // Part of the first view: arrived before the page was scrolled (a lazy image below the fold that the browser
+  // fetched early is not). Absent when the first view wasn't measured.
+  firstView?: boolean;
 }
 
 export interface ImageSeen {
@@ -120,7 +123,7 @@ export interface ImageSeen {
   shown: [number, number];            // CSS pixels on the page at the laptop width
 }
 
-// One page, loaded at the laptop width with an empty cache.
+// One page, loaded at the laptop width.
 export interface PageLoad {
   path: string;
   status: number | null;
@@ -129,7 +132,9 @@ export interface PageLoad {
   images: ImageSeen[];
   scriptErrors: string[];             // uncaught exceptions
   refs?: Record<string, string>;      // address → the element on the page that asks for it ('img', 'script', 'link rel=stylesheet', …)
-  timing: { ttfb: number | null; domContentLoaded: number | null; load: number | null; lcp: number | null };
+  // From the visit pass, or (throttled: true) from the page loaded again alone, empty cache, on THROTTLE. Only
+  // throttled timings are judged.
+  timing: { ttfb: number | null; domContentLoaded: number | null; load: number | null; lcp: number | null; throttled?: boolean };
 }
 
 export const VIEWPORTS = [
@@ -197,22 +202,31 @@ export interface Dictionary { correct(word: string): boolean; suggest(word: stri
 
 // ---------- limits ----------
 export const LIMITS = {
-  // The website's own files: much smaller than a game's (pages weighed 0.4-1 MB on 2026-10-04).
-  imageWarnBytes: 250_000, imageFailBytes: 1_000_000,
-  fileWarnBytes: 250_000, fileFailBytes: 1_000_000,         // scripts, stylesheets, fonts, anything else
-  mediaWarnBytes: 5_000_000,                                // video and audio
-  pageWarnBytes: 1_500_000, pageFailBytes: 4_000_000,       // everything one page loads
-  loadWarnMs: 3000, loadFailMs: 8000,
-  lcpWarnMs: 2500, lcpFailMs: 4000,                         // largest contentful paint (web.dev's "good" and "poor")
-  ttfbWarnMs: 800,
-  uncompressedBytes: 20_000,                                // text files this big should be sent compressed
-  oversizedFactor: 3, oversizedBytes: 100_000,              // an image with over 3x the pixels across that it is shown at
+  // The website's own files, sized for a school's shared wifi: about 1 Mbps for each of 30 students loading the same
+  // page at once (docs/site-checks.md). Bytes are as sent over the network (compressed); third-party files count.
+  firstViewWarnBytes: 500_000, firstViewFailBytes: 1_000_000,   // what loads before any scrolling (laptop width)
+  pageWarnBytes: 1_000_000, pageFailBytes: 2_000_000,           // everything, after scrolling to the bottom
+  imageWarnBytes: 150_000, imageFailBytes: 500_000,
+  fileWarnBytes: 100_000, fileFailBytes: 300_000,               // a script, stylesheet, font or anything else
+  codeWarnBytes: 170_000, codeFailBytes: 350_000,               // all the page's JavaScript and CSS together
+  mediaWarnBytes: 5_000_000,                                    // video and audio: only ever a warning
+  // Timings are judged only on a page loaded alone, with an empty cache, on an emulated "Slow 4G" connection
+  // (THROTTLE); the visit pass's timings, on the runner's fast connection, are only used to pick pages to time.
+  lcpWarnMs: 2500, lcpFailMs: 4000,                             // largest contentful paint (web.dev's "good" and "poor")
+  loadWarnMs: 5000, loadFailMs: 10_000,                         // the load event: twice and two and a half times the paint limits
+  ttfbWarnMs: 1800,                                             // first byte on the throttled load (web.dev's "poor")
+  uncompressedBytes: 20_000,                                    // text files this big should be sent compressed
+  oversizedFactor: 3, oversizedBytes: 100_000,                  // an image with over 3x the pixels across that it is shown at
+  biggestListed: 5,                                             // a heavy page's biggest files, named in its finding
   // Games, judged apart from the website: they may be large, so their size and load time only ever warn.
   gameLoadWarnMs: 15_000, gameWarnBytes: 50_000_000,
   gameMissingListed: 5,
   smallTextPx: 12, tapTargetPx: 24, overflowPx: 2,
   serviceWarnMs: 3000,                                      // a game service that takes longer than this to answer
 } as const;
+// Chrome DevTools' and Lighthouse's "Slow 4G" (once "Fast 3G"): 150 ms round trips and 1.6 Mbps down, 750 Kbps up,
+// applied per request as DevTools does (latency x 3.75, throughput x 0.9).
+export const THROTTLE = { latencyMs: 562.5, downloadBitsPerSec: 1_600_000 * 0.9, uploadBitsPerSec: 750_000 * 0.9, name: 'Slow 4G' } as const;
 export const MAX_PAGES_LISTED = 20;
 // Each check lists at most this many findings (worst first, then the most widespread), so one bad run can't bloat the
 // portal's database; the rest are counted (CheckSummary.unlisted).
@@ -279,27 +293,68 @@ export function assetFindings(page: PageLoad, siteOrigin: string): RawFinding[] 
 // ---------- performance ----------
 const COMPRESSIBLE = /^(text\/|application\/(javascript|json|xml|xhtml\+xml|manifest\+json)|image\/svg\+xml)/i;
 
-export function performanceFindings(page: PageLoad): RawFinding[] {
+// The site's own files: its origin, or another host of the same domain (a CDN at cdn.example.org). Anything else
+// is a third party's, which costs a classroom the same bandwidth but is fixed somewhere else.
+const domainOf = (host: string) => host.split('.').slice(-2).join('.');
+const ours = (url: string, siteOrigin: string) => {
+  try { const u = new URL(url), site = new URL(siteOrigin); return u.origin === site.origin || (/[a-z]/i.test(u.hostname.split('.').pop() ?? '') && u.hostname.includes('.') && domainOf(u.hostname) === domainOf(site.hostname)); } catch { return false; }
+};
+const hostOf = (url: string) => { try { return new URL(url).host; } catch { return ''; } };
+// A file as a person reads it in a finding: its size, and its path (with the other site's name when it isn't ours).
+function fileLabel(r: ResourceSeen, siteOrigin: string): string {
+  let where = r.url;
+  try { const u = new URL(r.url); where = ours(r.url, siteOrigin) ? u.pathname + u.search : `${u.host}${u.pathname}${u.search}`; } catch { /* as it is */ }
+  return `${mb(r.bytes ?? 0)} ${short(where, 70)}${ours(r.url, siteOrigin) ? '' : ' (third-party)'}`;
+}
+const isCode = (r: ResourceSeen) => r.type === 'script' || r.type === 'stylesheet';
+
+export function performanceFindings(page: PageLoad, siteOrigin: string): RawFinding[] {
   const out: RawFinding[] = [];
   if (page.error || (page.status !== null && page.status >= 400)) return out;
   const add = (f: Omit<RawFinding, 'check' | 'page'>) => out.push({ check: 'performance', page: page.path, ...f });
-  let total = 0;
+  // Each address once, at the most it weighed (a file asked for twice comes from the cache the second time). Files
+  // that embedded frames load are not the page's (there are none before Play is pressed; a game is judged by itself).
+  const files = new Map<string, ResourceSeen>();
   for (const r of page.resources) {
-    if (r.inFrame || r.bytes === null) continue;
-    total += r.bytes;
+    if (r.inFrame || r.bytes === null || !isWeb(r.url)) continue;
+    const had = files.get(r.url);
+    if (!had) files.set(r.url, r);
+    else files.set(r.url, { ...had, bytes: Math.max(had.bytes ?? 0, r.bytes), firstView: !!had.firstView || !!r.firstView });
+  }
+  for (const r of files.values()) {
+    const bytes = r.bytes ?? 0;
     const [warn, fail, what] = r.type === 'image' ? [LIMITS.imageWarnBytes, LIMITS.imageFailBytes, 'image']
       : r.type === 'media' ? [LIMITS.mediaWarnBytes, Infinity, 'video or audio file']
       : [LIMITS.fileWarnBytes, LIMITS.fileFailBytes, r.type === 'other' ? 'file' : r.type];
-    if (r.bytes > warn) {
-      add({ level: r.bytes > fail ? 'fail' : 'warn', code: 'perf.large-file', target: r.url, message: `A ${mb(r.bytes)} ${what}`, detail: { bytes: r.bytes, type: r.type, element: elementFor(page, r.url, r.type) } });
-    } else if (r.bytes > LIMITS.uncompressedBytes && !r.encoding && COMPRESSIBLE.test(r.mime)) {
-      add({ level: 'warn', code: 'perf.uncompressed', target: r.url, message: `A ${mb(r.bytes)} ${what} is sent without compression`, detail: { bytes: r.bytes, type: r.type, element: elementFor(page, r.url, r.type) } });
+    const third = !ours(r.url, siteOrigin);
+    const from = third ? ` from another site (${hostOf(r.url)})` : '';
+    const about = { bytes, type: r.type, element: elementFor(page, r.url, r.type), thirdParty: third, host: hostOf(r.url) };
+    if (bytes > warn) {
+      add({ level: bytes > fail ? 'fail' : 'warn', code: 'perf.large-file', target: r.url, message: `A ${mb(bytes)} ${what}${from}`, detail: about });
+    } else if (bytes > LIMITS.uncompressedBytes && !r.encoding && COMPRESSIBLE.test(r.mime)) {
+      add({ level: 'warn', code: 'perf.uncompressed', target: r.url, message: `A ${mb(bytes)} ${what}${from} is sent without compression`, detail: about });
     }
   }
-  if (total > LIMITS.pageWarnBytes) {
-    add({ level: total > LIMITS.pageFailBytes ? 'fail' : 'warn', code: 'perf.heavy-page', target: page.path, message: `The page loads ${mb(total)}`, detail: { bytes: total } });
+  // The page-level budgets: one finding each, naming the biggest files so the fix is obvious.
+  const budget = (code: string, list: ResourceSeen[], warn: number, fail: number, says: (size: string) => string) => {
+    const total = list.reduce((sum, r) => sum + (r.bytes ?? 0), 0);
+    if (total <= warn) return;
+    const biggest = [...list].sort((x, y) => (y.bytes ?? 0) - (x.bytes ?? 0) || x.url.localeCompare(y.url)).slice(0, LIMITS.biggestListed);
+    const thirdParty = list.filter((r) => !ours(r.url, siteOrigin)).reduce((sum, r) => sum + (r.bytes ?? 0), 0);
+    add({
+      level: total > fail ? 'fail' : 'warn', code, target: page.path,
+      message: `${says(mb(total))}; the biggest: ${biggest.slice(0, 3).map((r) => fileLabel(r, siteOrigin)).join(', ')}`,
+      detail: { bytes: total, files: list.length, thirdPartyBytes: thirdParty, biggest: biggest.map((r) => fileLabel(r, siteOrigin)).join('\n') },
+    });
+  };
+  const all = [...files.values()];
+  if (all.some((r) => r.firstView !== undefined)) {
+    budget('perf.first-view', all.filter((r) => r.firstView), LIMITS.firstViewWarnBytes, LIMITS.firstViewFailBytes, (s) => `The first view (before any scrolling) loads ${s}`);
   }
-  const bytesOf = new Map(page.resources.map((r) => [r.url, r.bytes]));
+  budget('perf.heavy-page', all, LIMITS.pageWarnBytes, LIMITS.pageFailBytes, (s) => `The whole page, scrolled to the bottom, loads ${s}`);
+  budget('perf.heavy-code', all.filter(isCode), LIMITS.codeWarnBytes, LIMITS.codeFailBytes, (s) => `The page's JavaScript and CSS together are ${s}`);
+
+  const bytesOf = new Map(all.map((r) => [r.url, r.bytes]));
   for (const img of page.images) {
     const bytes = bytesOf.get(img.src) ?? null;
     if (!img.loaded || img.shown[0] < 1 || bytes === null || bytes < LIMITS.oversizedBytes) continue;
@@ -307,14 +362,16 @@ export function performanceFindings(page: PageLoad): RawFinding[] {
       add({ level: 'warn', code: 'perf.oversized-image', target: img.src, message: `A ${img.natural[0]}px-wide image (${mb(bytes)}) is shown ${Math.round(img.shown[0])}px wide`, detail: { bytes, natural: img.natural[0], shown: Math.round(img.shown[0]), type: 'image', element: 'img' } });
     }
   }
-  const { load, lcp, ttfb } = page.timing;
-  if (load !== null && load > LIMITS.loadWarnMs) {
-    add({ level: load > LIMITS.loadFailMs ? 'fail' : 'warn', code: 'perf.slow-page', target: page.path, message: `The page takes ${secs(load)} to load`, detail: { ms: load } });
-  } else if (lcp !== null && lcp > LIMITS.lcpWarnMs) {
-    add({ level: lcp > LIMITS.lcpFailMs ? 'fail' : 'warn', code: 'perf.slow-paint', target: page.path, message: `The page's main content takes ${secs(lcp)} to appear`, detail: { ms: lcp } });
-  } else if (ttfb !== null && ttfb > LIMITS.ttfbWarnMs) {
-    add({ level: 'warn', code: 'perf.slow-server', target: page.path, message: `The server takes ${secs(ttfb)} to answer`, detail: { ms: ttfb } });
-  }
+  // Timings only from the throttled load; one finding per page, the worst (paint before load before first byte).
+  const { load, lcp, ttfb, throttled } = page.timing;
+  if (!throttled) return out;
+  const on = `on ${THROTTLE.name}`;
+  const timings: Omit<RawFinding, 'check' | 'page'>[] = [];
+  if (lcp !== null && lcp > LIMITS.lcpWarnMs) timings.push({ level: lcp > LIMITS.lcpFailMs ? 'fail' : 'warn', code: 'perf.slow-paint', target: page.path, message: `The page's main content takes ${secs(lcp)} to appear ${on}`, detail: { ms: lcp, throttle: THROTTLE.name } });
+  if (load !== null && load > LIMITS.loadWarnMs) timings.push({ level: load > LIMITS.loadFailMs ? 'fail' : 'warn', code: 'perf.slow-page', target: page.path, message: `The page takes ${secs(load)} to finish loading ${on}`, detail: { ms: load, throttle: THROTTLE.name } });
+  if (ttfb !== null && ttfb > LIMITS.ttfbWarnMs) timings.push({ level: 'warn', code: 'perf.slow-server', target: page.path, message: `The server takes ${secs(ttfb)} to answer ${on}`, detail: { ms: ttfb, throttle: THROTTLE.name } });
+  const worst = timings.find((t) => t.level === 'fail') ?? timings[0];
+  if (worst) add(worst);
   return out;
 }
 

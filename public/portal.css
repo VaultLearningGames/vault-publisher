@@ -505,6 +505,8 @@ table.site-checks td.where { min-width: 150px; }
 details.more { margin-top: 4px; }
 details.more summary { cursor: pointer; color: var(--ink-3); }
 details.more ul { margin: 6px 0 0; padding-left: 16px; }
+ul.plain { margin: 0; padding: 0; list-style: none; }
+ul.plain li { overflow-wrap: anywhere; min-width: 28ch; }
 /* A check's row opens the table of what it found (portal.js [data-findings]) */
 table.site-checks tr.has-details { cursor: pointer; }
 table.site-checks tr.has-details:hover > td { background: var(--hover); }

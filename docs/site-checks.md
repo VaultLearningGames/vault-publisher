@@ -19,7 +19,8 @@ The same problem on many pages (a broken footer link) is one finding listing its
 the browser's error), its type and the element that asks for it (`img`, `script`, `link rel=stylesheet`, `img srcset`,
 `div style`, or the likeliest asker when no element names it, e.g. a stylesheet's `@font-face`); a link's status or
 network error, its text, its kind and where it redirected; a game's name, how it opens, its status, error and load
-time; a word's suggestion and context; a layout problem's width, element and sizes; a large file's bytes and element.
+time; a word's suggestion and context; a layout problem's width, element and sizes; a large file's bytes, element and
+whether it is a third party's; a heavy page's biggest files.
 Each check lists at most 500 findings (its failures first, then the most widespread); the rest are counted in its
 summary's `unlisted` and in the totals.
 
@@ -56,29 +57,68 @@ emails, anything with a digit, single letters, short ALL-CAPS words (NGSS, STEM)
 (iCivics, PhET). One finding per word, with its context and the dictionary's best suggestion.
 See [accepting a word](#accepting-a-word).
 
-**Website size and speed** (`performance`). The website's own files only, from the same page loads; games are judged separately under Games load (below the table). The pages share
-one browser cache, so each file is downloaded once per run; a page's weight still counts every file it uses at the
-size it had when first fetched. Timings come in two steps: the visit gives a first look, then every page that looked
-slow or is over `pageWarnBytes` (the 30 heaviest) is loaded again alone with an empty cache, as a first-time visitor
-gets it, and that time is the one reported.
+**Website size and speed** (`performance`). The website's own files only, from the same page loads; games are judged
+separately under Games load (below the table). The limits are for a US school's shared classroom wifi: a building's
+connection split among everyone on it leaves about **1 Mbps per student**, and a class of 30 opens the same page at
+the same moment. 1 Mbps is 125 KB a second, so a 500 KB first view takes a student about 4 seconds and a 1 MB one
+about 8; 30 students pulling 1 MB each is 30 MB through a classroom access point at once. Hence a first view (what a
+student sees before scrolling) of at most 500 KB, and a whole page of at most 1 MB.
 
 | | Warning | Failure |
 | --- | --- | --- |
-| An image | over `imageWarnBytes` 250 KB | over `imageFailBytes` 1 MB |
-| A script, stylesheet, font or other file | over `fileWarnBytes` 250 KB | over `fileFailBytes` 1 MB |
-| A video or audio file | over `mediaWarnBytes` 5 MB | |
-| Everything one page loads | over `pageWarnBytes` 1.5 MB | over `pageFailBytes` 4 MB |
-| Page load | over `loadWarnMs` 3 s | over `loadFailMs` 8 s |
-| Largest contentful paint | over `lcpWarnMs` 2.5 s | over `lcpFailMs` 4 s |
-| Time to first byte | over `ttfbWarnMs` 0.8 s | |
+| First view: what loads before any scrolling, at the laptop width (1280 × 800), empty cache | over `firstViewWarnBytes` 500 KB | over `firstViewFailBytes` 1 MB |
+| The whole page, after scrolling to the bottom | over `pageWarnBytes` 1 MB | over `pageFailBytes` 2 MB |
+| One image | over `imageWarnBytes` 150 KB | over `imageFailBytes` 500 KB |
+| One script, stylesheet, font or other file | over `fileWarnBytes` 100 KB | over `fileFailBytes` 300 KB |
+| All the page's JavaScript and CSS together | over `codeWarnBytes` 170 KB | over `codeFailBytes` 350 KB |
+| A video or audio file | over `mediaWarnBytes` 5 MB | never |
+| Largest contentful paint, on Slow 4G | over `lcpWarnMs` 2.5 s | over `lcpFailMs` 4 s |
+| The load event, on Slow 4G | over `loadWarnMs` 5 s | over `loadFailMs` 10 s |
+| Time to first byte, on Slow 4G | over `ttfbWarnMs` 1.8 s | |
+
+How it is measured:
+
+* **Bytes are as sent over the network** (compressed, with the response headers), as Chromium reports them. Each
+  address counts once on a page. The pages share one browser cache, so each file is downloaded once per run; a page's
+  weight still counts every file it uses at the size it had when first fetched.
+* **Third-party files count.** Google's tag script costs a classroom the same bandwidth as the site's own. A finding
+  about someone else's file says so ("from another site (www.googletagmanager.com)", `detail.thirdParty`), and the
+  page-level findings mark them "(third-party)", so it is clear the fix is to drop or defer that service rather than
+  to shrink a file. Another host of the site's own domain (its CDN, `cdn.vaultlearninggames.org`) is the site's own.
+  Files loaded inside embedded frames aren't counted: the site has none until Play is pressed, and a game is judged by
+  itself.
+* **The first view** is what the page has asked for once it has loaded and the network has gone quiet (up to 4 s),
+  before the check scrolls, less the lazy images (`loading="lazy"`) that are below the fold. Chrome fetches lazy
+  images that are near the window early, so a visitor who never scrolls may still download some of them; they aren't
+  counted, because the page doesn't need them to show its first screen. **The whole page** is everything after
+  scrolling to the bottom and waiting for the images that scrolling started.
+* **One finding per page for each page-level budget** (`perf.first-view`, `perf.heavy-page`, `perf.heavy-code`). Its
+  message names the three biggest files, and its `detail` has the total (`bytes`), how many files (`files`), how much
+  of it is third-party (`thirdPartyBytes`) and the five biggest files (`biggest`, one per line), which the portal shows
+  in its **What to fix first** column.
+* **Timings are judged only on a throttled load.** The visit pass loads pages several at a time on the runner's fast
+  connection, which says nothing about a classroom. So pages are loaded again one at a time, in a fresh browser
+  context with an empty cache, on Chrome's **Slow 4G** (`THROTTLE`: DevTools' and Lighthouse's preset for 150 ms
+  round trips, 1.6 Mbps down and 750 Kbps up, which Chrome applies per request as 562.5 ms of latency and 90% of the
+  bandwidth). Which pages: first the heaviest page of each kind, so every template is covered (the home page, a
+  game's page, `/game-cards/`, its tag and category pages, `/about/`, `/get-involved/`, `/submit-a-game/`, …:
+  `templateOf` in `src/site-checks/util.ts`), then pages that looked slow in the visit pass or are over a weight
+  limit, heaviest first, 24 in all (each takes a few seconds). Pages that weren't re-timed get no timing findings.
+* **Why these timing limits.** Largest contentful paint is the limit approved on 2026-10-04 (web.dev's "good" and "poor"
+  thresholds, which are what Lighthouse judges on this same connection). The load event and the first byte are kept
+  as backstops but moved to the throttled load too, rather than judged on the runner's connection, so that every
+  timing means the same thing: the load event at twice and two and a half times the paint limits (5 s and 10 s: a
+  page can paint its main content and still be downloading below-the-fold images), and the first byte at web.dev's
+  "poor" 1.8 s (the emulated latency is part of it, so the old 0.8 s would warn on every page). One timing finding per
+  page: the worst of paint, load and first byte (paint first when they tie). A page that hasn't finished loading
+  after 60 s is reported as taking 60 s.
 
 Games are counted apart from the website, under **Games load**, and their size and speed only ever warn: a game's
 load time over `gameLoadWarnMs` 15 s (or not finished when the check stopped waiting), and what a game downloads
 before it can be played over `gameWarnBytes` 50 MB. A game's files never count toward a page's weight.
 
 Also warnings: a text file over `uncompressedBytes` 20 KB sent without compression, and an image with more than
-`oversizedFactor` 3 times the pixels across that it is shown at (when the file is over `oversizedBytes` 100 KB). Only
-one timing finding per page is reported (load, then paint, then first byte).
+`oversizedFactor` 3 times the pixels across that it is shown at (when the file is over `oversizedBytes` 100 KB).
 
 **Responsive design** (`responsive`). Every page at phone (360 px), tablet (768), laptop (1280) and wide (1920) widths.
 * Failure: the page scrolls sideways on a phone or tablet (wider than the window by more than `overflowPx` 2 px; the
@@ -207,14 +247,16 @@ failure. A repeating warning you have checked can't be silenced yet; it stays a 
 
 ## What it can't tell you
 
-* **Timings are from GitHub's hosted runner**, a data-centre machine on a fast connection, not from a classroom.
-  A classroom's connection is slower: treat a warning as "this is heavy", and the byte counts, which don't depend on
-  where you are, as the firmer number.
+* **Timings are an emulation.** They come from GitHub's hosted runner with Chrome throttled to Slow 4G, which is close
+  to one student's share of a classroom's wifi but not the same: a real shared network also loses packets and
+  queues. Chrome's per-request latency makes even a small page take about 2.5 s to paint when it chains requests to
+  other sites (a font service's stylesheet, then its fonts). The byte counts, which don't depend on where you are,
+  are the firmer number.
 * **The checker's own connection.** A network error is only believed while the checker can still reach the site's
   front page; if it can't, it waits (up to three minutes) and tries again, and a connection that stays away ends the
   run as "did not finish" rather than reporting hundreds of false failures.
 * **A run takes roughly seven to fifteen minutes** for the whole site (275 pages at four widths and 101 games took 7
-  minutes from a laptop on 2026-10-02; a hosted runner is slower), and the job is stopped at 45. A `limit` or `paths` run takes less.
+  minutes from a laptop on 2026-10-02; a hosted runner is slower; the Slow 4G re-timing adds two or three minutes), and the job is stopped at 45. A `limit` or `paths` run takes less.
 * **Games are opened, not played.** The check sees the game's document load, show something and stop asking for
   missing files; it can't tell that level 3 is broken.
 * Pages that need a sign-in aren't covered; neither is anything the site's links don't reach (the portal's own pages).

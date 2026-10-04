@@ -34,6 +34,16 @@ export function normalisePath(path: string): string {
   return p;
 }
 
+// Which kind of page a path is, so the throttled timing covers every kind: the home page, each page of its own at
+// the top (/about/, /game-cards/), a game's page (one with a Play button), and pages under a section by section
+// ('/game-cards/*', '/game-cards/tag/*').
+export function templateOf(path: string, hasPlay: boolean): string {
+  const parts = normalisePath(path).split('/').filter(Boolean);
+  if (!parts.length) return 'home';
+  if (parts.length > 1) return `/${parts.slice(0, -1).join('/')}/*`;
+  return hasPlay ? 'a game page' : `/${parts[0]}/`;
+}
+
 // Whether a link's target looks like a page of the site (so it is worth visiting): no query, and no file extension
 // but .html.
 export function isPageUrl(u: URL): boolean {

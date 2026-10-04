@@ -7,6 +7,8 @@
 {{- partial "sq/section.html" (dict "s" $head "page" $page "key" "s0" "first" true "class" "is-first") }}
 <section class="sq-sec theme-white sq-blog" data-section-theme="white">
   <div class="blog-grid" data-page-size="20">
+    {{- /* The first row of cards (four on a laptop) is on screen: fetched at once; the rest when they come near it. */}}
+    {{- $n := 0 }}
     {{- range $items }}{{ $p := .page }}
     {{- $cats := slice }}{{ range $p.Params.grades }}{{ $cats = $cats | append . }}{{ end }}{{ range $p.Params.makers }}{{ $cats = $cats | append (printf "Dev: %s" .) }}{{ end }}
     {{- with $p.Params.legacy }}{{ with .card_categories }}{{ $cats = . }}{{ end }}{{ end }}
@@ -16,9 +18,9 @@
     {{- if eq $kind "tag" }}{{ $show = in $tags $val }}{{ end }}
     {{- if $show }}
     {{- $href := strings.TrimSuffix "/" $p.RelPermalink }}
-    {{- $img := partial "sq/card-image.html" $p }}
+    {{- $img := partial "sq/card-image.html" $p }}{{ $n = add $n 1 }}
     <article class="blog-item" data-offset="{{ mul .date.Unix 1000 }}">
-      <a class="blog-img" href="{{ $href }}">{{ with $img }}{{ partial "sq/img.html" (dict "src" . "alt" $p.Title "sizes" "(min-width: 1400px) 340px, (min-width: 1024px) 25vw, (min-width: 768px) 33vw, (min-width: 600px) 50vw, 100vw" "lazy" true) }}{{ end }}</a>
+      <a class="blog-img" href="{{ $href }}">{{ with $img }}{{ partial "sq/img.html" (dict "src" . "alt" $p.Title "sizes" "(min-width: 1400px) 340px, (min-width: 1024px) 25vw, (min-width: 768px) 33vw, (min-width: 600px) 50vw, 100vw" "defer" (gt $n 4)) }}{{ end }}</a>
       <div class="blog-meta">
         <span class="blog-cats">{{ range $i, $c := $cats }}{{ if $i }}, {{ end }}<a href="{{ printf "/game-cards/category/%s" (replace (urlquery $c) "%2B" "+") | safeURL }}">{{ $c }}</a>{{ end }}</span>
         <span class="blog-delim" aria-hidden="true"></span>
@@ -32,6 +34,7 @@
     {{- end }}
     {{- end }}
   </div>
+  {{- partial "sq/lazy-images.html" . }}
   <nav class="blog-pages" aria-label="Pages">
     <a class="blog-newer" href="#" hidden><span class="chev" aria-hidden="true"></span>Newer Posts</a>
     <a class="blog-older" href="#" hidden>Older Posts<span class="chev" aria-hidden="true"></span></a>

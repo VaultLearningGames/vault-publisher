@@ -1,7 +1,23 @@
 {{- /* An <img> for a listing or Squarespace image, with its smaller copies (partials/sq/srcset.html) as srcset and the
        original's width and height (its aspect ratio; the CSS sets the size it is shown at). Params: src, alt, sizes
        (how wide it is shown, for srcset; default 100vw), style, lazy (below the fold: loading="lazy"), priority (the
-       one image at the top of the page: fetched first, fetchpriority="high"). */ -}}
+       one image at the top of the page: fetched first, fetchpriority="high"), defer (the same as lazy).
+       An image with copies (srcset) below the fold is fetched only once it comes near the screen, by
+       partials/sq/lazy-images.html (at the end of the page, and right after a grid of cards): the browser's own
+       loading="lazy" fetches everything up to 1250-2500px below the screen, which on the home page and /game-cards
+       is a dozen or more thumbnails nobody has scrolled to yet, on a slow shared school connection. Without
+       JavaScript the <noscript> copy is shown instead. With AVIF copies (partials/sq/srcset.html), a <picture> that offers
+       them first (display: contents in vault-sq.css, so it lays out as the <img> alone). */ -}}
 {{- $i := partial "sq/srcset.html" .src -}}
-<img src="{{ $i.src | relURL }}"{{ with $i.srcset }} srcset="{{ . }}" sizes="{{ $.sizes | default "100vw" }}"{{ end }}{{ if $i.w }} width="{{ $i.w }}" height="{{ $i.h }}"{{ end }} alt="{{ .alt | default "" }}"{{ with .style }} style="{{ . | safeCSS }}"{{ end }}{{ if .priority }} fetchpriority="high"{{ else if .lazy }} loading="lazy"{{ end }} decoding="async">
+{{- $sizes := .sizes | default "100vw" -}}
+{{- if and (or .lazy .defer) (not .priority) $i.srcset -}}
+{{ with $i.avif }}<picture><source type="image/avif" data-srcset="{{ . }}" sizes="{{ $sizes }}">{{ end -}}
+<img class="lz" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="{{ $i.src | relURL }}" data-srcset="{{ $i.srcset }}" sizes="{{ $sizes }}"{{ if $i.w }} width="{{ $i.w }}" height="{{ $i.h }}"{{ end }} alt="{{ .alt | default "" }}"{{ with .style }} style="{{ . | safeCSS }}"{{ end }} loading="lazy" decoding="async">
+{{- if $i.avif }}</picture>{{ end -}}
+<noscript>{{ with $i.avif }}<picture><source type="image/avif" srcset="{{ . }}" sizes="{{ $sizes }}">{{ end }}<img src="{{ $i.src | relURL }}" srcset="{{ $i.srcset }}" sizes="{{ $sizes }}"{{ if $i.w }} width="{{ $i.w }}" height="{{ $i.h }}"{{ end }} alt="{{ .alt | default "" }}"{{ with .style }} style="{{ . | safeCSS }}"{{ end }} loading="lazy" decoding="async">{{ if $i.avif }}</picture>{{ end }}</noscript>
+{{- else -}}
+{{ with $i.avif }}<picture><source type="image/avif" srcset="{{ . }}" sizes="{{ $sizes }}">{{ end -}}
+<img src="{{ $i.src | relURL }}"{{ with $i.srcset }} srcset="{{ . }}" sizes="{{ $sizes }}"{{ end }}{{ if $i.w }} width="{{ $i.w }}" height="{{ $i.h }}"{{ end }} alt="{{ .alt | default "" }}"{{ with .style }} style="{{ . | safeCSS }}"{{ end }}{{ if .priority }} fetchpriority="high"{{ else if or .lazy .defer }} loading="lazy"{{ end }} decoding="async">
+{{- if $i.avif }}</picture>{{ end -}}
+{{- end -}}
 {{- /**/ -}}

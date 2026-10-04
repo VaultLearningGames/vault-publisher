@@ -11,6 +11,7 @@
     {{- block "main" . }}{{ end }}
   </main>
   {{- partial "sq/footer.html" . }}
+  {{- partial "sq/lazy-images.html" . }}
   <script src="{{ "sq/js/vault-sq.js" | relURL }}{{ partialCached "sq/asset-v.html" "sq/js/vault-sq.js" "sq/js/vault-sq.js" }}" defer></script>
   {{- block "scripts" . }}{{ end }}
 </body>

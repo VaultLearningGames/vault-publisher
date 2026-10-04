@@ -48,6 +48,7 @@ describe('the static hosting files of the site', () => {
     assert.equal(cacheFor('sitemap.xml'), PAGE_CACHE);
     assert.equal(cacheFor('sq/css/vault-sq.css'), ASSET_CACHE);
     assert.equal(cacheFor('sq/img/site/key-to-vault-min-fc73a9.png'), FIXED_CACHE);
+    assert.equal(cacheFor('sq/img/site/key-to-vault-min-fc73a9-800w.avif'), FIXED_CACHE);
     assert.equal(cacheFor('sq/img/site/vault-game-library.png'), ASSET_CACHE);
     assert.equal(cacheFor('sq/fonts/archivo-500-latin.woff2'), FIXED_CACHE);
     assert.equal(cacheFor('files/keys-to-the-vault.pdf'), ASSET_CACHE);

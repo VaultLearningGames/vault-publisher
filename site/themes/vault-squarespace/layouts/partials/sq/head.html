@@ -43,11 +43,25 @@
 <link rel="apple-touch-icon" href="{{ "apple-touch-icon.png" | relURL }}">
 {{- /* Base 9 Sans, the heading font, is an Adobe Fonts typeface: it loads from Field Day's own Adobe Fonts web project
        (params.fonts.adobe_kit). Until that's set, Share Tech Mono (self-hosted) stands in; html.no-base9 selects it. */}}
-{{- with site.Params.fonts.adobe_kit }}<link rel="stylesheet" href="https://use.typekit.net/{{ . }}.css">{{ end }}
-{{- /* Google Analytics, as on the Squarespace site; only where the build is given an id (params.analytics.google). */}}
+{{- /* The kit's stylesheet blocks rendering, and it and the font come from two more hosts (use.typekit.net, which
+       @imports p.typekit.net); connecting to both early saves the round trips. (The kit's font-display is "auto", set in
+       the Adobe Fonts web project, not here.) The fonts are fetched with CORS, the stylesheets without: two connections. */}}
+{{- with site.Params.fonts.adobe_kit }}
+<link rel="preconnect" href="https://use.typekit.net" crossorigin>
+<link rel="preconnect" href="https://p.typekit.net">
+<link rel="stylesheet" href="https://use.typekit.net/{{ . }}.css">{{ end }}
+{{- /* Google Analytics, as on the Squarespace site; only where the build is given an id (params.analytics.google).
+       gtag.js (about 170 KB) loads only once the page has loaded and the browser is idle (at most 2 s later), so it
+       is never part of what a visitor waits for on a slow school connection. Until then gtag() queues into dataLayer,
+       which gtag.js reads when it arrives: the page_view (config) and anything sent meanwhile (the play events of
+       sq/js/vault-play-analytics.js) are sent then. */}}
 {{- with site.Params.analytics.google }}
-<script async src="https://www.googletagmanager.com/gtag/js?id={{ . }}"></script>
-<script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', {{ . }});</script>
+<script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', {{ . }});
+(function (id) {
+  function load() { var s = document.createElement('script'); s.async = true; s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(id); document.head.appendChild(s); }
+  function idle() { if (window.requestIdleCallback) requestIdleCallback(load, { timeout: 2000 }); else setTimeout(load, 200); }
+  if (document.readyState === 'complete') idle(); else addEventListener('load', idle, { once: true });
+})({{ . }});</script>
 {{- end }}
 <link rel="preload" href="{{ "sq/fonts/montserrat-300-latin.woff2" | relURL }}" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="{{ "sq/css/fonts.css" | relURL }}">

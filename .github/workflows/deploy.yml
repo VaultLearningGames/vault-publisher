@@ -141,10 +141,13 @@ jobs:
         grep -q "action=\"$HUGOxPARAMSxFORMSxSUBMIT_GAME\"" site/public/submit-a-game/index.html
         grep -q "action=\"$HUGOxPARAMSxFORMSxNEWSLETTER\"" site/public/index.html
         grep -q "<link rel=\"canonical\" href=\"${SITE_URL%/}\">" site/public/index.html
-        # Analytics only where the environment has an id: then on the home page and on game pages.
+        # Analytics only where the environment has an id: then on the home page and on game pages. gtag.js is added by
+        # a script once the page has loaded (partials/sq/head.html), so look for its config and its loader.
         if [ -n "${GOOGLE_ANALYTICS_ID:-}" ]; then
-          grep -q "gtag/js?id=${GOOGLE_ANALYTICS_ID}\"" site/public/index.html
-          grep -q "gtag/js?id=${GOOGLE_ANALYTICS_ID}\"" site/public/wake/index.html
+          for f in site/public/index.html site/public/wake/index.html; do
+            grep -qF "gtag('config', \"${GOOGLE_ANALYTICS_ID}\")" "$f" && grep -qF "googletagmanager.com/gtag/js?id=" "$f" \
+              || { echo "::error::no Google Analytics (${GOOGLE_ANALYTICS_ID}) in $f"; exit 1; }
+          done
         else
           if grep -rq "googletagmanager" site/public; then echo "::error::analytics in a build that has no GOOGLE_ANALYTICS_ID"; exit 1; fi
         fi

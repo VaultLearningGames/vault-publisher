@@ -114,6 +114,9 @@ export interface ResourceSeen {
   // Part of the first view: arrived before the page was scrolled (a lazy image below the fold that the browser
   // fetched early is not). Absent when the first view wasn't measured.
   firstView?: boolean;
+  // Asked for only after the page's load event (an analytics tag loaded once the page is ready): nothing a visitor
+  // waits for, so not part of the first view or of the JavaScript and CSS budget; still part of the whole page.
+  afterLoad?: boolean;
 }
 
 export interface ImageSeen {
@@ -319,7 +322,7 @@ export function performanceFindings(page: PageLoad, siteOrigin: string): RawFind
     if (r.inFrame || r.bytes === null || !isWeb(r.url)) continue;
     const had = files.get(r.url);
     if (!had) files.set(r.url, r);
-    else files.set(r.url, { ...had, bytes: Math.max(had.bytes ?? 0, r.bytes), firstView: !!had.firstView || !!r.firstView });
+    else files.set(r.url, { ...had, bytes: Math.max(had.bytes ?? 0, r.bytes), firstView: !!had.firstView || !!r.firstView, afterLoad: !!had.afterLoad && !!r.afterLoad });
   }
   for (const r of files.values()) {
     const bytes = r.bytes ?? 0;
@@ -352,7 +355,7 @@ export function performanceFindings(page: PageLoad, siteOrigin: string): RawFind
     budget('perf.first-view', all.filter((r) => r.firstView), LIMITS.firstViewWarnBytes, LIMITS.firstViewFailBytes, (s) => `The first view (before any scrolling) loads ${s}`);
   }
   budget('perf.heavy-page', all, LIMITS.pageWarnBytes, LIMITS.pageFailBytes, (s) => `The whole page, scrolled to the bottom, loads ${s}`);
-  budget('perf.heavy-code', all.filter(isCode), LIMITS.codeWarnBytes, LIMITS.codeFailBytes, (s) => `The page's JavaScript and CSS together are ${s}`);
+  budget('perf.heavy-code', all.filter((r) => isCode(r) && !r.afterLoad), LIMITS.codeWarnBytes, LIMITS.codeFailBytes, (s) => `The page's JavaScript and CSS together are ${s}`);
 
   const bytesOf = new Map(all.map((r) => [r.url, r.bytes]));
   for (const img of page.images) {

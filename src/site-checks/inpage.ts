@@ -25,8 +25,14 @@ export interface PageData {
 // The first view, before any scrolling: every file the page has used so far, and the lazy images below the fold
 // (which the browser may already have fetched, being near the window, but which a visitor who doesn't scroll
 // doesn't need). An image shown anywhere else on the page, or not marked lazy, is part of the first view.
-export function firstView(): { used: string[]; lazyBelow: string[] } {
-  const used = performance.getEntriesByType('resource').map((e) => e.name);
+export function firstView(): { used: string[]; lazyBelow: string[]; afterLoad: string[] } {
+  const entries = performance.getEntriesByType('resource');
+  const used = entries.map((e) => e.name);
+  // Asked for only once the page had loaded (its load event): a deferred analytics tag, say.
+  const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+  const loaded = nav && nav.loadEventEnd > 0 ? nav.loadEventEnd : Infinity;
+  const late = new Set(entries.filter((e) => e.startTime >= loaded).map((e) => e.name));
+  for (const e of entries) if (e.startTime < loaded) late.delete(e.name);   // asked for before load too
   const needed = new Set<string>(), below = new Set<string>();
   for (const img of document.querySelectorAll('img')) {
     const src = img.currentSrc || img.src;
@@ -34,7 +40,7 @@ export function firstView(): { used: string[]; lazyBelow: string[] } {
     if (img.loading === 'lazy' && img.getBoundingClientRect().top + scrollY >= innerHeight) below.add(src);
     else needed.add(src);
   }
-  return { used, lazyBelow: [...below].filter((s) => !needed.has(s)) };
+  return { used, lazyBelow: [...below].filter((s) => !needed.has(s)), afterLoad: [...late] };
 }
 
 // Down the page in steps (so lazy images load) and back up. Bounded to about four seconds.

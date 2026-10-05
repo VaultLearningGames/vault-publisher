@@ -2,4 +2,5 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Lazy</title></head><body><h1>Lazy</h1><img src="/img/noise-1.png" alt="The picture at the top" width="100" height="67">
 <div style="height:4000px"></div>
 <img src="/img/noise-2.png" alt="A picture far below" width="600" height="400" loading="lazy">
-<img src="/img/noise-3.png" alt="Another picture far below" width="600" height="400" loading="lazy"></body></html>
+<img src="/img/noise-3.png" alt="Another picture far below" width="600" height="400" loading="lazy">
+<script>addEventListener('load', () => setTimeout(() => { const s = document.createElement('script'); s.src = '/js/late.js'; document.head.appendChild(s); }, 50));</script></body></html>

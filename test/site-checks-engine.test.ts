@@ -145,6 +145,8 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
     site = http.createServer(async (req, res) => {
       const path = (req.url ?? '/').split('?')[0];
       if (path === '/img/bad.png') { res.writeHead(200, { 'content-type': 'image/png' }); res.end('this is not a png'); return; }
+      // A 200 KB script that doesn't compress, as /lazy/ asks for it only after its load event (like the site's analytics).
+      if (path === '/js/late.js') { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(`/* ${png.subarray(0, 150_000).toString('base64')} */`); return; }
       if (path === '/img/big.png' || /^\/img\/noise-\d\.png$/.test(path)) { res.writeHead(200, { 'content-type': 'image/png' }); res.end(png); return; }
       let file = path === '/' ? 'index.html' : path.endsWith('/') ? `${path.slice(1)}index.html` : path.slice(1);
       if (!/^[\w./-]+$/.test(file) || file.includes('..')) file = '';
@@ -212,6 +214,11 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
     assert.doesNotMatch(String(first.detail?.biggest), /noise-[23]/);
     assert.equal(whole.level, 'fail');               // all three, after scrolling
     assert.ok(Number(whole.detail?.bytes) > 2_000_000, String(whole.detail?.bytes));
+    // The script asked for after load: a large file, part of the whole page, but not of the first view or the JS+CSS budget.
+    assert.doesNotMatch(String(first.detail?.biggest), /late\.js/);
+    assert.match(String(whole.detail?.biggest), /late\.js/);
+    assert.ok(!find('perf.heavy-code'), JSON.stringify(find('perf.heavy-code')));
+    assert.ok(run.findings.some((f) => f.code === 'perf.large-file' && f.target.endsWith('/js/late.js')));
   });
 
   test('performance: timings come from a throttled load (Slow 4G)', () => {

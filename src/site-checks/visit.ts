@@ -77,12 +77,14 @@ export async function visitPage(env: VisitEnv, path: string): Promise<Visit> {
     // The first view: what the page has asked for once it has loaded and the network has gone quiet, before any
     // scrolling, less the lazy images below the fold.
     let first: Set<string> | null = null;
+    let late = new Set<string>();
     if (env.deep) {
       await quiet(page, 4000);
       const fv = await withTimeout(page.evaluate(firstView), 10_000, 'reading the first view').catch(() => null);
       if (fv) {
         first = new Set([...watch.asked, ...fv.used]);
-        for (const src of fv.lazyBelow) first.delete(src);
+        late = new Set(fv.afterLoad);
+        for (const src of [...fv.lazyBelow, ...late]) first.delete(src);
       }
       await withTimeout(page.evaluate(scrollThrough), 10_000, 'scrolling').catch(() => {});
       await quiet(page, 4000);
@@ -99,7 +101,7 @@ export async function visitPage(env: VisitEnv, path: string): Promise<Visit> {
       } catch { /* a page that can't be measured just has no view */ }
     }
     const main = page.mainFrame();
-    const inFirst = (url: string) => (first ? { firstView: first.has(url) } : {});
+    const inFirst = (url: string) => ({ ...(first ? { firstView: first.has(url) } : {}), ...(late.has(url) ? { afterLoad: true } : {}) });
     const resources = watch.seen.map((s) => ({ ...s.res, inFrame: s.frame !== main, ...inFirst(s.res.url) }));
     // Files the browser took from its cache without asking (an image another page already showed) still belong to
     // this page's weight.

@@ -87,6 +87,10 @@ How it is measured:
   to shrink a file. Another host of the site's own domain (its CDN, `cdn.vaultlearninggames.org`) is the site's own.
   Files loaded inside embedded frames aren't counted: the site has none until Play is pressed, and a game is judged by
   itself.
+* **Files asked for only after the page's load event** (the site's Google Analytics tag, which it loads once the page
+  is ready and the browser is idle) are nothing a visitor waits for: they count toward the whole page, and a large one
+  is still its own finding, but not toward the first view or the JavaScript and CSS budget, which are about what a
+  page needs before it can be used.
 * **The first view** is what the page has asked for once it has loaded and the network has gone quiet (up to 4 s),
   before the check scrolls, less the lazy images (`loading="lazy"`) that are below the fold. Chrome fetches lazy
   images that are near the window early, so a visitor who never scrolls may still download some of them; they aren't

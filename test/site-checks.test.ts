@@ -136,6 +136,11 @@ describe('performance', () => {
     assert.deepEqual(codes(perf({ resources: code(2, 90_000) })), ['warn:perf.heavy-code']);
     assert.deepEqual(codes(perf({ resources: [...code(4, 90_000), res({ bytes: 1 })] })), ['fail:perf.heavy-code']);
     assert.equal(perf({ resources: [...code(2, 90_000), res()] })[0].detail?.bytes, 192_000);
+    // A script asked for only after the page's load event (the deferred analytics tag) isn't waited for: not in the
+    // JavaScript and CSS budget, though the page still downloads it.
+    const tag = { ...js('https://www.googletagmanager.com/gtag/js?id=G-X', 179_000), afterLoad: true };
+    assert.deepEqual(perf({ resources: [...code(1, 30_000), tag] }).map((f) => f.code), ['perf.large-file']);
+    assert.deepEqual(codes(perf({ resources: [...code(1, 30_000), { ...tag, afterLoad: false }] })), ['warn:perf.large-file', 'warn:perf.heavy-code']);
   });
 
   test('text sent without compression', () => {

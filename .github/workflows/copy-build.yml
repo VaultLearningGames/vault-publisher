@@ -88,10 +88,14 @@ jobs:
       env:
         REPO: ${{ steps.source.outputs.repo }}
         SHA: ${{ steps.source.outputs.sha }}
+        REF: ${{ steps.source.outputs.ref }}
       run: |
         set -euo pipefail
-        id=$(gh api "repos/$REPO/actions/artifacts?per_page=100" --paginate \
-          --jq ".artifacts[] | select(.expired | not) | select(.name | endswith(\"$SHA\")) | .id" | head -1 || true)
+        # The commit's artifact built from the source's branch first: one commit can be on two branches (production
+        # merged into staging), and a Unity build differs by branch (its build info and hashed file names).
+        ours=$(gh api "repos/$REPO/actions/artifacts?per_page=100" --paginate \
+          --jq ".artifacts[] | select(.expired | not) | select(.name | endswith(\"$SHA\")) | \"\(.workflow_run.head_branch) \(.id)\"" || true)
+        id=$( { echo "$ours" | awk -v r="$REF" '$1 == r {print $2}'; echo "$ours" | awk '{print $2}'; } | grep . | head -1 || true)
         if [ -z "$id" ]; then echo "No unexpired artifact for $SHA in $REPO."; echo "found=false" >> "$GITHUB_OUTPUT"; exit 0; fi
         echo "Artifact $id"
         if ! gh api "repos/$REPO/actions/artifacts/$id/zip" > build.zip; then

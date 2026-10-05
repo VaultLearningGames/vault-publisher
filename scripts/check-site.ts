@@ -26,7 +26,7 @@ import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import {
   CHECK_LABEL, annotations, fitRun, issueMarkdown, parseStart, runFails, runMarkdown,
-  type CheckName, type FailOn, type Progress, type RunOptions, type SiteCheckRun,
+  type CatalogGame, type CheckName, type FailOn, type Progress, type RunOptions, type SiteCheckRun,
 } from '../src/site-checks.ts';
 
 const USAGE = `usage: node scripts/check-site.ts --site https://vaultlearninggames-staging.org [--checks games,links] [--limit N] [--paths /a/,/b/]
@@ -150,6 +150,14 @@ export async function catalogNames(portal: string, fetchFn: typeof fetch): Promi
   return names.filter((n) => typeof n === 'string' && n);
 }
 
+// The listings and what each plays, for the games check (each game page plays its own game).
+export async function catalogGames(portal: string, fetchFn: typeof fetch): Promise<CatalogGame[]> {
+  const res = await fetchFn(`${portal}/v1/catalog`, { signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`${portal}/v1/catalog answered HTTP ${res.status}`);
+  const catalog = (await res.json()) as { games?: { slug?: string; title?: string; play?: { url?: string } }[] };
+  return (catalog.games ?? []).filter((g) => g.slug).map((g) => ({ slug: g.slug!, title: g.title ?? g.slug!, play: g.play?.url ?? '' }));
+}
+
 // ---------- main ----------
 export interface MainDeps {
   engine?: (options: RunOptions) => Promise<SiteCheckRun>;   // default: the real one, imported on demand
@@ -171,11 +179,13 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
   }
   try {
     const words = [...opts.words];
+    let games: CatalogGame[] = [];
     if (opts.catalog) {
       try {
         words.push(...await catalogNames(opts.catalog, deps.fetch ?? fetch));
+        games = await catalogGames(opts.catalog, deps.fetch ?? fetch);
       } catch (err) {
-        const why = `couldn't read the catalog's names from ${opts.catalog} (${(err as Error).message}); the spelling check will flag game and studio names it doesn't know`;
+        const why = `couldn't read the catalog's names from ${opts.catalog} (${(err as Error).message}); the spelling check will flag game and studio names it doesn't know, and the games check can't tell whether each page plays its own game`;
         log(env.GITHUB_ACTIONS ? `::warning title=Site checks::${why.replace(/%/g, '%25').replace(/\r?\n/g, '%0A')}` : `check-site: warning: ${why}`);
       }
     }
@@ -183,7 +193,7 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
     const checks = parseStart({ checks: opts.checks }) as { checks: CheckName[] };
     let seen = '';
     const run = await engine({
-      site: opts.site, checks: checks.checks, limit: opts.limit, paths: opts.paths, allowWords: words.filter(Boolean),
+      site: opts.site, checks: checks.checks, limit: opts.limit, paths: opts.paths, allowWords: words.filter(Boolean), catalog: games,
       guard: opts.guard, source: opts.source, startedBy: 'cli',
       onProgress: (p) => { const t = progressText(p); if (t !== seen) { seen = t; log(t); } },
     });

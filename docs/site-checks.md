@@ -32,6 +32,15 @@ second try.
 * Warning: the game is still one flat colour after loading (`blank`); it asks for files of its own that don't arrive
   (the first `gameMissingListed` = 5 are listed, the rest counted; its calls to someone else's statistics service
   aren't); or its site refuses the checker (HTTP 401, 403, 429…), which says nothing about a visitor.
+* **Each page plays its own game** (with `--catalog PORTAL`, as the workflow runs it). Game pages name their listing in
+  `<meta name="vault:game">`; the check compares every page's Play address with what that listing plays in the
+  portal's public catalog (`/v1/catalog`), ignoring a trailing slash or `index.html`.
+  * Failure (`game.shared-play`): two or more listings play the same address, so at most one of them is right
+    (Headlines and High Water once played Jo Wilder's build). The Yard games share one CDN game but each plays its own
+    folder, so they don't count.
+  * Failure (`game.wrong-play`): a page's Play opens something other than its listing's address: the page is stale
+    (rebuild the site) or wired to the wrong game.
+  * Warning (`game.unlisted-page`): a game page for a listing the catalog doesn't have.
 
 **Missing assets** (`assets`). Every request a page makes while it loads and is scrolled to the bottom (so lazy images
 load), at the laptop width.

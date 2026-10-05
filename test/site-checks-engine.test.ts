@@ -129,7 +129,7 @@ describe('the services check', () => {
 });
 
 describe('site checks engine', { skip: chromium ? false : 'Chromium is not installed (npx playwright install chromium-headless-shell)' }, () => {
-  let site: http.Server, games: http.Server, origin = '', gamePort = 0;
+  let site: http.Server, games: http.Server, origin = '', gamePort = 0, analyticsHits = 0;
   let run: SiteCheckRun;
   const png = bigPng();
 
@@ -144,6 +144,8 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
     gamePort = await listen(games);
     site = http.createServer(async (req, res) => {
       const path = (req.url ?? '/').split('?')[0];
+      // Cloudflare Web Analytics' beacon address: the checker must never reach it (it would count as a visit).
+      if (path === '/cdn-cgi/rum') { analyticsHits++; res.writeHead(204); res.end(); return; }
       if (path === '/img/bad.png') { res.writeHead(200, { 'content-type': 'image/png' }); res.end('this is not a png'); return; }
       // A 200 KB script that doesn't compress, as /lazy/ asks for it only after its load event (like the site's analytics).
       if (path === '/js/late.js') { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(`/* ${png.subarray(0, 150_000).toString('base64')} */`); return; }
@@ -219,6 +221,11 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
     assert.match(String(whole.detail?.biggest), /late\.js/);
     assert.ok(!find('perf.heavy-code'), JSON.stringify(find('perf.heavy-code')));
     assert.ok(run.findings.some((f) => f.code === 'perf.large-file' && f.target.endsWith('/js/late.js')));
+  });
+
+  test('the checker never reports a visit to analytics; the beacon isn\'t a failed request either', () => {
+    assert.equal(analyticsHits, 0);
+    assert.ok(!run.findings.some((f) => f.target.includes('/cdn-cgi/rum')), JSON.stringify(run.findings.filter((f) => f.target.includes('/cdn-cgi/rum'))));
   });
 
   test('performance: timings come from a throttled load (Slow 4G)', () => {

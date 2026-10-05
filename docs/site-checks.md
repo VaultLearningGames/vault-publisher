@@ -90,6 +90,10 @@ How it is measured:
 * **Bytes are as sent over the network** (compressed, with the response headers), as Chromium reports them. Each
   address counts once on a page. The pages share one browser cache, so each file is downloaded once per run; a page's
   weight still counts every file it uses at the size it had when first fetched.
+* **A check is never a visit.** The checker's browsers answer analytics hits themselves (Google Analytics `collect`
+  requests and Cloudflare Web Analytics' `/cdn-cgi/rum` beacon, `ANALYTICS_HIT` in `src/site-checks/browser.ts`) with
+  an empty 204, so the hundreds of pages a run loads aren't recorded as visitors; the analytics scripts still download
+  and count toward a page's weight.
 * **Third-party files count.** Google's tag script costs a classroom the same bandwidth as the site's own. A finding
   about someone else's file says so ("from another site (www.googletagmanager.com)", `detail.thirdParty`), and the
   page-level findings mark them "(third-party)", so it is clear the fix is to drop or defer that service rather than

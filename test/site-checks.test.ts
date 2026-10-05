@@ -280,7 +280,21 @@ describe('games', () => {
 
   test('a game that opens and shows something passes', () => {
     assert.deepEqual(gameFindings(game()), []);
-    assert.deepEqual(gameFindings(game({ embed: false, blank: null })), []);
+    // A game that opens in its own tab works, but without the Vault player's bar: a warning, nothing else.
+    assert.deepEqual(codes(gameFindings(game({ embed: false, blank: null }))), ['warn:game.own-tab']);
+  });
+
+  test('games that get away from the Vault player and its bar are warnings, never failures', () => {
+    const away = (escapes: GameLoad['escapes'], g: Partial<GameLoad> = {}) => gameFindings(game({ escapes, ...g }));
+    // It sent the whole tab to its own site: the player (and anything about it) is gone, so that is the one finding.
+    const busted = away([{ how: 'navigated', url: 'https://game.example/' }], { hasContent: false, blank: null });
+    assert.deepEqual(codes(busted), ['warn:game.leaves-player']);
+    assert.match(busted[0].message, /^Wake takes the whole tab away from Vault to https:\/\/game\.example\/, leaving the player$/);
+    assert.deepEqual(codes(away([{ how: 'window', url: 'https://game.example/popup' }])), ['warn:game.leaves-player']);
+    const launcher = away([{ how: 'launcher', url: 'https://game.example/play', text: 'Play now' }]);
+    assert.deepEqual(codes(launcher), ['warn:game.launcher']);
+    assert.match(launcher[0].message, /launcher in the Vault player: “Play now” opens the game in a new tab/);
+    assert.ok([...busted, ...launcher].every((f) => f.check === 'games' && f.level === 'warn'));
   });
 
   test('a game that can’t be reached, refuses the frame, or opens empty fails, with one finding', () => {
@@ -293,7 +307,7 @@ describe('games', () => {
   });
 
   test('a game whose site refuses the checker is unverified, not broken', () => {
-    assert.deepEqual(codes(gameFindings(game({ embed: false, status: 403, hasContent: false, blank: null }))), ['warn:game.unverified']);
+    assert.deepEqual(codes(gameFindings(game({ embed: false, status: 403, hasContent: false, blank: null }))), ['warn:game.own-tab', 'warn:game.unverified']);
     assert.deepEqual(codes(gameFindings(game({ status: 429 }))), ['warn:game.unverified']);
   });
 

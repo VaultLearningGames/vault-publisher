@@ -32,6 +32,13 @@ second try.
 * Warning: the game is still one flat colour after loading (`blank`); it asks for files of its own that don't arrive
   (the first `gameMissingListed` = 5 are listed, the rest counted; its calls to someone else's statistics service
   aren't); or its site refuses the checker (HTTP 401, 403, 429…), which says nothing about a visitor.
+* **Without the Vault player's bar** (all warnings: the game may still play fine, but the visitor loses Vault's bar,
+  its fullscreen and close buttons and its way back):
+  * `game.own-tab`: Play opens the game in its own tab (its listing has embed off, or its site refuses to be framed).
+  * `game.leaves-player`: in the player, the game takes the whole tab to its own site (frame-busting), or opens a
+    window of its own (`window.open`, recorded even when the checker's popup blocker stops it).
+  * `game.launcher`: what the player shows is a launcher, a visible link or button worded like Play, Start or Launch
+    that opens the game in a new tab or over the whole page (`target=_blank` / `_top`).
 * **Each page plays its own game** (with `--catalog PORTAL`, as the workflow runs it). Game pages name their listing in
   `<meta name="vault:game">`; the check compares every page's Play address with what that listing plays in the
   portal's public catalog (`/v1/catalog`), ignoring a trailing slash or `index.html`.

@@ -193,7 +193,11 @@ export interface GameLoad {
   blank: boolean | null;              // after settling, the game's area is one flat colour; null when not measured
   ms: number | null;                  // until the game's document finished loading; null: it never did in time
   resources: ResourceSeen[];          // what the game asked for
+  // Ways the game left the Vault player (and its bar): it sent the whole tab elsewhere, opened a window of its own, or
+  // showed a launcher whose Play button opens the real game in a new tab.
+  escapes?: GameEscape[];
 }
+export interface GameEscape { how: 'navigated' | 'window' | 'launcher'; url: string; text?: string }
 
 export interface PageText { path: string; text: string }
 
@@ -471,6 +475,18 @@ export function gameFindings(game: GameLoad): RawFinding[] {
   // What the details table shows for every game finding: which game, how it is opened, and what it answered.
   const about = { game: short(name, 120), embed: game.embed, status: game.status, error: game.error, ms: game.ms };
   const broken = (code: string, message: string) => { add('games', { level: 'fail', code, target: game.url || game.page, message, detail: about }); return out; };
+  // Without the Vault player's bar (all warnings: the game may still be fine to play).
+  if (!game.embed) {
+    add('games', { level: 'warn', code: 'game.own-tab', target: game.url, message: `${name} opens in its own tab, without the Vault player's bar (its listing has embed off, or its site refuses to be shown in a frame)`, detail: about });
+  }
+  for (const e of game.escapes ?? []) {
+    const message = e.how === 'navigated' ? `${name} takes the whole tab away from Vault to ${short(e.url, 100)}, leaving the player`
+      : e.how === 'window' ? `${name} opens a window of its own (${short(e.url, 100)}), outside the Vault player`
+      : `${name} shows a launcher in the Vault player: “${e.text ?? ''}” opens the game in a new tab (${short(e.url, 100)}), without the Vault bar`;
+    add('games', { level: 'warn', code: `game.${e.how === 'launcher' ? 'launcher' : 'leaves-player'}`, target: game.url || game.page, message, detail: { ...about, how: e.how, to: e.url, text: e.text ?? null } });
+  }
+  // A game that took the whole tab away can't be looked at in the player any more: that warning is the finding.
+  if (game.escapes?.some((e) => e.how === 'navigated')) return out;
   if (game.error) return broken('game.failed', `${name} doesn't load ${where}: ${game.error}`);
   // A game's site that refuses the checker (bot protection) may still let a visitor in.
   if (game.status !== null && REFUSED.has(game.status)) {

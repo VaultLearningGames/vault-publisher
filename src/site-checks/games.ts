@@ -2,7 +2,7 @@
 // what happened as a GameLoad.
 import type { Browser, Frame, Page } from 'playwright';
 import { VIEWPORTS } from '../site-checks.ts';
-import type { GameLoad } from '../site-checks.ts';
+import type { GameEscape, GameLoad } from '../site-checks.ts';
 import { inFrame, newContext, watchRequests } from './browser.ts';
 import type { HostGuard, Seen } from './browser.ts';
 import { hasVisibleContent } from './inpage.ts';
@@ -70,15 +70,63 @@ async function until(done: () => boolean, ms: number, stop: { now: boolean }): P
   return false;
 }
 
+// Inside the game's frame: visible links, buttons and forms that would open somewhere else in a new tab or over the whole
+// page, worded like a way into the game (Play, Start, Launch…). A game whose page in the player is only a launcher.
+export function launchers(): { url: string; text: string }[] {
+  const away = new Set(['_blank', '_top', '_parent', '_new']);
+  const shown = (el: Element) => { const r = el.getBoundingClientRect(); const st = getComputedStyle(el); return r.width > 4 && r.height > 4 && st.visibility !== 'hidden' && st.display !== 'none'; };
+  const out: { url: string; text: string }[] = [];
+  for (const el of document.querySelectorAll('a[href], form[action], button[formtarget], input[formtarget]')) {
+    const target = (el.getAttribute('target') ?? el.getAttribute('formtarget') ?? '').toLowerCase();
+    if (!away.has(target) || !shown(el)) continue;
+    const text = ((el as HTMLElement).innerText || (el as HTMLInputElement).value || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (!/\b(play|start|launch|open|begin|enter|go|continue|run|full ?screen)\b/i.test(text)) continue;
+    out.push({ url: (el as HTMLAnchorElement).href || (el as HTMLFormElement).action || '', text });
+  }
+  return out.slice(0, 3);
+}
+
 async function openInPlayer(env: GameEnv, c: Extract<GameCandidate, { embed: true }>): Promise<GameLoad> {
   const game = blank(c);
+  const escapes: GameEscape[] = [];
+  game.escapes = escapes;
   const ctx = await newContext(env.browser, { viewport: { width: laptop.width, height: laptop.height }, userAgent: UA }, env.guard);
   try {
+    // A game asking for a window of its own, even when the browser's popup blocker stops it (a visitor's may not).
+    await ctx.exposeBinding('__vaultCheckWindow', ({ frame }, url: string) => {
+      if (frame === frame.page().mainFrame()) return;           // the site itself, not the game
+      const abs = (() => { try { return new URL(url || 'about:blank', frame.url()).href; } catch { return String(url); } })();
+      if (!escapes.some((e) => e.how === 'window' && e.url === abs)) escapes.push({ how: 'window', url: abs });
+    });
+    await ctx.addInitScript(() => {
+      const open = window.open;
+      window.open = function (this: Window, ...args: Parameters<Window['open']>) {
+        try { (window as unknown as { __vaultCheckWindow?: (u: string) => void }).__vaultCheckWindow?.(String(args[0] ?? '')); } catch { /* the checker isn't listening */ }
+        return open.apply(this, args);
+      } as Window['open'];
+    });
     const page = await ctx.newPage();
     const watch = watchRequests(page);
     try { await page.goto(env.origin + c.page, { timeout: LOAD_MS, waitUntil: 'load' }); } catch (e) { return { ...game, error: `the page ${c.page} didn't load: ${shortError(e)}` }; }
     const button = page.locator('a[data-vault-play]').first();
     if (!(await button.count())) return game;
+    // From Play on: the tab leaving the game's page (frame-busting), or a window of the game's own.
+    const here = page.url().split('#')[0];
+    page.on('framenavigated', (f) => {
+      if (f !== page.mainFrame()) return;
+      const u = f.url();
+      if (u.split('#')[0] !== here && !escapes.some((e) => e.how === 'navigated')) escapes.push({ how: 'navigated', url: u });
+    });
+    ctx.on('page', (p) => {
+      const e: GameEscape = { how: 'window', url: p.url() };
+      escapes.push(e);
+      p.waitForLoadState('domcontentloaded', { timeout: 10_000 }).then(() => {
+        e.url = p.url();
+        // The same window, also seen through window.open below: once is enough.
+        const twin = escapes.findIndex((x) => x !== e && x.how === 'window' && x.url === e.url);
+        if (twin >= 0) escapes.splice(twin, 1);
+      }, () => {});
+    });
     const clicked = Date.now();
     try { await button.click({ timeout: 5000 }); } catch { await button.evaluate((el) => (el as HTMLElement).click()).catch(() => {}); }
     const handle = await page.waitForSelector('.vault-player.is-open iframe.vault-player__frame', { state: 'attached', timeout: 5000 }).catch(() => null);
@@ -109,6 +157,10 @@ async function openInPlayer(env: GameEnv, c: Extract<GameCandidate, { embed: tru
         const shot = await page.locator('.vault-player__stage').screenshot({ timeout: 10_000 }).catch(() => null);
         game.blank = shot ? await isBlank(env.scratch, shot) : null;
         game.hasContent = dom === true || game.blank === false || (dom === null && game.blank === null);
+        if (!escapes.some((e) => e.how === 'navigated')) {
+          const found = await withTimeout(frame.evaluate(launchers), 10_000, 'looking for a launcher').catch(() => []);
+          for (const l of found) escapes.push({ how: 'launcher', url: l.url, text: l.text });
+        }
       }
     }
     return game;

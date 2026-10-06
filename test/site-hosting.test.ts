@@ -138,6 +138,30 @@ describe('the static hosting files of the site', () => {
     assert.throws(() => redirectsFile([...SITE, 'game-cards/pearl-diver/index.html'], CARDS), /the build has a page at that address/);
   });
 
+  test('a CDN build opened outside the player goes to its page with the player open', () => {
+    const cdn = [
+      { from: '/fieldday/wake/', to: '/wake' },
+      { from: '/fieldday/yardgames/bacteria/', to: '/pearl' },
+      { from: '/fieldday/wake/', to: '/wake' },                    // listed twice: one line
+    ];
+    const r = redirectsFile(SITE, CARDS, cdn);
+    const lines = r.text.split('\n').filter((l) => l.startsWith('/cdn/'));
+    // Exact addresses, the folder and its index.html: no "*", which would stop Cloudflare matching the encoded lines.
+    assert.deepEqual(lines, [
+      '/cdn/fieldday/wake/ /wake#play 302',
+      '/cdn/fieldday/wake/index.html /wake#play 302',
+      '/cdn/fieldday/yardgames/bacteria/ /pearl#play 302',
+      '/cdn/fieldday/yardgames/bacteria/index.html /pearl#play 302',
+    ]);
+    assert.ok(!r.text.includes('*'), 'no placeholder anywhere in _redirects');
+    assert.equal(r.cdn, 2);
+    assert.ok(!redirectsFile(SITE, CARDS).text.includes('/cdn/'), 'no CDN games: no /cdn/ lines at all');
+    assert.throws(() => redirectsFile(SITE, CARDS, [{ from: '/fieldday/wake/', to: '/nope' }]), /the build has no such page/);
+    assert.throws(() => redirectsFile(SITE, CARDS, [{ from: '/fieldday/wake', to: '/wake' }]), /not a CDN folder/);
+    assert.throws(() => redirectsFile(SITE, CARDS, [{ from: '/a b/', to: '/wake' }]), /not a CDN folder/);
+    assert.throws(() => redirectsFile(SITE, CARDS, [{ from: '/x/', to: '/wake' }, { from: '/x/', to: '/pearl' }]), /two games play it/);
+  });
+
   test('more pages than Cloudflare allows redirects for: the slash 301s are left to the hosting, the rest stays', () => {
     const pages = Array.from({ length: MAX_STATIC_REDIRECTS }, (_, i) => `g${i}/index.html`);
     const r = redirectsFile([...SITE, ...pages], CARDS);
@@ -158,12 +182,12 @@ describe('the static hosting files of the site', () => {
     writeFileSync(join(dir, 'card-redirects.json'), JSON.stringify(CARDS));
     const withRobots = [...SITE, 'robots.txt'].sort();
     const r = await writeHostingFiles(dir, { indexHost: 'vaultlearninggames.org' });
-    assert.deepEqual(r, { files: withRobots.length, headerRules: 8, cards: 2, rewrites: 3, slashes: 8, skippedSlashes: false });
+    assert.deepEqual(r, { files: withRobots.length, headerRules: 8, cards: 2, cdn: 0, rewrites: 3, slashes: 8, skippedSlashes: false });
     assert.equal(readFileSync(join(dir, '_headers'), 'utf8'), headersFile(withRobots, { indexHost: 'vaultlearninggames.org' }));
     assert.equal(readFileSync(join(dir, '_redirects'), 'utf8'), redirectsFile(withRobots, CARDS).text);
     assert.equal(readFileSync(join(dir, 'robots.txt'), 'utf8'), robotsFile({ indexHost: 'vaultlearninggames.org' }));
     // The list of card redirects is read, and never published.
-    assert.equal(readFileSync(join(dir, '.assetsignore'), 'utf8'), 'card-redirects.json\n.DS_Store\n');
+    assert.equal(readFileSync(join(dir, '.assetsignore'), 'utf8'), 'card-redirects.json\ncdn-redirects.json\n.DS_Store\n');
     // A second run sees the same site: the hosting's own files are not part of it.
     assert.deepEqual(await listFiles(dir), withRobots);
     assert.deepEqual(await writeHostingFiles(dir, { indexHost: 'vaultlearninggames.org' }), r);

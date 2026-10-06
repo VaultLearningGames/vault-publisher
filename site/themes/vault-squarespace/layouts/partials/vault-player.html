@@ -467,6 +467,15 @@
       .catch(function () { scan('/game-cards?format=json'); });
   }
 
+  // Campaign tags on this page's address (utm_source=... from a partner's link, or the redirect from a game's old
+  // address) go on to the game, so its own analytics can tell where a play came from, not just "Vault". A tag the
+  // game's URL already has is kept.
+  function forwardUtm(url) {
+    new URLSearchParams(location.search).forEach(function (v, k) {
+      if (/^utm_/.test(k) && !url.searchParams.has(k)) url.searchParams.set(k, v);
+    });
+  }
+
   function wire(root) {
     var links = (root || document).querySelectorAll('a[href]');
     for (var j = 0; j < links.length; j++) {
@@ -477,6 +486,7 @@
       if (url.host === location.host || !/^https?:$/.test(url.protocol)) continue;
       // A game that opens in a new tab keeps its link; the Play gate still checks it fits first (the click handler).
       if (url.hash === '#noembed' || NO_EMBED.some(function (p) { return url.href.indexOf(p) === 0; })) { a.setAttribute('data-vault-tab', ''); continue; }
+      forwardUtm(url);
       var i = games.push(url.href) - 1;
       a.setAttribute('data-vault-play', i);
       a.setAttribute('href', '#play');

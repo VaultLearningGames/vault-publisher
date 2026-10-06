@@ -93,6 +93,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `POST /v1/admin/releases/approve` · `promote` | Approve staging build as release; make current / roll back |
 | | `POST /v1/admin/game-checks` | Post availability-check results |
 | | `POST /v1/admin/site-checks` | A finished [site checks](#site-checks) run from the check-site workflow (`scripts/check-site.ts --out`): validated, counts recomputed, kept (latest 60) → `{ id, counts, url }` |
+| | `POST /v1/admin/site-builds` | A website build, from the deploy workflow once the site is published: `{ catalog_at, slugs, source? }` (the catalog's `generated_at` and its games). Listings published or taken off after the newest build's catalog show *Publishing to the site* / *Publishing changes* / *Coming off the site* in the portal → `{ id, catalog_at, games }` |
 | | `GET /v1/admin/listings` · `POST /v1/admin/listings/{import,migrate-images,move,update}` · `GET`/`POST /v1/admin/image-variants` | [Admin tasks](#admin-tasks): the Vault-admin listing operations, for workflows |
 | | `GET /v1/releases/:studio/:game[/check]` | Read-only: a game's releases, or pre-flight check of a release run |
 | | `GET /v1/catalog` | Public: site listings, studios, featured games |
@@ -480,7 +481,10 @@ longer where the site is edited or deployed from. Details of the theme: [site/RE
 * **When listings change** (published, edited, taken off the site, featured) the site must be rebuilt, though no
   code changed: **Actions → Deploy (portal and site) → Run workflow**, choose the system and tick *Rebuild the site
   only*, or `gh workflow run deploy.yml -f environment=staging -f site_only=true`. It builds and publishes the site
-  and doesn't touch the portal.
+  (about two minutes) and doesn't touch the portal. Each deploy that publishes the site then reports the catalog it
+  was built from to the portal (`POST /v1/admin/site-builds`); until a build includes a listing's latest publish, the
+  studio's Games list, the game page and Vault → Game Catalog show it as *Publishing to the site* (or *Publishing
+  changes*, *Coming off the site*), and the game page links Vault staff to the rebuild.
 * **Addresses built in scripts** must be absolute (`absURL`): a preview is served from the portal, and only addresses
   in HTML attributes and CSS `url()` are rewritten to the site.
 

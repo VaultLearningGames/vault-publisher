@@ -582,6 +582,28 @@ export function createApp(deps: AppDeps) {
     return c.json({ id: runId, counts: run.counts, url: `${deps.portal.baseUrl.replace(/\/+$/, '')}/vault/site-checks/${runId}` });
   });
 
+  // A website build, from the deploy workflow once the site is published: the time of the catalog it was built from
+  // (its generated_at) and the listings in it. Listings changed after that show "Publishing to the site" in the portal
+  // until a newer build reports (src/portal/listings.ts, siteSync). Body: { catalog_at, slugs, source? }.
+  app.post('/v1/admin/site-builds', async (c) => {
+    const id = await admin(c);
+    const body = await jsonBody(c);
+    const at = body.catalog_at;
+    if (typeof at !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/.test(at) || Number.isNaN(Date.parse(at))) {
+      fail(400, 'catalog_at must be the catalog’s generated_at, e.g. 2026-10-06T20:40:00.000Z');
+    }
+    if (Date.parse(at) > Date.now() + 5 * 60_000) fail(400, 'catalog_at is in the future');
+    const slugs = body.slugs;
+    if (!Array.isArray(slugs) || slugs.length > 5000 || !slugs.every((x) => typeof x === 'string' && x.length <= 200)) {
+      fail(400, 'slugs must be the catalog’s game slugs');
+    }
+    const source = typeof body.source === 'string' && /^https:\/\/\S+$/.test(body.source) ? body.source.slice(0, 500) : null;
+    const by = `github:${id.actor}`;
+    const buildId = db.addSiteBuild(at, slugs as string[], source, by);
+    db.audit(by, 'site_builds.post', at, { build: buildId, games: (slugs as string[]).length, source });
+    return c.json({ id: buildId, catalog_at: at, games: (slugs as string[]).length });
+  });
+
   // The README's dashboard: one badge per check, one for the latest run and one for when it ran, as shields.io
   // endpoint JSON (public; counts only). A check's badge comes from the most recent run that included it, so a
   // run of one check by hand doesn't blank the others. Worked out once per run, not once per badge.

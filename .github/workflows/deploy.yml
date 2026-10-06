@@ -247,3 +247,24 @@ jobs:
         (cd cloudflare/site && ./node_modules/.bin/wrangler deploy --env "$TARGET" --message "${GITHUB_SHA::12}, run $GITHUB_RUN_ID") | tee "$log"
         grep -q "Uploaded $SITE_WORKER " "$log" || { echo "::error::wrangler did not publish to $SITE_WORKER"; exit 1; }
         { echo "Site published to the Worker \`$SITE_WORKER\`:"; grep -E "Uploaded $SITE_WORKER |Version ID" "$log" | sed 's/^/- /'; } >> "$GITHUB_STEP_SUMMARY"
+
+    # Tells this system's portal what the site now shows: the catalog this build was made from (its generated_at) and
+    # its games. Listings published or taken off after that catalog show "Publishing to the site" (or "Coming off the
+    # site") in the portal until a newer build reports (POST /v1/admin/site-builds). The site is out either way, so a
+    # portal that can't take the report is a warning, and one without the route yet (404) a notice.
+    - name: Tell the portal what the site shows
+      if: ${{ vars.SITE_WORKER != '' }}
+      env:
+        VAULT_PORTAL: ${{ vars.PORTAL_URL }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        body=$(jq -c --arg source "$RUN_URL" '{catalog_at: .generated_at, slugs: [.games[].slug], source: $source}' site/data/catalog.json)
+        token=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=vault-publisher" | jq -r .value)
+        res=$(curl -sS -w '\n%{http_code}' -X POST "${VAULT_PORTAL%/}/v1/admin/site-builds" \
+          -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data-binary "$body")
+        code=$(echo "$res" | tail -1); json=$(echo "$res" | sed '$d')
+        if [ "$code" = 404 ]; then echo "::notice::$VAULT_PORTAL doesn't take site build reports yet"; exit 0; fi
+        if [ "$code" != 200 ]; then echo "::warning::Reporting the site build to $VAULT_PORTAL failed (HTTP $code): $(echo "$json" | jq -r .error 2>/dev/null || echo "$json")"; exit 0; fi
+        echo "Site build reported to the portal: $(echo "$json" | jq -r '"catalog \(.catalog_at), \(.games) games"')" | tee -a "$GITHUB_STEP_SUMMARY"

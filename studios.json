@@ -28,5 +28,14 @@
     "repositories": [
       { "name": "VaultLearningGames/hosted-transformation-quest", "id": "679805874" }
     ]
+  },
+  {
+    "slug": "tc-columbia",
+    "name": "Teachers College, Columbia University",
+    "github_owner": "",
+    "github_owner_id": "vault:tc-columbia",
+    "repositories": [
+      { "name": "VaultLearningGames/hosted-studio-beats-empire", "id": "1315554370" }
+    ]
   }
 ]

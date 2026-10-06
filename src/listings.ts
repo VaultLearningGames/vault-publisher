@@ -31,13 +31,21 @@ export interface ListingFields {
   // default (hugo.toml params.play). Below it, Play explains what's needed instead of starting the game (Vault staff set it).
   min_width: number | null;
   min_height: number | null;
+  // The game's own Google Analytics 4 measurement id ("G-XXXXXXXXXX"), if its makers want its plays in their own
+  // property too; besides its studio's (studios.ga_measurement_id) and Vault's. '' for none.
+  ga_measurement_id: string;
 }
 
 export const EMPTY_LISTING: ListingFields = {
   title: '', short_description: '', about: '', makers: [], grades: [], subjects: [], topics: [], standards: [],
   related_curriculum: '', gameplay_video: '', hero_image: '', thumb_image: '', screenshots: [],
   play_source: 'url', play_url: '', cdn_path: '', embed: true, fit: '', min_width: null, min_height: null,
+  ga_measurement_id: '',
 };
+
+// A Google Analytics 4 measurement id, as typed ("g-abc123 " → "G-ABC123"); '' stays ''. isGaMeasurementId checks one.
+export const gaMeasurementId = (v: unknown) => (typeof v === 'string' ? v.trim().toUpperCase().slice(0, 40) : '');
+export const isGaMeasurementId = (s: string) => /^G-[A-Z0-9]{4,15}$/.test(s);
 
 // Fields only Vault staff set; a studio member's save or preview leaves them as they are.
 export const VAULT_ONLY = ['fit', 'min_width', 'min_height'] as const;
@@ -105,6 +113,7 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
     fit: pick('fit', str(input.fit, 60).replace(/\s+/g, '')),
     min_width: pick('min_width', minSize(input.min_width)),
     min_height: pick('min_height', minSize(input.min_height)),
+    ga_measurement_id: pick('ga_measurement_id', gaMeasurementId(input.ga_measurement_id)),
   };
 }
 
@@ -122,6 +131,7 @@ export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady
     if (!isMinSize(v)) out.push(`The minimum play ${name} must be a whole number of pixels from ${MIN_SIZE_RANGE.min} to ${MIN_SIZE_RANGE.max}, or empty for the site’s default.`);
   }
   for (const g of f.grades) if (!(GRADES as readonly string[]).includes(g)) out.push(`Unknown grade band “${g}”.`);
+  if (f.ga_measurement_id && !isGaMeasurementId(f.ga_measurement_id)) out.push('The Google Analytics measurement ID must look like G-XXXXXXXXXX (GA4: Admin → Data streams → the web stream).');
   if (f.play_source === 'cdn' && !opts.cdnReady) out.push('To be hosted on the Vault CDN, the game needs a CDN game with a current release.');
   if (opts.forPublish) {
     if (!f.title) out.push('Add a title.');
@@ -144,13 +154,13 @@ export const FIELD_LABEL: Record<keyof ListingFields, string> = {
   subjects: 'Subjects', topics: 'Topics', standards: 'Standards', related_curriculum: 'Related curriculum',
   gameplay_video: 'Gameplay video', hero_image: 'Hero image', thumb_image: 'Thumbnail', screenshots: 'Screenshots',
   play_source: 'Hosted by', play_url: 'Play URL', cdn_path: 'CDN folder', embed: 'Opens in', fit: 'Player fit',
-  min_width: 'Minimum play width', min_height: 'Minimum play height',
+  min_width: 'Minimum play width', min_height: 'Minimum play height', ga_measurement_id: 'Google Analytics',
 };
 
 // The public catalog entry for a published listing. `cdn` is the linked game's current production URL and release,
 // if it has one; the listing's cdn_path is added to the URL.
 export function catalogEntry(
-  l: { slug: string; studio_slug: string; studio_name: string; studio_website?: string | null; published_at: string | null; updated_at: string },
+  l: { slug: string; studio_slug: string; studio_name: string; studio_website?: string | null; studio_ga?: string | null; published_at: string | null; updated_at: string },
   f: ListingFields,
   cdn: { url: string; release: string } | null,
 ) {
@@ -176,6 +186,9 @@ export function catalogEntry(
       min_width: f.min_width ?? null,
       min_height: f.min_height ?? null,
     },
+    // The makers' own GA4 properties the site also sends this game's page views and plays to: the game's, then its
+    // studio's (docs/analytics.md, "Studios' own Google Analytics"). Vault's own property isn't listed here.
+    analytics: { google: [...new Set([f.ga_measurement_id, l.studio_ga ?? ''].filter(isGaMeasurementId))] },
     published_at: l.published_at,
   };
 }

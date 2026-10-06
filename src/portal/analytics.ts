@@ -367,6 +367,21 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     return view(ov, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio) });
   }
 
+  // Which of the makers' own GA4 properties also get these page views and plays (the catalog's analytics.google: the
+  // game's measurement id, then its studio's), and where GA shows who plays where. Studio pages and game tabs.
+  function ownGa(s: Studio, l: ListingRow | null): Html {
+    const game = l?.published?.ga_measurement_id || '';
+    const pending = !!l && (l.draft.ga_measurement_id || '') !== game;
+    const ids = [...(game ? [html`<span class="mono">${game}</span> (this game)`] : []),
+      ...(s.ga_measurement_id && s.ga_measurement_id !== game ? [html`<span class="mono">${s.ga_measurement_id}</span> (${s.name})`] : [])];
+    const where = 'In GA4, Reports → User attributes → Demographic details shows where people play by country and city; Realtime shows who is playing now.';
+    const set = html`Set one on the <a href="/s/${s.slug}/members#studio">Members page</a> (every ${s.name} game)${l ? html` or this game’s Site listing` : ''}.`;
+    return html`<div class="card small" style="margin-bottom:16px"><h2>Your own Google Analytics</h2>
+      ${ids.length ? html`<p>Page views and plays ${l ? 'of this game' : `of ${s.name}’s games`} on vaultlearninggames.org also go to ${ids.map((x, i) => html`${i ? ' and ' : ''}${x}`)}. ${where}</p>`
+        : html`<p class="muted">None yet: only Vault’s analytics (below) count these plays. Add a GA4 measurement ID to get them, with country and city, in your own property. ${set}</p>`}
+      ${pending ? html`<p class="small muted">This game’s Google Analytics ID was changed in its listing; it applies once Vault publishes the listing and the site is rebuilt.</p>` : ''}</div>`;
+  }
+
   app.get('/vault/analytics', async (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isStaff(u)) return h.denied(c, 'Only Vault staff can see this page.');
@@ -383,7 +398,7 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     const body = scope.games!.length
       ? await render(u, scope, queryOf(c), `/s/${s.slug}/analytics`, cat)
       : html`<div class="card"><p class="muted">None of this studio’s games are on the site yet, so there are no plays to show. Analytics count plays from a game’s page on vaultlearninggames.org.</p></div>`;
-    return h.page(c, 'Analytics', html`${head('Analytics', sub)}${body}`, { studio: s, active: 'studio-analytics' });
+    return h.page(c, 'Analytics', html`${head('Analytics', sub)}${ownGa(s, null)}${body}`, { studio: s, active: 'studio-analytics' });
   });
 
   // The realtime card's contents, for the page's script to refresh every minute.
@@ -409,7 +424,7 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     async gameTab(u: User, s: Studio, l: ListingRow | null, c: Parameters<typeof queryOf>[0]): Promise<Html> {
       if (!l) return html`<div class="card"><p class="muted">This game isn’t on the site, so there are no plays to show. Analytics count plays from a game’s page on vaultlearninggames.org.</p></div>`;
       const body = await render(u, { game: l.slug }, queryOf(c), `/s/${s.slug}/g/${l.slug}?tab=analytics`);
-      return html`${l.published ? '' : html`<p class="small muted">This game isn’t published on the site yet.</p>`}${body}`;
+      return html`${l.published ? '' : html`<p class="small muted">This game isn’t published on the site yet.</p>`}${ownGa(s, l)}${body}`;
     },
   };
 }

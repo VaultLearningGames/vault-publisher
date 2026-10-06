@@ -72,6 +72,31 @@ domain and the same game page addresses. So, with standard fields only (no custo
 A custom range is at most three years (and its comparison as long again); the Data API's reports aren't limited by the property's data-retention setting (only explorations are). Locally, `GA_FAKE=history node scripts/dev-portal.ts` shows a property with page
 views and no play events.
 
+## Studios' own Google Analytics
+
+A studio, and each of its games, can have its own GA4 property get the game pages' page views and plays as well
+(Vault's own property and the portal's pages above are unchanged):
+
+* **A studio's**: studio admins set its **GA4 measurement ID** (`G-…`) on its Members page
+  (`POST /portal/api/s/STUDIO/google-analytics`; `studios.ga_measurement_id`, migration v18). It applies to every
+  game of the studio on the site.
+* **A game's**: the listing field `ga_measurement_id` (the editor's *Analytics* section), reviewed and published
+  like the rest of the listing.
+* **The catalog** gives each game `analytics: { google: [game's, studio's] }` (valid ids only, each once).
+* **The site** (`partials/sq/head.html`) configures them on the game's page after Vault's own
+  `gtag('config', …)`. The page view and the play events (`sq/js/vault-play-analytics.js`) name no destination
+  (`send_to`), so gtag sends each of them to every configured property: the studio's property gets `page_view`,
+  `play_start`, `play_end`, … with the same parameters and the `vault_game` user property, and GA4 adds the
+  visitor's country and city itself (GA4: **Reports → User attributes → Demographic details**, and **Realtime**).
+  Only builds that send Vault's analytics (production) configure them, so staging and listing previews send nothing
+  to studios either.
+* **The portal**: a studio's Analytics page and each game's Analytics tab say which of their own properties get the
+  plays, or how to add one. The figures there are still Vault's property's.
+
+A measurement ID has to be GA4's (`G-` and 4–15 letters or digits); Universal Analytics ids (`UA-…`) stopped
+collecting in 2023 and are refused. Studios own what their properties collect; Vault's privacy policy should say
+that game pages may also send these events to the game's makers.
+
 ## How the portal reads it
 
 `src/analytics/`: `reports.ts` builds the Data API v1beta request bodies and reads the answers (pure; dates are the

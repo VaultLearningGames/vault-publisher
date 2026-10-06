@@ -10,6 +10,7 @@ import type { AppDeps } from '../app.ts';
 import { fail, jsonBody } from '../app.ts';
 import { DEFAULT_SUPPORT_URL, SUPPORT_CHANNEL } from '../config.ts';
 import { studioWebsite, type Build, type Game, type Membership, type Release, type StudioRole, type Studio, type User, type VaultRole } from '../db.ts';
+import { gaMeasurementId, isGaMeasurementId } from '../listings.ts';
 import { headersFor, isSafeFilePath, isVersionName, sanitizeRefName } from '../paths.ts';
 import { escape, html, raw, type Html } from './html.ts';
 import { listingPieces, registerListingPages, type ListingRow } from './listings.ts';
@@ -785,6 +786,21 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       db.audit(actor(u), 'studio.website', s.slug, { from: s.website || null, to: website });
     }
     return c.json({ ok: true, website });
+  });
+
+  // A studio's own Google Analytics 4 measurement id: the site also sends its games' page views and plays there.
+  // Body: { ga_measurement_id } ('' clears it).
+  app.post('/portal/api/s/:studio/google-analytics', async (c) => {
+    const u = apiUser(c);
+    const s = db.studioBySlug(c.req.param('studio'));
+    if (!s || !canManageMembers(u, s)) fail(403, 'Only studio admins can change the studio’s Google Analytics.');
+    const id = gaMeasurementId((await jsonBody(c)).ga_measurement_id) || null;
+    if (id && !isGaMeasurementId(id)) fail(400, 'The measurement ID must look like G-XXXXXXXXXX (in GA4: Admin → Data streams → your web stream).');
+    if ((s.ga_measurement_id || null) !== id) {
+      db.setStudioGa(s.id, id);
+      db.audit(actor(u), 'studio.google_analytics', s.slug, { from: s.ga_measurement_id || null, to: id });
+    }
+    return c.json({ ok: true, ga_measurement_id: id });
   });
 
   registerListingPages(app, listingHelpers);

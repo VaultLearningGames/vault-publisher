@@ -345,13 +345,13 @@ describe('a repository assigned to a studio (its organization belongs to another
   });
 });
 
-describe('the url_monitors migration is v15 (and site_checks v16, site_builds v17 after it)', () => {
+describe('the url_monitors migration is v15 (and site_checks v16, site_builds v17, studios’ GA v18 after it)', () => {
   const version = (db: Db) => (db.sqlite.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
   const tables = (db: Db) => (db.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
 
-  test('a new database ends at v17 with both tables', () => {
+  test('a new database ends at v18 with both tables', () => {
     const db = new Db(':memory:');
-    assert.equal(version(db), 17);
+    assert.equal(version(db), 18);
     assert.ok(tables(db).includes('studio_repositories') && tables(db).includes('url_monitors'));
   });
 
@@ -364,11 +364,11 @@ describe('the url_monitors migration is v15 (and site_checks v16, site_builds v1
       const studio = main.studioBySlug('ucalgary')!;
       main.bindRepository({ repository_id: '555', repository: 'VaultLearningGames/hosted-quest', studio_id: studio.id, created_by: 'user:boss', source: 'portal' });
       const game = main.createGame(studio.id, 'quest', 'VaultLearningGames/hosted-quest', '555');
-      main.sqlite.exec('DROP TABLE site_builds; ALTER TABLE listings DROP COLUMN site_changed_at; DROP TABLE site_checks; DROP TABLE url_monitors; PRAGMA user_version = 14;'); // as origin/main leaves it
+      main.sqlite.exec('ALTER TABLE studios DROP COLUMN ga_measurement_id; DROP TABLE site_builds; ALTER TABLE listings DROP COLUMN site_changed_at; DROP TABLE site_checks; DROP TABLE url_monitors; PRAGMA user_version = 14;'); // as origin/main leaves it
       main.sqlite.close();
       for (let boot = 0; boot < 2; boot++) { // the upgrade, then an ordinary restart
         const db = new Db(path);
-        assert.equal(version(db), 17);
+        assert.equal(version(db), 18);
         assert.equal(db.studioByRepositoryId('555')!.slug, 'ucalgary');
         const m = saveMonitor(db, { game_id: game.id, url: 'https://games.example.org/quest/', files_from: 'crawl', list_url: null, by: 'user:boss' });
         assert.equal(monitorsForStudio(db, studio.id)[0].id, m.id);

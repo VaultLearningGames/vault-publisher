@@ -108,6 +108,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `POST /portal/api/s/:studio/uploads` + `/:id/finalize` | A zip uploaded in the portal: presigned PUTs per file, then record the test build |
 | | `POST /portal/api/s/:studio/monitors[/:id/check\|delete]` | URL monitors: register (and copy now), check now, stop |
 | | `POST /portal/api/s/:studio/members[?]` | Studio members add/remove, website URL |
+| | `POST /portal/api/s/:studio/google-analytics` | The studio's own GA4 measurement ID (studio admins); the site also sends its games' page views and plays there ([docs/analytics.md](docs/analytics.md#studios-own-google-analytics)) |
 | | `POST /portal/api/vault/…` | Vault-admin: studios CRUD, a studio's `repositories` (add/remove), users/roles, listings import, featured |
 | Public (token) | `GET /_preview/:token/` · `GET /v1/listing-previews/:token` | An unsaved listing preview, rendered as the website's page (the second answers the preview's JSON to `Accept: application/json`) |
 

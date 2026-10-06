@@ -186,6 +186,12 @@ export function listingPieces(h: ListingHelpers) {
         ${vault ? txt('fit', 'Player fit (Vault)', 'For fixed-size games: page width, page height, x, y, width, height of the game on that page.') : ''}
         ${minSizeField(f, vault && edit)}
       </div>
+      <h2 style="margin-top:18px">Analytics</h2>
+      <div class="fields">
+        ${txt('ga_measurement_id', 'Google Analytics (this game)', s.ga_measurement_id
+          ? `Optional: this game’s own GA4 measurement ID (G-…). Its page views and plays already go to ${s.name}’s ${s.ga_measurement_id} (set on the studio’s Members page) and to Vault’s analytics.`
+          : `Optional: a GA4 measurement ID (G-…) to also send this game’s page views and plays to, besides Vault’s analytics. A studio-wide one is set on the studio’s Members page.`)}
+      </div>
       ${edit ? html`<div class="form-foot">${saveControls(vault, l)}${previewButtons(api, h.deps.previewSites)}${err}</div>` : ''}
     </form>`;
     const coming = siteSync(l);

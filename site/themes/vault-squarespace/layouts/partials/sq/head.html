@@ -54,9 +54,13 @@
        gtag.js (about 170 KB) loads only once the page has loaded and the browser is idle (at most 2 s later), so it
        is never part of what a visitor waits for on a slow school connection. Until then gtag() queues into dataLayer,
        which gtag.js reads when it arrives: the page_view (config) and anything sent meanwhile (the play events of
-       sq/js/vault-play-analytics.js) are sent then. */}}
+       sq/js/vault-play-analytics.js) are sent then.
+       A game page also configures its makers' own GA4 properties (the catalog game's analytics.google: the game's and
+       its studio's measurement ids, set in the portal), so its page view and play events, which name no destination,
+       reach those properties too (docs/analytics.md, "Studios' own Google Analytics"). Only in a build that sends
+       Vault's own analytics, so staging and previews send nothing to studios either. */}}
 {{- with site.Params.analytics.google }}
-<script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', {{ . }});
+<script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', {{ . }});{{ with $.Params.analytics }}{{ range .google }}gtag('config', {{ . }});{{ end }}{{ end }}
 (function (id) {
   function load() { var s = document.createElement('script'); s.async = true; s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(id); document.head.appendChild(s); }
   function idle() { if (window.requestIdleCallback) requestIdleCallback(load, { timeout: 2000 }); else setTimeout(load, 200); }

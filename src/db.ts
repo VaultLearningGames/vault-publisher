@@ -291,6 +291,11 @@ const MIGRATIONS = [
     created_at  TEXT NOT NULL
   );
   `,
+  // v18: a studio's own Google Analytics 4 measurement id ("G-…"), set by its admins: the site also sends its games'
+  // page views and plays there (catalog games' analytics.google). NULL: none.
+  `
+  ALTER TABLE studios ADD COLUMN ga_measurement_id TEXT;
+  `,
 ];
 
 export interface Listing {
@@ -328,6 +333,7 @@ export interface Studio {
   github_owner: string;
   github_owner_id: string;
   website?: string | null;
+  ga_measurement_id?: string | null;   // the studio's own GA4 measurement id ("G-…"); null for none
   source?: StudioSource | null;
 }
 
@@ -650,6 +656,11 @@ export class Db {
   // doesn't fill it in again.
   setStudioWebsite(studioId: number, website: string | null) {
     this.sqlite.prepare('UPDATE studios SET website = ? WHERE id = ?').run(website ?? '', studioId);
+  }
+
+  // Set (or clear, with null) a studio's own Google Analytics 4 measurement id (already checked).
+  setStudioGa(studioId: number, id: string | null) {
+    this.sqlite.prepare('UPDATE studios SET ga_measurement_id = ? WHERE id = ?').run(id, studioId);
   }
 
   // studio-websites.json ({ "slug": "https://…" }): fills in websites for studios that exist and have never had one
@@ -1086,7 +1097,7 @@ export class Db {
     const { draft_json, published_json, ...rest } = r as Record<string, unknown> & { draft_json: string; published_json: string | null };
     return { ...(rest as unknown as Listing & { studio_slug: string; studio_name: string; studio_website: string | null }), draft: JSON.parse(draft_json), published: published_json ? JSON.parse(published_json) : null };
   }
-  private readonly LISTING_SELECT = `SELECT l.*, s.slug AS studio_slug, s.name AS studio_name, s.website AS studio_website FROM listings l JOIN studios s ON s.id = l.studio_id`;
+  private readonly LISTING_SELECT = `SELECT l.*, s.slug AS studio_slug, s.name AS studio_name, s.website AS studio_website, s.ga_measurement_id AS studio_ga FROM listings l JOIN studios s ON s.id = l.studio_id`;
 
   createListing(studioId: number, slug: string, draft: ListingFields, by: string) {
     const t = now();

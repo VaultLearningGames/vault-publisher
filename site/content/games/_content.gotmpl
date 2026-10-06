@@ -28,6 +28,7 @@
       "subjects" .subjects
       "topics" .topics
       "makers" .makers
+      "analytics" .analytics
   -}}
   {{- $legacy := index (hugo.Data.squarespace.games.games | default dict) .slug -}}
   {{- $params = merge $params (dict "catalog_slug" .slug "legacy" ($legacy | default dict)) -}}

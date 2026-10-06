@@ -192,11 +192,16 @@ export function registerPeople(app: Hono, h: Helpers) {
             <label class="field"><span class="lab">Website</span><input name="website" type="url" maxlength="300" value="${s.website ?? ''}" placeholder="https://example.org" autocomplete="off"></label>
             <button class="btn">Save</button>${errSlot}</form>` : ''}
           <p class="muted">vaultlearninggames.org links ${s.name} to it wherever it’s named as a game’s maker.</p>
+          <table class="kv"><tbody><tr><th>Google Analytics</th><td>${s.ga_measurement_id ? html`<span class="mono">${s.ga_measurement_id}</span>` : html`<span class="muted">none</span>`}</td></tr></tbody></table>
+          ${manage ? html`<form data-api="/portal/api/s/${s.slug}/google-analytics" data-then="reload" class="inline-form">
+            <label class="field"><span class="lab">GA4 measurement ID</span><input name="ga_measurement_id" maxlength="40" value="${s.ga_measurement_id ?? ''}" placeholder="G-XXXXXXXXXX" autocomplete="off" spellcheck="false"></label>
+            <button class="btn">Save</button>${errSlot}</form>` : ''}
+          <p class="muted">Your own Google Analytics 4 property: every ${s.name} game page on vaultlearninggames.org also sends its page views and plays there, so you see who plays and where (GA4 → Reports → User attributes → Demographic details: country, city). A game can add its own ID on its Site listing. Vault’s analytics are unchanged.</p>
           ${h.isVaultAdmin(u) ? html`<p><a href="/vault/studios/${s.slug}">Edit the studio’s name and GitHub organization</a></p>` : ''}</div>
         <div class="card small"><h2>Roles</h2><ul class="tight">
         <li><b>Viewer</b>: sees the studio’s games, test versions and releases.</li>
         <li><b>Maintainer</b>: also edits site listings, requests releases and switches between approved releases.</li>
-        <li><b>Studio admin</b>: also manages members and the studio’s website. A studio always keeps at least one studio admin who has signed in.</li>
+        <li><b>Studio admin</b>: also manages members, the studio’s website and its Google Analytics. A studio always keeps at least one studio admin who has signed in.</li>
         <li><b>Vault staff</b> release, promote and roll back; Vault admins manage every studio’s members.</li></ul></div></div></div>`;
     return h.page(c, 'Members', body, { studio: s, active: 'members' });
   });

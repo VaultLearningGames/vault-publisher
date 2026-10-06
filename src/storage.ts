@@ -21,19 +21,21 @@ export interface BrowseResult {
   next?: string;                                           // continuation token for the next page
 }
 
+// Calls that move release files take an optional AbortSignal: releases.ts gives each one a timeout, and aborts what
+// a switch still has in flight when another call takes over its lock, so a hung request can't hold a game's releases.
 export interface Storage {
   // A URL the caller can PUT one file to, valid for `expiresIn` seconds. The caller must send
   // exactly the headers returned by requestHeaders() for the same ObjectHeaders.
   presignPut(key: string, headers: ObjectHeaders, expiresIn: number): Promise<string>;
-  list(prefix: string): Promise<StoredObject[]>;
-  deleteKeys(keys: string[]): Promise<void>;
+  list(prefix: string, signal?: AbortSignal): Promise<StoredObject[]>;
+  deleteKeys(keys: string[], signal?: AbortSignal): Promise<void>;
   // One folder level under `prefix` (like a file browser), up to 1000 entries per page.
   browse(prefix: string, token?: string): Promise<BrowseResult>;
   // Streams one object's body; used to copy approved builds from staging to production.
-  get(key: string): Promise<Readable | Uint8Array>;
-  put(key: string, body: Readable | Uint8Array, size: number, headers: ObjectHeaders): Promise<void>;
+  get(key: string, signal?: AbortSignal): Promise<Readable | Uint8Array>;
+  put(key: string, body: Readable | Uint8Array, size: number, headers: ObjectHeaders, signal?: AbortSignal): Promise<void>;
   // Server-side copy within the bucket (nothing passes through this service), replacing the headers.
-  copy(srcKey: string, dstKey: string, headers: ObjectHeaders): Promise<void>;
+  copy(srcKey: string, dstKey: string, headers: ObjectHeaders, signal?: AbortSignal): Promise<void>;
 }
 
 // Folder-style listing over a plain key→size map; used by in-memory storage in tests and the dev preview.
@@ -91,12 +93,13 @@ export function createR2Storage(opts: {
       return getSignedUrl(client, command, { expiresIn, signableHeaders });
     },
 
-    async list(prefix) {
+    async list(prefix, signal) {
       const objects: StoredObject[] = [];
       let token: string | undefined;
       do {
         const page = await client.send(
           new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
+          { abortSignal: signal },
         );
         for (const item of page.Contents ?? []) {
           if (item.Key) objects.push({ key: item.Key, size: item.Size ?? 0 });
@@ -119,13 +122,13 @@ export function createR2Storage(opts: {
       };
     },
 
-    async get(key) {
-      const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    async get(key, signal) {
+      const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }), { abortSignal: signal });
       if (!res.Body) throw new Error(`empty body for ${key}`);
       return res.Body as Readable;
     },
 
-    async put(key, body, size, headers) {
+    async put(key, body, size, headers, signal) {
       await client.send(
         new PutObjectCommand({
           Bucket: bucket,
@@ -136,10 +139,11 @@ export function createR2Storage(opts: {
           ContentEncoding: headers.contentEncoding,
           CacheControl: headers.cacheControl,
         }),
+        { abortSignal: signal },
       );
     },
 
-    async copy(srcKey, dstKey, headers) {
+    async copy(srcKey, dstKey, headers, signal) {
       await client.send(
         new CopyObjectCommand({
           Bucket: bucket,
@@ -150,10 +154,11 @@ export function createR2Storage(opts: {
           ContentEncoding: headers.contentEncoding,
           CacheControl: headers.cacheControl,
         }),
+        { abortSignal: signal },
       );
     },
 
-    async deleteKeys(keys) {
+    async deleteKeys(keys, signal) {
       for (let i = 0; i < keys.length; i += 1000) {
         const batch = keys.slice(i, i + 1000);
         await client.send(
@@ -161,6 +166,7 @@ export function createR2Storage(opts: {
             Bucket: bucket,
             Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
           }),
+          { abortSignal: signal },
         );
       }
     },

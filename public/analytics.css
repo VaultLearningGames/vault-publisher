@@ -1,26 +1,62 @@
 /* Analytics pages (src/portal/analytics.ts). Colors are portal.css's tokens, so light and dark both work. */
-.ga-top > h2 { align-items: center; }
-.ga-top > h2 > span { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
-.ga-tot { color: var(--ink); font-weight: 600; }
-.ga-range a { min-width: 52px; text-align: center; }
+.ga-head { align-items: center; }
+.ga-head h2 { font: inherit; font-size: 14px; margin: 0; }
+.ga-tot { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* The date range picker: a button, and a panel like Google Analytics' (presets on the left, dates and Compare). */
+.ga-dates { position: relative; font-weight: 400; }
+.ga-dates > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  padding: 6px 30px 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 13px; position: relative; }
+.ga-dates > summary::-webkit-details-marker { display: none; }
+.ga-dates > summary::after { content: ""; position: absolute; right: 12px; top: 50%; margin-top: -5px; width: 6px; height: 6px;
+  border: solid var(--ink-3); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.ga-dates[open] > summary::after { margin-top: -1px; transform: rotate(-135deg); }
+.ga-dates > summary:hover, .ga-dates[open] > summary { border-color: var(--s1); }
+.ga-dl { color: var(--ink-3); }
+.ga-vs { color: var(--ink-3); font-size: 12px; }
+.ga-dp { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; display: grid; grid-template-columns: minmax(190px, auto) minmax(260px, 1fr);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 16px 40px -16px rgba(0,0,0,.45); width: max-content; max-width: min(640px, calc(100vw - 32px)); }
+.ga-presets { margin: 0; padding: 6px 0; border: 0; border-right: 1px solid var(--line); max-height: min(560px, 70vh); overflow-y: auto; }
+.ga-presets legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.ga-preset { display: flex; align-items: center; gap: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+.ga-preset input { position: absolute; opacity: 0; pointer-events: none; }
+.ga-preset:hover { background: var(--hover); }
+.ga-preset:has(input:checked) { background: var(--hover); color: var(--s1); font-weight: 600; box-shadow: inset 3px 0 0 var(--s1); }
+.ga-preset:has(input:focus-visible) { outline: 2px solid var(--s1); outline-offset: -2px; }
+.ga-preset:first-of-type { border-bottom: 1px solid var(--line-2); margin-bottom: 4px; }
+.ga-custom { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
+.ga-days { display: flex; align-items: flex-end; gap: 8px; }
+.ga-days label { display: flex; flex-direction: column; gap: 4px; color: var(--ink-3); font-size: 12px; flex: 1; }
+.ga-days input { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; color-scheme: light dark; }
+.ga-days > span { padding-bottom: 8px; color: var(--ink-3); }
+.ga-custom p { margin: 0; }
+.ga-cmpl { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.ga-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; }
+
+.ga-warn { margin: 0 0 12px; padding: 8px 12px; font-size: 13px; line-height: 1.45; background: var(--wait-soft); border-left: 3px solid var(--wait); border-radius: 6px; }
 
 .ga-chart { padding: 6px 0 0 40px; }
 .ga-plot { position: relative; height: 220px; border-bottom: 1px solid var(--axis); }
 .ga-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; display: block; }
 .ga-yl { position: absolute; left: -40px; width: 34px; text-align: right; transform: translateY(50%); font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .ga-chart .gridl { stroke: var(--grid); stroke-width: 1; }
-.ga-cur { fill: none; stroke: var(--s1); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
-.ga-cur.ga-part { stroke-dasharray: 1 5; }
-.ga-prev { fill: none; stroke: var(--axis); stroke-width: 1.5; stroke-dasharray: 5 4; stroke-linejoin: round; }
-.ga-area { fill: var(--s1); opacity: .12; }
+.ga-cur { fill: none; stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
+.ga-prev { fill: none; stroke-width: 1.5; stroke-dasharray: 5 4; stroke-linejoin: round; stroke-linecap: round; opacity: .55; }
+.ga-cur.s1, .ga-prev.s1 { stroke: var(--s1); } .ga-cur.s2, .ga-prev.s2 { stroke: var(--s2); } .ga-cur.s3, .ga-prev.s3 { stroke: var(--s3); }
 .ga-hit { fill: transparent; }
 .ga-hit:hover { fill: var(--ink); opacity: .06; }
 .ga-x { position: relative; height: 22px; margin-top: 4px; }
 .ga-x span { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
-.ga-legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--ink-2); margin-top: 2px; }
-.ga-legend .k { display: inline-block; width: 18px; height: 0; border-top: 2.5px solid var(--s1); margin-left: 8px; }
-.ga-legend .k:first-child { margin-left: 0; }
-.ga-legend .k.prev { border-top: 2px dashed var(--axis); }
+.ga-legend { display: flex; align-items: flex-start; gap: 6px 22px; flex-wrap: wrap; color: var(--ink-2); margin: 0 0 10px; font-size: 13px; }
+.ga-lk { display: grid; grid-template-columns: 18px auto 1fr; column-gap: 6px; align-items: baseline; justify-content: start; }
+.ga-lk .ga-tot { font-size: 16px; }
+.ga-lk .d { grid-column: 2 / -1; font-size: 12px; color: var(--ink-3); }
+.ga-lk .d:empty { display: none; }
+.ga-lk .d.up { color: var(--ok); } .ga-lk .d.down { color: var(--bad); }
+.ga-legend .k { display: inline-block; width: 18px; height: 0; border-top: 2.5px solid var(--s1); align-self: center; }
+.ga-legend .k.s2 { border-top-color: var(--s2); } .ga-legend .k.s3 { border-top-color: var(--s3); }
+.ga-legend .k.prev { border-top: 2px dashed var(--ink-3); }
+.ga-lprev { display: flex; gap: 6px; align-self: center; color: var(--ink-3); }
 
 .ga .kpis.ga-k3, .kpis.ga-k3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 16px; }
 .kpis.ga-k3 .kpi:nth-child(n) { border-top: 0; grid-column: auto; }
@@ -50,9 +86,12 @@ h3.sec small { font: 400 12.5px var(--body); }
 
 @media (max-width: 1100px) { .ga-split { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 860px) {
-  .ga-top > h2 { flex-direction: column; align-items: stretch; }
-  .ga-range { align-self: flex-start; max-width: 100%; overflow-x: auto; }
-  .ga-range a { min-width: 0; padding: 6px 9px; }
+  .ga-head { flex-direction: column; align-items: stretch; }
+  .ga-x span.alt { display: none; }
+  .ga-dp { position: static; margin-top: 6px; grid-template-columns: minmax(0, 1fr); width: auto; max-width: none; box-shadow: none; }
+  .ga-presets { border-right: 0; border-bottom: 1px solid var(--line); max-height: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ga-preset:first-of-type { grid-column: 1 / -1; }
+  .ga-days { flex-wrap: wrap; }
   .ga-plot { height: 170px; }
   .kpis.ga-k3 .kpi { padding: 10px 10px; }
   .kpis.ga-k3 .kpi .v { font-size: 20px; }

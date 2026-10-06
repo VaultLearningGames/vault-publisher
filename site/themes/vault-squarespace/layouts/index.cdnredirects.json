@@ -1,0 +1,16 @@
+{{- /* cdn-redirects.json: each game played from the Vault CDN, with its address there (path only) and its page. Read
+       by src/site-hosting.ts, which writes "/cdn<path>* <page>#play" into the hosting's _redirects. A Cloudflare
+       rule on the CDN sends a browser that opens a game's build directly (address bar, new tab, another site's
+       iframe) to /cdn<path> here, so a build is only ever played inside the Vault player. The file itself is not
+       published. */ -}}
+{{- $out := slice -}}
+{{- range (hugo.Data.catalog.games | default slice) -}}
+  {{- $p := .play | default dict -}}
+  {{- if and (eq $p.source "cdn") $p.url -}}
+    {{- $from := (urls.Parse $p.url).Path -}}
+    {{- with site.GetPage (printf "/games/%s" .slug) -}}
+      {{- $out = $out | append (dict "from" $from "to" (strings.TrimSuffix "/" .RelPermalink)) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $out | jsonify -}}

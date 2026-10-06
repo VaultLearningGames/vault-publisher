@@ -63,5 +63,13 @@ disableKinds = ['taxonomy', 'term', 'rss']
   isPlainText = true
   notAlternative = true
 
+# Each CDN game's address on the CDN and its page (themes/vault-squarespace/layouts/index.cdnredirects.json). For
+# the hosting's _redirects (/cdn/<path> -> the page with the player open); not published.
+[outputFormats.cdnredirects]
+  mediaType = 'application/json'
+  baseName = 'cdn-redirects'
+  isPlainText = true
+  notAlternative = true
+
 [outputs]
-  home = ['html', 'cardredirects']
+  home = ['html', 'cardredirects', 'cdnredirects']

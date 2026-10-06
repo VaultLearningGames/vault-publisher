@@ -30,6 +30,13 @@ on:
         description: Extra Unity command-line parameters passed to game-ci.
         type: string
         default: ''
+      build-method:
+        description: >-
+          game-ci buildMethod: "Class.Method" of an editor script in the project that builds the player.
+          Empty: game-ci's own build script, which uses C# 7 and so doesn't compile in projects older than
+          Unity 2018.3 (C# 4/6); such a project brings its own (see Atom Touch's Assets/Editor/VaultWebGLBuild.cs).
+        type: string
+        default: ''
       retention-days:
         type: number
         default: 14
@@ -106,6 +113,7 @@ jobs:
         unityVersion: ${{ steps.names.outputs.version }}
         targetPlatform: ${{ inputs.target-platform }}
         customParameters: ${{ inputs.custom-parameters }}
+        buildMethod: ${{ inputs.build-method }}
 
     # game-ci writes to build/<platform>/<platform>/.
     - uses: actions/upload-artifact@v7

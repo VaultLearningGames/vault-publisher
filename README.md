@@ -245,6 +245,12 @@ tag is the best thing to release, because a branch can change after it was teste
 
 ## Games on the site and on the CDN
 
+> **CDN builds only play inside the Vault player, and that is enforced by a Cloudflare Redirect Rule kept only in the
+> dashboard** (zone `vaultlearninggames.org` → Rules → Redirect Rules, "CDN builds only play in the Vault player"), not
+> by anything in this repository. It has a PBS Wisconsin exception so PBS players get Jo Wilder and Emerald without the
+> Vault bar. Before changing how a game's build is reached, read
+> [docs/setup.md, "Cloudflare rules that live only in the dashboard"](docs/setup.md#cloudflare-rules-that-live-only-in-the-dashboard).
+
 Each studio's **Games** page in the portal lists every game it has on Vault. A game is its **site listing** (what
 vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, connected:
 

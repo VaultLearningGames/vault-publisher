@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  allowList, annotations, assetFindings, checkBadge, CHECKS, runBadge, whenBadge, finishRun, fingerprint, gameFindings, groupFindings, hrefProblem, issueMarkdown,
+  allowList, annotations, assetFindings, checkBadge, CHECKS, runBadge, whenBadge, finishRun, fingerprint, gameFindings, gameIdentityFindings, groupFindings, hrefProblem, issueMarkdown,
   DETAIL_VERSION, elementFor, fitRun, LIMITS, linkFinding, MAX_FINDINGS, MAX_PAGES_LISTED, MAX_PER_CHECK, parseRun, parseStart, performanceFindings, responsiveFindings, runFails, serviceFindings, SERVICES, runMarkdown, spellingFindings, wordsOf,
   type CheckSummary, type Dictionary, type GameLoad, type LinkProbe, type LinkSeen, type PageLoad, type RawFinding, type ResourceSeen, type ServiceSeen, type SiteCheckRun, type ViewSeen,
 } from '../src/site-checks.ts';
@@ -280,7 +280,21 @@ describe('games', () => {
 
   test('a game that opens and shows something passes', () => {
     assert.deepEqual(gameFindings(game()), []);
-    assert.deepEqual(gameFindings(game({ embed: false, blank: null })), []);
+    // A game that opens in its own tab works, but without the Vault player's bar: a warning, nothing else.
+    assert.deepEqual(codes(gameFindings(game({ embed: false, blank: null }))), ['warn:game.own-tab']);
+  });
+
+  test('games that get away from the Vault player and its bar are warnings, never failures', () => {
+    const away = (escapes: GameLoad['escapes'], g: Partial<GameLoad> = {}) => gameFindings(game({ escapes, ...g }));
+    // It sent the whole tab to its own site: the player (and anything about it) is gone, so that is the one finding.
+    const busted = away([{ how: 'navigated', url: 'https://game.example/' }], { hasContent: false, blank: null });
+    assert.deepEqual(codes(busted), ['warn:game.leaves-player']);
+    assert.match(busted[0].message, /^Wake takes the whole tab away from Vault to https:\/\/game\.example\/, leaving the player$/);
+    assert.deepEqual(codes(away([{ how: 'window', url: 'https://game.example/popup' }])), ['warn:game.leaves-player']);
+    const launcher = away([{ how: 'launcher', url: 'https://game.example/play', text: 'Play now' }]);
+    assert.deepEqual(codes(launcher), ['warn:game.launcher']);
+    assert.match(launcher[0].message, /launcher in the Vault player: “Play now” opens the game in a new tab/);
+    assert.ok([...busted, ...launcher].every((f) => f.check === 'games' && f.level === 'warn'));
   });
 
   test('a game that can’t be reached, refuses the frame, or opens empty fails, with one finding', () => {
@@ -293,7 +307,7 @@ describe('games', () => {
   });
 
   test('a game whose site refuses the checker is unverified, not broken', () => {
-    assert.deepEqual(codes(gameFindings(game({ embed: false, status: 403, hasContent: false, blank: null }))), ['warn:game.unverified']);
+    assert.deepEqual(codes(gameFindings(game({ embed: false, status: 403, hasContent: false, blank: null }))), ['warn:game.own-tab', 'warn:game.unverified']);
     assert.deepEqual(codes(gameFindings(game({ status: 429 }))), ['warn:game.unverified']);
   });
 
@@ -315,6 +329,54 @@ describe('games', () => {
     assert.deepEqual(codes(gameFindings(game({ ms: null }))), ['warn:game.slow']);
     assert.deepEqual(codes(gameFindings(game({ resources: [res({ bytes: 900_000_000 })] }))), ['warn:game.heavy']);
     assert.deepEqual(gameFindings(game({ resources: [res({ bytes: 49_000_000 })] })), []);
+  });
+});
+
+describe('each page plays its own game', () => {
+  const CDN = 'https://cdn.vaultlearninggames.org/fieldday';
+  const catalog = [
+    { slug: 'jo-wilder-and-the-capitol-case', title: 'Jo Wilder and the Capitol Case', play: `${CDN}/jowilder/` },
+    { slug: 'headlines-and-high-water', title: 'Headlines and High Water', play: `${CDN}/headlines/` },
+    { slug: 'earthquake', title: 'Earthquake', play: `${CDN}/yardgames/earthquake/` },
+    { slug: 'water-cycle-game', title: 'Water Cycle Game', play: `${CDN}/yardgames/water/` },
+    { slug: 'blockly-games', title: 'Blockly Games', play: 'https://blockly.games/' },
+  ];
+  const pg = (path: string, game: string, wired: string[], newTab: string[] = []) => ({ path, game, plays: { wired, newTab } });
+  const pages = [
+    pg('/jowilder', 'jo-wilder-and-the-capitol-case', [`${CDN}/jowilder/`]),
+    pg('/headlines-and-high-water', 'headlines-and-high-water', [`${CDN}/headlines`]),         // no trailing slash: the same address
+    pg('/earthquake', 'earthquake', [`${CDN}/yardgames/earthquake/index.html`]),             // nor index.html
+    pg('/water-cycle-game', 'water-cycle-game', [`${CDN}/yardgames/water/`]),                // one CDN game, two listings, two folders
+    pg('/blockly-games', 'blockly-games', [], ['https://blockly.games/']),                   // opens in a new tab
+    pg('/about', '', []),                                                                    // not a game page
+  ];
+
+  test('a site where every page plays its own game has no findings', () => {
+    assert.deepEqual(gameIdentityFindings(catalog, pages), []);
+  });
+
+  test('two listings playing the same game fail (Headlines once played Jo Wilder)', () => {
+    const wrong = catalog.map((g) => (g.slug === 'headlines-and-high-water' ? { ...g, play: `${CDN}/jowilder/` } : g));
+    const f = gameIdentityFindings(wrong, pages);
+    const shared = f.find((x) => x.code === 'game.shared-play')!;
+    assert.equal(shared.level, 'fail');
+    assert.equal(shared.check, 'games');
+    assert.match(shared.message, /“Jo Wilder and the Capitol Case” and “Headlines and High Water” all play the same game/);
+    assert.equal(shared.detail?.games, 'jo-wilder-and-the-capitol-case, headlines-and-high-water');
+    // The page built before the change still plays Headlines: it doesn't match its listing either.
+    assert.ok(f.some((x) => x.code === 'game.wrong-play' && x.page === '/headlines-and-high-water'));
+  });
+
+  test('a page whose Play opens something other than its listing fails', () => {
+    const f = gameIdentityFindings(catalog, [pg('/headlines-and-high-water', 'headlines-and-high-water', [`${CDN}/jowilder/`])]);
+    assert.deepEqual(f.map((x) => `${x.level}:${x.code} ${x.page}`), ['fail:game.wrong-play /headlines-and-high-water']);
+    assert.match(f[0].message, /^Headlines and High Water's page plays .*jowilder.*, but its listing plays .*headlines/);
+    assert.deepEqual(gameIdentityFindings(catalog, [pg('/blockly-games', 'blockly-games', [], ['https://example.org/other'])]).map((x) => x.code), ['game.wrong-play']);
+  });
+
+  test('a game page for a listing the catalog doesn’t have is a warning; pages without Play aren’t judged', () => {
+    assert.deepEqual(gameIdentityFindings(catalog, [pg('/gone', 'gone-game', ['https://x.example/'])]).map((x) => `${x.level}:${x.code}`), ['warn:game.unlisted-page']);
+    assert.deepEqual(gameIdentityFindings(catalog, [pg('/earthquake', 'earthquake', [])]), []);
   });
 });
 

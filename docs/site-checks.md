@@ -32,6 +32,22 @@ second try.
 * Warning: the game is still one flat colour after loading (`blank`); it asks for files of its own that don't arrive
   (the first `gameMissingListed` = 5 are listed, the rest counted; its calls to someone else's statistics service
   aren't); or its site refuses the checker (HTTP 401, 403, 429…), which says nothing about a visitor.
+* **Without the Vault player's bar** (all warnings: the game may still play fine, but the visitor loses Vault's bar,
+  its fullscreen and close buttons and its way back):
+  * `game.own-tab`: Play opens the game in its own tab (its listing has embed off, or its site refuses to be framed).
+  * `game.leaves-player`: in the player, the game takes the whole tab to its own site (frame-busting), or opens a
+    window of its own (`window.open`, recorded even when the checker's popup blocker stops it).
+  * `game.launcher`: what the player shows is a launcher, a visible link or button worded like Play, Start or Launch
+    that opens the game in a new tab or over the whole page (`target=_blank` / `_top`).
+* **Each page plays its own game** (with `--catalog PORTAL`, as the workflow runs it). Game pages name their listing in
+  `<meta name="vault:game">`; the check compares every page's Play address with what that listing plays in the
+  portal's public catalog (`/v1/catalog`), ignoring a trailing slash or `index.html`.
+  * Failure (`game.shared-play`): two or more listings play the same address, so at most one of them is right
+    (Headlines and High Water once played Jo Wilder's build). The Yard games share one CDN game but each plays its own
+    folder, so they don't count.
+  * Failure (`game.wrong-play`): a page's Play opens something other than its listing's address: the page is stale
+    (rebuild the site) or wired to the wrong game.
+  * Warning (`game.unlisted-page`): a game page for a listing the catalog doesn't have.
 
 **Missing assets** (`assets`). Every request a page makes while it loads and is scrolled to the bottom (so lazy images
 load), at the laptop width.
@@ -81,6 +97,10 @@ How it is measured:
 * **Bytes are as sent over the network** (compressed, with the response headers), as Chromium reports them. Each
   address counts once on a page. The pages share one browser cache, so each file is downloaded once per run; a page's
   weight still counts every file it uses at the size it had when first fetched.
+* **A check is never a visit.** The checker's browsers answer analytics hits themselves (Google Analytics `collect`
+  requests and Cloudflare Web Analytics' `/cdn-cgi/rum` beacon, `ANALYTICS_HIT` in `src/site-checks/browser.ts`) with
+  an empty 204, so the hundreds of pages a run loads aren't recorded as visitors; the analytics scripts still download
+  and count toward a page's weight.
 * **Third-party files count.** Google's tag script costs a classroom the same bandwidth as the site's own. A finding
   about someone else's file says so ("from another site (www.googletagmanager.com)", `detail.thirdParty`), and the
   page-level findings mark them "(third-party)", so it is clear the fix is to drop or defer that service rather than

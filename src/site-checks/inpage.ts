@@ -19,6 +19,7 @@ export interface PageData {
   title: string;
   heading: string;
   plays: { wired: string[]; newTab: string[] };   // game addresses: opened in the site's player, and in a new tab
+  game: string;                                    // the listing a game page is for (<meta name="vault:game">), else ''
   refs: Record<string, string>;                    // address → the element that asks for it (the first one, up to 3000)
 }
 
@@ -162,7 +163,8 @@ export function collectPage(): PageData {
       if (/^https?:$/.test(u.protocol) && u.host !== location.host) plays.newTab.push(u.href);
     } catch { /* not an address */ }
   }
-  return { images, links, ids, text, title: document.title, heading: clean(document.querySelector('h1')?.textContent), plays, refs };
+  const game = document.querySelector('meta[name="vault:game"]')?.getAttribute('content')?.trim() ?? '';
+  return { images, links, ids, text, title: document.title, heading: clean(document.querySelector('h1')?.textContent), plays, refs, game };
 }
 
 // Whether the game's own document shows something.

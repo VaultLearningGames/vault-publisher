@@ -1,12 +1,12 @@
-import { beforeEach, describe, test } from 'node:test';
+import { beforeEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp } from '../src/app.ts';
+import { createApp, SWITCH_STALE_MS, type AppDeps } from '../src/app.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db } from '../src/db.ts';
 import { browseKeys, type Storage } from '../src/storage.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import type { Readable } from 'node:stream';
-import { copyRelease, makeLive } from '../src/releases.ts';
+import { copyRelease, makeLive, StorageTimeoutError } from '../src/releases.ts';
 
 class FakeStorage implements Storage {
   objects = new Map<string, number>();
@@ -17,7 +17,7 @@ class FakeStorage implements Storage {
     if (!this.objects.has(key)) throw new Error(`no such key ${key}`);
     return this.data.get(key) ?? new Uint8Array(this.objects.get(key)!);
   }
-  async put(key: string, body: Readable | Uint8Array, size: number, headers: ObjectHeaders) {
+  async put(key: string, body: Readable | Uint8Array, size: number, headers: ObjectHeaders, _signal?: AbortSignal) {
     if (this.failPutAfter-- <= 0) throw new Error('simulated R2 failure');
     const bytes = body instanceof Uint8Array ? body : new Uint8Array(Buffer.concat(await (body as Readable).toArray()));
     this.objects.set(key, size);
@@ -31,7 +31,7 @@ class FakeStorage implements Storage {
     return [...this.objects].filter(([k]) => k.startsWith(prefix)).map(([key, size]) => ({ key, size }));
   }
   async browse(prefix: string) { return browseKeys(this.objects, prefix); }
-  async copy(src: string, dst: string, headers: ObjectHeaders) {
+  async copy(src: string, dst: string, headers: ObjectHeaders, _signal?: AbortSignal) {
     if (!this.objects.has(src)) throw new Error(`no such key ${src}`);
     await this.put(dst, this.data.get(src) ?? new Uint8Array(this.objects.get(src)!), this.objects.get(src)!, headers);
   }
@@ -80,7 +80,11 @@ beforeEach(() => {
   db.syncStudios([{ slug: 'fielddaylab', name: 'Field Day Lab', github_owner: 'fielddaylab', github_owner_id: '1881825' }]); // idempotent
   storage = new FakeStorage();
   prod = new FakeStorage();
-  app = createApp({
+  app = newApp();
+});
+
+function newApp(extra: Partial<AppDeps> = {}) {
+  return createApp({
     db,
     staging: storage,
     production: prod,
@@ -92,8 +96,9 @@ beforeEach(() => {
     portal: { baseUrl: 'https://portal.test', vaultAdmins: [] },
     previewRetentionDays: 90,
     taskInvokerEmail: 'scheduler@example.iam.gserviceaccount.com',
+    ...extra,
   });
-});
+}
 
 function post(path: string, token: string | null, body?: unknown) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -415,6 +420,148 @@ describe('production releases', () => {
     prod.failPutAfter = Infinity;
     assert.equal(db.currentRelease(1)?.version, 'm3.1');
     assert.equal(new TextDecoder().decode(prod.data.get('fielddaylab/aqualab/index.html')), 'old');
+  });
+
+  // Copies of a file in the production bucket that wait until `release()` (or their signal) lets them go.
+  function holdCopies(match: (dst: string) => boolean, honourSignal = true) {
+    const real = prod.copy.bind(prod);
+    const held: { dst: string; go: () => void }[] = [];
+    let reached: () => void;
+    const first = new Promise<void>((r) => { reached = r; });
+    prod.copy = (src, dst, headers, signal) => {
+      if (!match(dst)) return real(src, dst, headers, signal);
+      return new Promise<void>((resolve, reject) => {
+        held.push({ dst, go: () => real(src, dst, headers).then(resolve, reject) });
+        const h = held[held.length - 1];
+        if (honourSignal) signal?.addEventListener('abort', () => { held.splice(held.indexOf(h), 1); reject(signal.reason); }, { once: true });
+        reached();
+      });
+    };
+    return { first, held, restore: () => { prod.copy = real; }, release: () => held.splice(0).forEach((h) => h.go()) };
+  }
+  async function twoReleases() {
+    await publishTag('m3.1');
+    await approve('m3.1');
+    await publishTag('m3.2');
+    await approve('m3.2');
+    prod.data.set('fielddaylab/aqualab/_releases/m3.1/index.html', new TextEncoder().encode('old'));
+    prod.data.set('fielddaylab/aqualab/_releases/m3.2/index.html', new TextEncoder().encode('new'));
+    prod.data.set('fielddaylab/aqualab/_releases/m3.1/Build/game.wasm.br', new TextEncoder().encode('old wasm'));
+    prod.data.set('fielddaylab/aqualab/_releases/m3.2/Build/game.wasm.br', new TextEncoder().encode('new wasm'));
+    assert.equal((await promote('m3.1')).status, 200);
+  }
+  const liveText = (rel: string) => new TextDecoder().decode(prod.data.get(`fielddaylab/aqualab/${rel}`));
+
+  test('a storage request that never answers fails the switch (and rolls it back) instead of holding the lock', async () => {
+    app = newApp({ storageTimeoutMs: 30 });
+    await twoReleases();
+    const hold = holdCopies((dst) => dst === 'fielddaylab/aqualab/Build/game.wasm.br', false); // ignores its signal too
+    const res = await promote('m3.2');
+    assert.equal(res.status, 500);
+    hold.restore();
+    assert.equal(db.currentRelease(1)?.version, 'm3.1');
+    assert.deepEqual([liveText('index.html'), liveText('Build/game.wasm.br')], ['old', 'old wasm'], 'the previous release was put back');
+    const again = await promote('m3.2');
+    assert.equal(again.status, 200, 'the lock was released, so the next call switches');
+    assert.deepEqual([liveText('index.html'), liveText('Build/game.wasm.br')], ['new', 'new wasm']);
+  });
+
+  test('a stale lock is taken over; the abandoned switch is aborted and touches nothing after that', async () => {
+    await twoReleases();
+    mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    try {
+      const hold = holdCopies((dst) => dst.startsWith('fielddaylab/aqualab/') && !dst.includes('/_releases/'));
+      const stuck = promote('m3.2');
+      await hold.first;
+      const busy = await promote('m3.2');
+      assert.equal(busy.status, 409);
+      assert.match(((await busy.json()) as any).error, /already switching versions \(started 0 s ago, last progress 0 s ago\)/);
+
+      mock.timers.tick(SWITCH_STALE_MS - 1000);
+      assert.equal((await promote('m3.1')).status, 409, 'not stale yet');
+      mock.timers.tick(2000);
+      hold.restore(); // the new owner's copies go through
+      const writes: string[] = [];
+      const put = prod.put.bind(prod);
+      prod.put = async (key, ...rest) => { writes.push(key); return put(key, ...rest); };
+      const took = await promote('m3.2');
+      assert.equal(took.status, 200);
+      assert.deepEqual(pick(await took.json(), ['current', 'previous']), { current: 'm3.2', previous: 'm3.1' });
+
+      const old = await stuck;
+      assert.equal(old.status, 409, 'the abandoned call answers that it was taken over');
+      assert.match(((await old.json()) as any).error, /taken over/);
+      assert.equal(hold.held.length, 0, 'its copy in flight was aborted, not left waiting');
+      const n = writes.length;
+      hold.release();
+      await new Promise((r) => setImmediate(r));
+      assert.equal(writes.length, n, 'and it wrote nothing more (no rollback to m3.1)');
+      assert.equal(db.currentRelease(1)?.version, 'm3.2');
+      assert.deepEqual([liveText('index.html'), liveText('Build/game.wasm.br')], ['new', 'new wasm']);
+      assert.equal(db.setting('release_live:1'), '');
+      assert.deepEqual(db.recentAudit().filter((a) => a.action === 'release.lock_takeover').map((a) => [a.actor, a.target]), [['github:dev', 'fielddaylab/aqualab/']]);
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
+  test('a switch taken over mid-way by a budgeted call (the admin task) resumes from the saved progress', async () => {
+    await twoReleases();
+    const publish = (budget_seconds?: number) => post('/v1/admin/releases/publish', 'releaser', { studio: 'fielddaylab', game: 'aqualab', version: 'm3.2', ref: 'm3.2', budget_seconds });
+    db.setSetting('release_live:1', JSON.stringify({ version: 'm3.2', done: 1 })); // an earlier round copied Build/game.wasm.br
+    await prod.copy('fielddaylab/aqualab/_releases/m3.2/Build/game.wasm.br', 'fielddaylab/aqualab/Build/game.wasm.br', { contentType: 'application/wasm', cacheControl: 'no-cache' });
+    mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    try {
+      const hold = holdCopies((dst) => dst === 'fielddaylab/aqualab/index.html');
+      const stuck = publish();
+      await hold.first;
+      mock.timers.tick(SWITCH_STALE_MS + 1);
+      hold.restore();
+      const copies: string[] = [];
+      const copy = prod.copy.bind(prod);
+      prod.copy = async (src, dst, ...rest) => { copies.push(dst); return copy(src, dst, ...rest); };
+      const res = await publish();
+      assert.equal(res.status, 200);
+      assert.deepEqual(pick(await res.json(), ['done', 'promoted', 'current']), { done: true, promoted: true, current: 'm3.2' });
+      assert.deepEqual(copies, ['fielddaylab/aqualab/index.html'], 'only what the saved progress says is left');
+      assert.equal((await stuck).status, 409);
+      assert.equal(db.setting('release_live:1'), '');
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
+  test('after one copy fails, a switch starts no more and waits for those in flight before putting the old release back', async () => {
+    const dst = new FakeStorage();
+    for (let i = 0; i < 12; i++) dst.objects.set(`s/g/_releases/v1/f${String(i).padStart(2, '0')}.js`, 1);
+    let active = 0, started = 0, peakAfterFailure = 0, failed = false;
+    const copy = dst.copy.bind(dst);
+    dst.copy = async (src, to, h, signal) => {
+      started++; active++;
+      try {
+        if (to.endsWith('f01.js')) { failed = true; throw new Error('simulated R2 failure'); }
+        await new Promise((r) => setTimeout(r, 10));
+        if (failed) peakAfterFailure = Math.max(peakAfterFailure, active);
+        return await copy(src, to, h, signal);
+      } finally { active--; }
+    };
+    await assert.rejects(makeLive(dst, 's/g/', 'v1', { concurrency: 4 }), /simulated R2 failure/);
+    assert.equal(active, 0, 'nothing is still copying when makeLive rejects');
+    assert.ok(started <= 4, `started ${started}: none after the failure`);
+    assert.ok(peakAfterFailure <= 3);
+  });
+
+  test('a storage call that never answers times out, even if the storage ignores its signal', async () => {
+    const dst = new FakeStorage();
+    dst.objects.set('s/g/_releases/v1/index.html', 1);
+    dst.copy = () => new Promise(() => {});
+    const t0 = Date.now();
+    await assert.rejects(makeLive(dst, 's/g/', 'v1', { callTimeoutMs: 20 }), (err) => err instanceof StorageTimeoutError && /did not answer copy/.test(err.message));
+    assert.ok(Date.now() - t0 < 1000);
+    const src = new FakeStorage();
+    src.objects.set('a/index.html', 1);
+    src.get = () => new Promise(() => {});
+    await assert.rejects(copyRelease({ staging: src, production: dst, srcPrefix: 'a/', dstPrefix: 'b/', callTimeoutMs: 20 }), StorageTimeoutError);
   });
 
   test('make current and rollback leave STUDIO/GAME/_vault-assets/ (uploaded listing images) untouched', async () => {

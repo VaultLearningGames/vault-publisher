@@ -89,6 +89,7 @@ export interface RunOptions {
   limit?: number;                     // visit at most this many pages (a quick run)
   paths?: string[];                   // visit only these site paths instead of discovering pages
   allowWords?: string[];              // names the spelling check should accept (game titles, studios)
+  catalog?: CatalogGame[];            // the portal's listings, for the games check's "each page plays its own game"
   services?: readonly Service[];      // the services check asks these instead of SERVICES (tests)
   guard?: boolean;                    // true: never request private or loopback addresses (the workflow does)
   concurrency?: number;               // browser pages open at once
@@ -98,6 +99,8 @@ export interface RunOptions {
   onProgress?: (p: Progress) => void;
 }
 export type Engine = (options: RunOptions) => Promise<SiteCheckRun>;
+// A listing as the portal's public catalog has it: what its game page should play.
+export interface CatalogGame { slug: string; title: string; play: string }
 
 // ---------- what the engine sees ----------
 // A request made while a page or game loaded.
@@ -190,7 +193,11 @@ export interface GameLoad {
   blank: boolean | null;              // after settling, the game's area is one flat colour; null when not measured
   ms: number | null;                  // until the game's document finished loading; null: it never did in time
   resources: ResourceSeen[];          // what the game asked for
+  // Ways the game left the Vault player (and its bar): it sent the whole tab elsewhere, opened a window of its own, or
+  // showed a launcher whose Play button opens the real game in a new tab.
+  escapes?: GameEscape[];
 }
+export interface GameEscape { how: 'navigated' | 'window' | 'launcher'; url: string; text?: string }
 
 export interface PageText { path: string; text: string }
 
@@ -468,6 +475,18 @@ export function gameFindings(game: GameLoad): RawFinding[] {
   // What the details table shows for every game finding: which game, how it is opened, and what it answered.
   const about = { game: short(name, 120), embed: game.embed, status: game.status, error: game.error, ms: game.ms };
   const broken = (code: string, message: string) => { add('games', { level: 'fail', code, target: game.url || game.page, message, detail: about }); return out; };
+  // Without the Vault player's bar (all warnings: the game may still be fine to play).
+  if (!game.embed) {
+    add('games', { level: 'warn', code: 'game.own-tab', target: game.url, message: `${name} opens in its own tab, without the Vault player's bar (its listing has embed off, or its site refuses to be shown in a frame)`, detail: about });
+  }
+  for (const e of game.escapes ?? []) {
+    const message = e.how === 'navigated' ? `${name} takes the whole tab away from Vault to ${short(e.url, 100)}, leaving the player`
+      : e.how === 'window' ? `${name} opens a window of its own (${short(e.url, 100)}), outside the Vault player`
+      : `${name} shows a launcher in the Vault player: “${e.text ?? ''}” opens the game in a new tab (${short(e.url, 100)}), without the Vault bar`;
+    add('games', { level: 'warn', code: `game.${e.how === 'launcher' ? 'launcher' : 'leaves-player'}`, target: game.url || game.page, message, detail: { ...about, how: e.how, to: e.url, text: e.text ?? null } });
+  }
+  // A game that took the whole tab away can't be looked at in the player any more: that warning is the finding.
+  if (game.escapes?.some((e) => e.how === 'navigated')) return out;
   if (game.error) return broken('game.failed', `${name} doesn't load ${where}: ${game.error}`);
   // A game's site that refuses the checker (bot protection) may still let a visitor in.
   if (game.status !== null && REFUSED.has(game.status)) {
@@ -492,6 +511,43 @@ export function gameFindings(game: GameLoad): RawFinding[] {
   const bytes = game.resources.reduce((sum, r) => sum + (r.bytes ?? 0), 0);
   if (bytes > LIMITS.gameWarnBytes) {
     add('games', { level: 'warn', code: 'game.heavy', target: game.url, message: `${name} downloads ${mb(bytes)} before it can be played`, detail: { ...about, bytes } });
+  }
+  return out;
+}
+
+// ---------- each page plays its own game ----------
+// Two listings that play the same address mean one of them plays the wrong game (Headlines and High Water once played
+// Jo Wilder's build), and a game page whose Play opens something other than its listing's address is stale or wired to
+// the wrong game. Pages are matched to listings by their <meta name="vault:game"> (the listing's slug).
+const playKey = (url: string) => { try { const u = new URL(url); return `${u.host}${u.pathname.replace(/\/(index\.html?)?$/, '')}${u.search}`.toLowerCase(); } catch { return url.trim().toLowerCase(); } };
+export interface GamePage { path: string; game: string; plays: { wired: string[]; newTab: string[] } }
+export function gameIdentityFindings(catalog: CatalogGame[], pages: GamePage[]): RawFinding[] {
+  const out: RawFinding[] = [];
+  const bySlug = new Map(catalog.map((g) => [g.slug, g]));
+  const pageOf = new Map(pages.filter((p) => p.game).map((p) => [p.game, p.path]));
+  const shared = new Map<string, CatalogGame[]>();
+  for (const g of catalog) if (g.play) shared.set(playKey(g.play), [...(shared.get(playKey(g.play)) ?? []), g]);
+  for (const games of shared.values()) {
+    if (games.length < 2) continue;
+    const names = games.map((g) => `“${g.title}”`);
+    out.push({ check: 'games', level: 'fail', code: 'game.shared-play', page: pageOf.get(games[0].slug) ?? '/', target: games[0].play,
+      message: `${names.slice(0, -1).join(', ')} and ${names.at(-1)} all play the same game; at most one of them is right`,
+      detail: { games: games.map((g) => g.slug).join(', '), play: games[0].play } });
+  }
+  for (const p of pages) {
+    const g = p.game ? bySlug.get(p.game) : undefined;
+    if (!p.game) continue;
+    if (!g) {
+      out.push({ check: 'games', level: 'warn', code: 'game.unlisted-page', page: p.path, target: p.path, message: `The page is for the game “${p.game}”, which isn't in the portal's catalog`, detail: { game: p.game } });
+      continue;
+    }
+    const opens = [...p.plays.wired.filter(Boolean), ...p.plays.newTab];
+    if (!g.play || !opens.length) continue;
+    const wrong = opens.filter((u) => playKey(u) !== playKey(g.play));
+    if (wrong.length) {
+      out.push({ check: 'games', level: 'fail', code: 'game.wrong-play', page: p.path, target: wrong[0],
+        message: `${g.title}'s page plays ${short(wrong[0])}, but its listing plays ${short(g.play)}`, detail: { game: g.slug, expected: g.play, plays: wrong.join('\n') } });
+    }
   }
   return out;
 }

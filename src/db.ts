@@ -275,6 +275,22 @@ const MIGRATIONS = [
     created_at  TEXT NOT NULL
   );
   `,
+  // v17: what the website shows. A listing's site_changed_at is when Vault last changed what it puts on the site
+  // (published it, taken it off, or moved it with its published version); site_builds records each website build: the
+  // time of the catalog it was built from and the listings that catalog had. A change after the newest build's catalog
+  // isn't on the site yet ("Publishing to the site").
+  `
+  ALTER TABLE listings ADD COLUMN site_changed_at TEXT;
+  UPDATE listings SET site_changed_at = published_at WHERE published_at IS NOT NULL;
+  CREATE TABLE site_builds (
+    id          INTEGER PRIMARY KEY,
+    catalog_at  TEXT NOT NULL,
+    slugs_json  TEXT NOT NULL,
+    source      TEXT,
+    built_by    TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+  );
+  `,
 ];
 
 export interface Listing {
@@ -290,8 +306,19 @@ export interface Listing {
   submitted_at: string | null;
   published_by: string | null;
   published_at: string | null;
+  site_changed_at: string | null;   // when Vault last changed what the site shows for it (see site_builds)
   updated_by: string;
   updated_at: string;
+}
+
+// A website build (POST /v1/admin/site-builds, from the deploy workflow): the catalog it was built from.
+export interface SiteBuild {
+  id: number;
+  catalog_at: string;     // the catalog's generated_at: changes after this aren't in the build
+  slugs: string[];        // the listings that catalog had, i.e. the games on the site after this build
+  source: string | null;  // the workflow run
+  built_by: string;
+  created_at: string;
 }
 
 export interface Studio {
@@ -1088,8 +1115,10 @@ export class Db {
   // Vault admins move a site listing to another studio. Its CDN link is dropped (CDN games belong to a studio), and
   // the caller passes the draft/published fields to keep (e.g. "Made by" renamed to the new studio).
   moveListing(id: number, studioId: number, draft: ListingFields, published: ListingFields | null, by: string) {
-    this.sqlite.prepare(`UPDATE listings SET studio_id = ?, game_id = NULL, draft_json = ?, published_json = ?, updated_by = ?, updated_at = ? WHERE id = ?`)
-      .run(studioId, JSON.stringify(draft), published ? JSON.stringify(published) : null, by, now(), id);
+    const t = now();
+    this.sqlite.prepare(`UPDATE listings SET studio_id = ?, game_id = NULL, draft_json = ?, published_json = ?, updated_by = ?, updated_at = ?,
+      site_changed_at = CASE WHEN ? IS NULL THEN site_changed_at ELSE ? END WHERE id = ?`)
+      .run(studioId, JSON.stringify(draft), published ? JSON.stringify(published) : null, by, t, published ? 'x' : null, t, id);
   }
 
   listingsForGame(gameId: number) {
@@ -1114,12 +1143,30 @@ export class Db {
   }
 
   publishListing(id: number, by: string) {
-    this.sqlite.prepare(`UPDATE listings SET published_json = draft_json, published_by = ?, published_at = ?, review = 'editing', review_note = NULL WHERE id = ?`)
-      .run(by, now(), id);
+    const t = now();
+    this.sqlite.prepare(`UPDATE listings SET published_json = draft_json, published_by = ?, published_at = ?, site_changed_at = ?, review = 'editing', review_note = NULL WHERE id = ?`)
+      .run(by, t, t, id);
   }
 
   unpublishListing(id: number) {
-    this.sqlite.prepare(`UPDATE listings SET published_json = NULL, published_by = NULL, published_at = NULL WHERE id = ?`).run(id);
+    this.sqlite.prepare(`UPDATE listings SET published_json = NULL, published_by = NULL, published_at = NULL,
+      site_changed_at = CASE WHEN published_json IS NULL THEN site_changed_at ELSE ? END WHERE id = ?`).run(now(), id);
+  }
+
+  // ---------- website builds ----------
+  addSiteBuild(catalogAt: string, slugs: string[], source: string | null, by: string): number {
+    const res = this.sqlite.prepare('INSERT INTO site_builds (catalog_at, slugs_json, source, built_by, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(catalogAt, JSON.stringify(slugs), source, by, now());
+    this.sqlite.prepare('DELETE FROM site_builds WHERE id NOT IN (SELECT id FROM site_builds ORDER BY id DESC LIMIT 50)').run();
+    return Number(res.lastInsertRowid);
+  }
+
+  // The build the site shows now: the one from the newest catalog (a slow run finishing late doesn't win).
+  lastSiteBuild(): SiteBuild | undefined {
+    const r = this.sqlite.prepare('SELECT * FROM site_builds ORDER BY catalog_at DESC, id DESC LIMIT 1').get() as Record<string, unknown> | undefined;
+    if (!r) return undefined;
+    const { slugs_json, ...rest } = r;
+    return { ...rest, slugs: JSON.parse(slugs_json as string) } as unknown as SiteBuild;
   }
 
   // ---------- game availability checks ----------

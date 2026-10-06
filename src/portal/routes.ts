@@ -374,7 +374,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       const slug = l?.slug ?? g!.slug;
       return html`<tr>
         <td class="proj"><a href="/s/${s.slug}/g/${slug}"><b>${l?.draft.title || slug}</b></a><span>${l ? html`/games/${l.slug}/` : 'not on the site'}${g ? html` · CDN <span class="mono">${g.slug}</span>` : ''}</span></td>
-        <td>${l?.published ? pill('ok', 'Published') : pill('off', 'Testing Only')}</td>
+        <td>${LP.publishing(l) || (l?.published ? pill('ok', 'Published') : pill('off', 'Testing Only'))}</td>
         <td>${LP.hosting(l, g)}${cur && !playsCdn && l ? html`<br><span class="small">${pill('ok', `CDN ${cur.version} ready`)}</span>` : ''}</td>
         <td>${g ? (builds.length ? html`<div class="refs">${shown.map((bd) => html`<a class="ref-chip ${bd.ref_type}" href="${deps.previewUrl(s, g, bd.ref_name)}" title="${bd.ref_type} · ${ago(bd.updated_at)}">${bd.ref_name}</a>`)}${builds.length > shown.length ? html`<span class="muted small">+${builds.length - shown.length}</span>` : ''}</div>` : html`<span class="muted small">No test versions</span>`)
           : html`<span class="muted small">Not on the CDN yet</span>`}</td>

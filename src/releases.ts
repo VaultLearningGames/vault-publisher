@@ -28,11 +28,59 @@ export interface CopyResult {
 }
 
 // Stop starting new copies once `deadline` (ms since the epoch) has passed; what is left is `remaining`.
+// `signal` stops a copy for good (a switch whose lock was taken over, see promoteStep in app.ts): nothing new starts,
+// the storage calls in flight are aborted, and the copy rejects with the signal's reason. Every storage call also has
+// its own timeout (`callTimeoutMs`, plus a second per MB for files that pass through this service), so a request that
+// never answers fails the copy instead of hanging it. `onProgress` is called after every storage call that completes.
 export interface Budget {
   deadline?: number;
   concurrency?: number;
+  signal?: AbortSignal;
+  callTimeoutMs?: number;
+  onProgress?: () => void;
 }
 const pastDeadline = (b: Budget) => b.deadline !== undefined && Date.now() > b.deadline;
+export const STORAGE_CALL_TIMEOUT_MS = 60_000;
+
+export class StorageTimeoutError extends Error {}
+
+// One storage call under the budget's signal and its own timeout. It rejects as soon as either fires, even if the
+// storage doesn't honour the signal it was given.
+export async function storageCall<T>(b: Budget, what: string, fn: (signal: AbortSignal) => Promise<T>, bytes = 0): Promise<T> {
+  b.signal?.throwIfAborted();
+  const ms = (b.callTimeoutMs ?? STORAGE_CALL_TIMEOUT_MS) + bytes / 1000;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(new StorageTimeoutError(`storage did not answer ${what} within ${Math.round(ms / 1000)} s`)), ms);
+  const stop = () => ctl.abort(b.signal!.reason);
+  b.signal?.addEventListener('abort', stop, { once: true });
+  try {
+    const work = fn(ctl.signal);
+    work.catch(() => {}); // it may still settle after we gave up on it
+    const result = await Promise.race([work, new Promise<never>((_, reject) => ctl.signal.addEventListener('abort', () => reject(ctl.signal.reason), { once: true }))]);
+    b.onProgress?.();
+    return result;
+  } finally {
+    clearTimeout(timer);
+    b.signal?.removeEventListener('abort', stop);
+  }
+}
+
+// Runs `work` on each item, `concurrency` at a time, starting none after the deadline. After the first failure (or
+// the signal) nothing new starts, and the error is thrown only once every item already started has settled, so a
+// caller cleaning up never races a copy still in flight. Answers the items never started.
+async function pool<T>(items: T[], b: Budget, work: (item: T) => Promise<void>): Promise<T[]> {
+  const queue = [...items];
+  let failure: { err: unknown } | undefined;
+  const next = () => (failure || b.signal?.aborted || pastDeadline(b) ? undefined : queue.shift());
+  await Promise.all(Array.from({ length: b.concurrency ?? 8 }, async () => {
+    for (let item = next(); item !== undefined; item = next()) {
+      try { await work(item); } catch (err) { failure ??= { err }; }
+    }
+  }));
+  if (failure) throw failure.err;
+  b.signal?.throwIfAborted();
+  return queue;
+}
 
 // Copies every object under `srcPrefix` in staging to `dstPrefix` in production, re-labelling each
 // file with the release cache policy. On any failure it removes what it copied, so a failed approval
@@ -48,40 +96,36 @@ export async function copyRelease(opts: Budget & {
   resume?: boolean;
 }): Promise<CopyResult & { remaining: number }> {
   const { staging, production, srcPrefix, dstPrefix } = opts;
-  const objects = await staging.list(srcPrefix);
+  const objects = await storageCall(opts, `list ${srcPrefix}`, (signal) => staging.list(srcPrefix, signal));
   if (objects.length === 0) throw new Error(`nothing in staging under ${srcPrefix}`);
   const clash = objects.map((o) => o.key.slice(srcPrefix.length)).find(isVaultPath);
   if (clash) throw new ReleaseLayoutError(`the build contains ${clash}, which would collide with the release layout (${RELEASES_DIR}, ${ASSETS_DIR} and current.json are Vault's)`);
   const total = { files: objects.length, bytes: objects.reduce((n, o) => n + o.size, 0) };
   let todo = objects;
   if (opts.resume) {
-    const there = new Map((await production.list(dstPrefix)).map((c) => [c.key, c.size]));
+    const there = new Map((await storageCall(opts, `list ${dstPrefix}`, (signal) => production.list(dstPrefix, signal))).map((c) => [c.key, c.size]));
     const wanted = new Set(objects.map((o) => dstPrefix + o.key.slice(srcPrefix.length)));
     const extra = [...there.keys()].filter((k) => !wanted.has(k));
-    if (extra.length) await production.deleteKeys(extra);
+    if (extra.length) await storageCall(opts, `delete ${extra.length} file(s) under ${dstPrefix}`, (signal) => production.deleteKeys(extra, signal));
     todo = objects.filter((o) => there.get(dstPrefix + o.key.slice(srcPrefix.length)) !== o.size);
   }
   const written: string[] = [];
-  const queue = [...todo];
   try {
-    await Promise.all(
-      Array.from({ length: opts.concurrency ?? 8 }, async () => {
-        for (let o = pastDeadline(opts) ? undefined : queue.shift(); o; o = pastDeadline(opts) ? undefined : queue.shift()) {
-          const rel = o.key.slice(srcPrefix.length);
-          const headers: ObjectHeaders = { ...headersFor(rel), cacheControl: RELEASE_CACHE };
-          const dst = dstPrefix + rel;
-          await production.put(dst, await staging.get(o.key), o.size, headers);
-          written.push(dst);
-        }
-      }),
-    );
-    if (queue.length) return { ...total, remaining: queue.length };
+    const left = await pool(todo, opts, async (o) => {
+      const rel = o.key.slice(srcPrefix.length);
+      const headers: ObjectHeaders = { ...headersFor(rel), cacheControl: RELEASE_CACHE };
+      const dst = dstPrefix + rel;
+      await storageCall(opts, `copy ${o.key}`, async (signal) => production.put(dst, await staging.get(o.key, signal), o.size, headers, signal), o.size);
+      written.push(dst);
+    });
+    if (left.length) return { ...total, remaining: left.length };
     // Verify the copy before recording the release.
-    const copied = new Map((await production.list(dstPrefix)).map((c) => [c.key, c.size]));
+    const copied = new Map((await storageCall(opts, `list ${dstPrefix}`, (signal) => production.list(dstPrefix, signal))).map((c) => [c.key, c.size]));
     const bad = objects.filter((o) => copied.get(dstPrefix + o.key.slice(srcPrefix.length)) !== o.size);
     if (bad.length) throw new Error(`${bad.length} file(s) did not copy correctly, e.g. ${bad[0].key}`);
   } catch (err) {
-    if (written.length) await production.deleteKeys(written).catch(() => {});
+    // Cleaning up has its own timeout but ignores the signal: a stopped copy still removes what it wrote.
+    if (written.length) await storageCall({ callTimeoutMs: opts.callTimeoutMs }, `delete ${written.length} file(s)`, (signal) => production.deleteKeys(written, signal)).catch(() => {});
     throw err;
   }
   return { ...total, remaining: 0 };
@@ -95,12 +139,12 @@ export async function copyRelease(opts: Budget & {
 export async function makeLive(production: Storage, gamePrefix: string, version: string, budget: Budget & { skip?: number } | number = {}): Promise<CopyResult & { remaining: number; done: number }> {
   const b: Budget & { skip?: number } = typeof budget === 'number' ? { concurrency: budget } : budget;
   const src = releasePrefix(gamePrefix, version);
-  const objects = await production.list(src);
+  const objects = await storageCall(b, `list ${src}`, (signal) => production.list(src, signal));
   if (objects.length === 0) throw new Error(`release ${version} has no files under ${src}`);
   const rels = objects.map((o) => ({ rel: o.key.slice(src.length), size: o.size })).sort((x, y) => (x.rel < y.rel ? -1 : x.rel > y.rel ? 1 : 0));
   const clash = rels.find((r) => isVaultPath(r.rel));
   if (clash) throw new Error(`release ${version} contains ${clash.rel}, which would collide with the release layout`);
-  const liveBefore = (await production.list(gamePrefix))
+  const liveBefore = (await storageCall(b, `list ${gamePrefix}`, (signal) => production.list(gamePrefix, signal)))
     .map((o) => o.key)
     .filter((k) => !isVaultPath(k.slice(gamePrefix.length)));
 
@@ -112,20 +156,18 @@ export async function makeLive(production: Storage, gamePrefix: string, version:
   for (const phase of phases) {
     const queue = phase.slice(Math.min(skip, phase.length));
     skip = Math.max(0, skip - phase.length);
-    // Copies that started always finish (Promise.all waits for them), so every file taken from the queue is done.
-    await Promise.all(Array.from({ length: b.concurrency ?? 8 }, async () => {
-      for (let r = pastDeadline(b) ? undefined : queue.shift(); r; r = pastDeadline(b) ? undefined : queue.shift()) {
-        await production.copy(src + r.rel, gamePrefix + r.rel, { ...headersFor(r.rel), cacheControl: LIVE_CACHE });
-        done++;
-      }
-    }));
-    if (queue.length) return { ...total, remaining: rels.length - done, done };
+    // Every copy started has settled when pool() answers, so `done` counts exactly the files in place.
+    const left = await pool(queue, b, async (r) => {
+      await storageCall(b, `copy ${src + r.rel}`, (signal) => production.copy(src + r.rel, gamePrefix + r.rel, { ...headersFor(r.rel), cacheControl: LIVE_CACHE }, signal));
+      done++;
+    });
+    if (left.length) return { ...total, remaining: rels.length - done, done };
   }
   const json = new TextEncoder().encode(JSON.stringify({ version, promoted_at: new Date().toISOString() }) + '\n');
-  await production.put(`${gamePrefix}current.json`, json, json.byteLength, { contentType: 'application/json', cacheControl: LIVE_CACHE });
+  await storageCall(b, `write ${gamePrefix}current.json`, (signal) => production.put(`${gamePrefix}current.json`, json, json.byteLength, { contentType: 'application/json', cacheControl: LIVE_CACHE }, signal));
   const keep = new Set(rels.map((r) => gamePrefix + r.rel));
   const stale = liveBefore.filter((k) => !keep.has(k));
-  if (stale.length) await production.deleteKeys(stale);
+  if (stale.length) await storageCall(b, `delete ${stale.length} old file(s) under ${gamePrefix}`, (signal) => production.deleteKeys(stale, signal));
   return { ...total, remaining: 0, done: rels.length };
 }
 

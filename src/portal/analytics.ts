@@ -1,11 +1,13 @@
 // Analytics: plays of the games on the website, from Google Analytics (src/analytics/). Vault staff see the whole
 // site (Vault → Analytics, /vault/analytics); each studio has an Analytics page for all its games (/s/STUDIO/analytics)
 // and each game's page an Analytics tab, with the same view, which the studio's members (viewers too) see. Each view:
-// plays over calendar periods (this week so far against the same days last week, ...), plays / players / average play
-// time, a realtime map of where people are playing, top games (site and studio), and for the site its page views,
-// sessions and visitors. A play is the unit for studios and games: they have no sessions figure.
-// The play events are new; the years before them are page views (and outbound clicks) of the game pages, which have
-// had the same addresses since the Squarespace site: the chart and top games fall back to those when there are no plays.
+// a date range picked the way Google Analytics' picker does it (presets, a custom range, compare with the period
+// before), a chart of sessions, plays and users, plays / players / average play time, a realtime map of where people
+// are playing, top games (site and studio), and for the site its page views, sessions and visitors. A game's (a
+// studio's) sessions and users are visits that showed its page or started one of its plays.
+// The play events began on PLAYS_SINCE: before it there are no plays (the page says so), but sessions, users, page
+// views and outbound clicks of the game pages go back through the Squarespace years (the same addresses): the top
+// games fall back to page views when there are no plays.
 import type { Hono } from 'hono';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -15,7 +17,7 @@ import { cityPoint } from '../analytics/cities.ts';
 import { COUNTRY_POINTS } from '../analytics/countries.ts';
 import { MAP_HEIGHT, MAP_WIDTH } from '../analytics/projection.ts';
 import { loadLegacy, pagePaths } from '../analytics/pages.ts';
-import { averageSeconds, dayLabel, RANGE_KEYS, RANGES, rangeOf, type Pair, type Period, type Place, type RangeKey, type Scope, type Series } from '../analytics/reports.ts';
+import { averageSeconds, longDate, PLAYS_SINCE, PRESETS, presetPeriods, spanLabel, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
 import type { Studio, User } from '../db.ts';
 import { html, raw, type Html } from './html.ts';
 import type { ListingHelpers, ListingRow } from './listings.ts';
@@ -32,9 +34,12 @@ export function duration(s: number | null): string {
   if (m < 60) return `${m}m ${String(sec).padStart(2, '0')}s`;
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
 }
-// The change from the same days of the previous period, as a KPI's second line.
-export function delta(cur: number | null, prev: number | null, range: RangeKey): Html {
-  const same = RANGES[range].same, vs = `vs ${same}`;
+// The change from the period before, as a KPI's second line; nothing when not comparing. plays: a figure counted
+// only since the play events began, so a period before them has none to compare with.
+export function delta(cur: number | null, prev: number | null, sel: Selection, plays = false): Html {
+  if (!sel.compare) return html`<div class="d"></div>`;
+  if (plays && sel.previous.start < PLAYS_SINCE) return html`<div class="d">${sel.previous.end < PLAYS_SINCE ? `not counted for ${sel.vs}` : `${sel.vs} only partly counted`}</div>`;
+  const same = sel.vs, vs = `vs ${same}`;
   if (cur === null || prev === null) return html`<div class="d">${prev === null && cur !== null ? `no data for ${same}` : ''}</div>`;
   if (prev === 0) return html`<div class="d">${cur > 0 ? `new: none ${same}` : `none ${same} either`}</div>`;
   const pct = ((cur - prev) / prev) * 100;
@@ -51,39 +56,51 @@ function niceMax(v: number): number {
   for (const m of [1, 1.2, 1.4, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p;
   return 10 * p;
 }
-export function chart(s: Series, what = 'plays'): Html {
+// The three lines, in the portal's series colours; the period before is the same colour, dashed.
+export const LINES = [
+  { key: 'sessions', label: 'Sessions', one: 'session', cls: 's1' },
+  { key: 'plays', label: 'Plays', one: 'play', cls: 's2' },
+  { key: 'users', label: 'Users', one: 'user', cls: 's3' },
+] as const;
+export function chart(s: Series, sel: Selection): Html {
   const n = s.labels.length;
-  const top = niceMax(Math.max(1, ...s.previous.map((v) => v ?? 0), ...s.current.map((v) => v ?? 0)));
+  const lines = LINES.map((l) => ({ ...l, line: s[l.key] })).filter((l) => l.line);
+  const all = lines.flatMap((l) => [...l.line!.current, ...(l.line!.previous ?? [])]).map((v) => v ?? 0);
+  const top = niceMax(Math.max(1, ...all));
   const y = (v: number) => +(100 - (v / top) * 100).toFixed(2);
   const x = (i: number) => i + 0.5;
-  const line = (vals: (number | null)[]) => {
+  const path = (vals: (number | null)[]) => {
     let d = '', pen = false;
     vals.forEach((v, i) => { if (v === null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${x(i)} ${y(v)}`; pen = true; });
-    return d;
+    // A point on its own (one day of plays, say) is a dot rather than nothing.
+    return d.replace(/M([\d.]+) ([\d.]+)(?=M|$)/g, 'M$1 $2l0 0');
   };
-  // A month still being counted (Year) is drawn dotted from the month before, so a few days don't read as a fall.
-  const part = s.partial !== undefined && s.partial > 0 && s.current[s.partial] !== null ? s.partial : -1;
-  const solid = part > 0 ? s.current.map((v, i) => (i < part ? v : null)) : s.current;
-  const lastIdx = solid.reduce<number>((k, v, i) => (v === null ? k : i), -1);
-  const area = lastIdx >= 0 ? `${line(solid.slice(0, lastIdx + 1))}L${x(lastIdx)} 100L${x(0)} 100Z` : '';
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * top);
+  // About six labels; on a phone every other one (.alt) is hidden.
   const every = Math.max(1, Math.ceil(n / 6));
   const xl = s.labels.map((l, i) => ({ l, i })).filter(({ i }) => i % every === 0);
-  const def = RANGES[s.range];
-  const later = def.unit === 'hour' ? 'later today' : 'still to come';
-  return html`<div class="ga-chart" role="img" aria-label="${what[0].toUpperCase()}${what.slice(1)} per ${def.unit}: ${num(s.totals.current)} ${def.long.toLowerCase()} so far, ${num(s.totals.previous)} ${def.same}.">
+  // Each point's tooltip: its figures, and the period before's at the same place.
+  const figures = (i: number, period: 'current' | 'previous') => lines.map((l) => {
+    const v = l.line![period]?.[i] ?? null;
+    if (v !== null) return `${num(v)} ${v === 1 ? l.one : l.label.toLowerCase()}`;
+    return l.key === 'plays' ? 'plays not counted yet' : '—';
+  }).join(' · ');
+  const tip = (i: number) => {
+    if (s.sessions.current[i] === null) return `${s.tips[i]}: later today`;
+    return `${s.tips[i]}: ${figures(i, 'current')}${sel.compare && s.prevTips[i] ? `\n${s.prevTips[i]}: ${figures(i, 'previous')}` : ''}`;
+  };
+  const totalsLabel = lines.map((l) => `${l.label}: ${l.line!.current.reduce<number>((t, v) => t + (v ?? 0), 0)}`).join(', ');
+  return html`<div class="ga-chart" role="img" aria-label="Sessions, plays and users per ${s.unit}, ${spanLabel(sel.current)}. ${totalsLabel}.">
     <div class="ga-plot">
       ${ticks.filter((t) => Number.isInteger(t)).map((t) => html`<span class="ga-yl" style="bottom:${(t / top) * 100}%">${num(t)}</span>`)}
       <svg viewBox="0 0 ${n} 100" preserveAspectRatio="none" aria-hidden="true">
         ${ticks.map((t) => html`<line class="gridl" x1="0" x2="${n}" y1="${y(t)}" y2="${y(t)}" vector-effect="non-scaling-stroke"/>`)}
-        <path class="ga-prev" d="${line(s.previous)}" vector-effect="non-scaling-stroke"/>
-        ${area ? html`<path class="ga-area" d="${area}"/>` : ''}
-        <path class="ga-cur" d="${line(solid)}" vector-effect="non-scaling-stroke"/>
-        ${part > 0 ? html`<path class="ga-cur ga-part" d="M${x(part - 1)} ${y(s.current[part - 1] ?? 0)}L${x(part)} ${y(s.current[part]!)}" vector-effect="non-scaling-stroke"/>` : ''}
-        ${s.labels.map((l, i) => html`<rect class="ga-hit" x="${i}" y="0" width="1" height="100"><title>${l}: ${s.current[i] === null ? later : `${num(s.current[i]!)} ${what}${i === part ? ' so far' : ''}`} (${def.previous}: ${s.previous[i] === null ? '—' : num(s.previous[i]!)})</title></rect>`)}
+        ${lines.map((l) => (l.line!.previous ? html`<path class="ga-prev ${l.cls}" d="${path(l.line!.previous)}" vector-effect="non-scaling-stroke"/>` : ''))}
+        ${lines.map((l) => html`<path class="ga-cur ${l.cls}" d="${path(l.line!.current)}" vector-effect="non-scaling-stroke"/>`)}
+        ${s.labels.map((_, i) => html`<rect class="ga-hit" x="${i}" y="0" width="1" height="100"><title>${tip(i)}</title></rect>`)}
       </svg>
     </div>
-    <div class="ga-x" aria-hidden="true">${xl.map(({ l, i }) => html`<span style="left:${(x(i) / n) * 100}%">${l}</span>`)}</div>
+    <div class="ga-x" aria-hidden="true">${xl.map(({ l, i }, k) => html`<span ${k % 2 ? raw('class="alt" ') : ''}style="left:${(x(i) / n) * 100}%">${l}</span>`)}</div>
   </div>`;
 }
 
@@ -139,12 +156,36 @@ const firstError = (...rs: (Result<unknown> | null)[]) => rs.find((r): r is { ok
 // titleOf: a game's title, the link to its Analytics tab (if the viewer may see it) and, on the site view, its
 // studio's Analytics page.
 export interface GameTitle { title: string; href: string | null; studio?: { name: string; href: string } }
-interface ViewOpts { timeZone: string; scope: Scope; range: RangeKey; staff: boolean; base: string; realtimeUrl: string; assets: Assets; titleOf(slug: string): GameTitle }
+interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; assets: Assets; titleOf(slug: string): GameTitle }
 interface Assets { css: string; js: string; land: string }
 
-function rangeBar(base: string, range: RangeKey): Html {
-  const sep = base.includes('?') ? '&' : '?';
-  return html`<div class="seg ga-range" role="group" aria-label="Time range">${RANGE_KEYS.map((k) => html`<a href="${base}${sep}range=${k}" class="${k === range ? 'on' : ''}" title="${RANGES[k].long}" ${k === range ? raw('aria-current="true"') : ''}>${RANGES[k].label}</a>`)}</div>`;
+// The date range picker, laid out like Google Analytics': a button showing the range, which opens the presets (in GA's
+// order), a custom start and end, and Compare. It is a plain GET form, so it works without the page's script, which
+// fills in a preset's dates when one is picked and picks Custom when the dates are edited (analytics.js).
+export function datePicker(base: string, sel: Selection): Html {
+  const [path, query = ''] = base.split('?');
+  const keep = [...new URLSearchParams(query)].filter(([k]) => !['range', 'start', 'end', 'compare'].includes(k));
+  const radio = (key: string, label: string, start: string, end: string) => html`<label class="ga-preset"><input type="radio" name="range" value="${key}" data-start="${start}" data-end="${end}" ${key === sel.preset ? raw('checked') : ''}><span>${label}</span></label>`;
+  return html`<details class="ga-dates">
+    <summary><span class="ga-dl">${sel.label}</span> <b>${spanLabel(sel.current)}</b>${sel.compare ? html` <span class="ga-vs">vs ${spanLabel(sel.previous)}</span>` : ''}</summary>
+    <form class="ga-dp" method="get" action="${path}">
+      ${keep.map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`)}
+      <fieldset class="ga-presets"><legend>Date range</legend>
+        ${radio('custom', 'Custom', sel.current.start, sel.current.end)}
+        ${PRESETS.map((p) => { const d = presetPeriods(p.key, sel.today).current; return radio(p.key, p.label, d.start, d.end); })}
+      </fieldset>
+      <div class="ga-custom">
+        <div class="ga-days">
+          <label>Start date<input type="date" name="start" value="${sel.current.start}" max="${sel.today}" required></label>
+          <span aria-hidden="true">–</span>
+          <label>End date<input type="date" name="end" value="${sel.current.end}" max="${sel.today}" required></label>
+        </div>
+        <p class="small muted">Days are whole days in the property’s time zone. “Last N days” end yesterday, as in Google Analytics.</p>
+        <label class="ga-cmpl"><input type="hidden" name="compare" value="0"><input type="checkbox" name="compare" value="1" ${sel.compare ? raw('checked') : ''}> Compare with the period before</label>
+        <div class="ga-btns"><button type="button" class="btn sm" data-cancel>Cancel</button><button type="submit" class="btn sm pri">Apply</button></div>
+      </div>
+    </form>
+  </details>`;
 }
 
 const kpi = (label: string, value: string, d: Html, title = '') => html`<div class="kpi" ${title ? raw(`title="${title.replace(/"/g, '&quot;')}"`) : ''}><div class="v">${value}</div><div class="l">${label}</div>${d}</div>`;
@@ -165,34 +206,56 @@ export function realtimeBody(rt: Realtime, o: { staff: boolean; land: string; ga
     ${rows.length ? html`<div class="tbl-wrap"><table class="ga-places"><thead><tr><th>Where</th><th class="r">${visitors ? 'On the site' : 'Playing'}</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
 }
 
-// What the period so far is compared with, in dates.
-export function spanNote(ov: Pick<Overview, 'range' | 'periods' | 'hour'>): string {
-  const def = RANGES[ov.range], p = ov.periods;
-  if (ov.range === 'day') return `Today so far (to ${String(ov.hour).padStart(2, '0')}:59) is compared with yesterday up to the same hour.`;
-  const f = (d: string) => (ov.range === 'year' ? `${dayLabel(d)}, ${d.slice(0, 4)}` : dayLabel(d));
-  const span = (q: Period) => (q.start === q.end ? f(q.start) : `${f(q.start)} – ${f(q.end)}`);
-  return `${def.long} so far (${span(p.current)}) is compared with ${def.same} (${span(p.previous)}).${ov.range === 'week' ? ' Weeks start on Sunday.' : ''}`;
+// What the period is compared with, in dates.
+export function spanNote(sel: Selection): string {
+  const what = `${spanLabel(sel.current)}${sel.toHour < 23 ? ` (to ${String(sel.toHour).padStart(2, '0')}:59)` : ''}`;
+  if (!sel.compare) return `${what}.`;
+  return `${what}, compared with ${sel.vs} (${spanLabel(sel.previous)}${sel.toHour < 23 ? ' up to the same hour' : ''}).`;
+}
+
+// Said above the chart when the range (or the one it is compared with) reaches back before the play events.
+export function playsNote(sel: Selection): Html | '' {
+  const before = sel.current.start < PLAYS_SINCE || (sel.compare && sel.previous.start < PLAYS_SINCE);
+  if (!before) return '';
+  const which = sel.current.start < PLAYS_SINCE ? 'so the Plays line starts there and play figures in this range cover only the days since'
+    : `so ${sel.vs} has none to compare with`;
+  return html`<p class="ga-warn" role="note"><b>Plays weren’t counted before ${longDate(PLAYS_SINCE)}</b>, when the site began sending play events, ${which}. Sessions and users go back further.</p>`;
 }
 
 export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
-  const def = RANGES[ov.range];
+  const sel = ov.sel;
   const kind = o.scope.game ? 'game' : o.scope.studio ? 'studio' : 'site';
   const assets = html`<link rel="stylesheet" href="${o.assets.css}"><script src="${o.assets.js}" defer></script>`;
-  const bar = rangeBar(o.base, ov.range);
+  const picker = datePicker(o.base, sel);
   // Not connected at all: say so once, rather than an empty chart and a row of dashes.
   const conn = [ov.series, ov.plays, ov.players].every((r) => !r.ok && CONNECTION.has(r.error.kind)) ? firstError(ov.series) : null;
   if (conn) return html`${assets}<div class="card ga-off">${problem(conn, o.staff)}${o.staff ? '' : html`<p class="small muted">Ask Vault about it.</p>`}</div>`;
 
-  // No plays in either period (before the play events): the chart shows page views instead, if there are any.
-  const noPlays = ov.series.ok && !ov.series.value.totals.current && !ov.series.value.totals.previous;
-  const byViews = noPlays && ov.views.ok && (ov.views.value.totals.current > 0 || ov.views.value.totals.previous > 0);
-  const s = byViews ? ov.views : ov.series;
+  // The legend: each line's total for the range and its change.
+  const tr = ov.traffic.ok ? ov.traffic.value : null, pl = ov.plays.ok ? ov.plays.value : null;
+  const totals: Record<string, { cur: number; prev: number } | null> = {
+    sessions: tr && { cur: tr.sessions.current, prev: tr.sessions.previous },
+    plays: pl && { cur: pl.current.plays, prev: pl.previous.plays },
+    users: tr && { cur: tr.totalUsers.current, prev: tr.totalUsers.previous },
+  };
+  const whose = kind === 'game' ? ' that showed the game’s page or played it' : kind === 'studio' ? ' that showed one of the studio’s game pages or played one of its games' : '';
+  const about: Record<string, string> = {
+    sessions: `Visits to the site${whose}`,
+    plays: 'Games opened from their page on the site (in the player, or in a new tab)',
+    users: `People (browsers)${whose ? ` in those visits` : ' who visited'}. Each point counts its own; the total counts each person once.`,
+  };
+  const legend = html`<div class="ga-legend">${LINES.map((l) => {
+    const t = totals[l.key];
+    return html`<div class="ga-lk" title="${about[l.key]}"><span class="k ${l.cls}"></span><span class="ga-ln">${l.label}</span> <b class="ga-tot">${t ? num(t.cur) : '—'}</b>${t ? delta(t.cur, t.prev, sel, l.key === 'plays') : ''}</div>`;
+  })}${sel.compare ? html`<div class="ga-lk ga-lprev small"><span class="k prev"></span>${sel.vs[0].toUpperCase()}${sel.vs.slice(1)}</div>` : ''}</div>`;
+  const s = ov.series;
   const chartCard = html`<div class="card ga-top">
-    <h2><span>${byViews ? 'Page views' : 'Plays'} <small>${def.long} · ${s.ok ? html`<b class="ga-tot">${num(s.value.totals.current)}</b>, ${def.same} ${num(s.value.totals.previous)}` : ''}</small></span>${bar}</h2>
-    ${s.ok ? html`${chart(s.value, byViews ? 'page views' : 'plays')}<div class="ga-legend small"><span class="k cur"></span>${def.long}<span class="k prev"></span>${def.previous[0].toUpperCase()}${def.previous.slice(1)}</div>
-      <p class="small muted ga-span">${spanNote(ov)}</p>
-      ${byViews ? html`<p class="small muted">No plays recorded in this range: the site has only just begun sending play events, so this is page views of ${kind === 'game' ? 'the game’s page' : kind === 'studio' ? 'the studio’s game pages' : 'the site'}, which go back years (the Squarespace site had the same addresses).</p>` : ''}`
-      : problem(s.error, o.staff, 'the chart')}
+    <div class="card-h ga-head"><h2>Sessions, plays and users</h2>${picker}</div>
+    ${playsNote(sel)}
+    ${legend}
+    ${s.ok ? html`${chart(s.value, sel)}${s.value.plays ? '' : problem(new AnalyticsError('failed', 'the plays line'), o.staff, 'the chart’s plays')}` : problem(s.error, o.staff, 'the chart')}
+    <p class="small muted ga-span">${spanNote(sel)}</p>
+    ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'sessions and users') : ''}
   </div>`;
 
   const p = ov.plays.ok ? ov.plays.value : null;
@@ -200,10 +263,10 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   const players = ov.players.ok ? ov.players.value : null;
   const avgNote = !p ? '' : !p.timed ? 'Needs the custom definitions in Google Analytics.'
     : avgCur === null ? 'No timed plays in this range yet. Only plays since the game pages began sending play events are timed.' : '';
-  const kpis = html`<div class="kpis ga-k3" aria-label="Plays, ${def.long.toLowerCase()}">
-      ${kpi('Plays', p ? num(p.current.plays) : '—', p ? delta(p.current.plays, p.previous.plays, ov.range) : html`<div class="d"></div>`, 'A play: the game opened from its page on the site (in the player, or in a new tab)')}
-      ${kpi('Unique players', players ? num(players.current) : '—', players ? delta(players.current, players.previous, ov.range) : html`<div class="d"></div>`, 'People (browsers) who started at least one play')}
-      ${kpi('Average play time', duration(avgCur), avgNote ? html`<div class="d">${avgNote}</div>` : delta(avgCur, avgPrev, ov.range), 'Time the game was open in the player with the page on screen, per play in the player. Games opened in a new tab can’t be timed.')}
+  const kpis = html`<div class="kpis ga-k3" aria-label="Plays, ${spanLabel(sel.current)}">
+      ${kpi('Plays', p ? num(p.current.plays) : '—', p ? delta(p.current.plays, p.previous.plays, sel, true) : html`<div class="d"></div>`, 'A play: the game opened from its page on the site (in the player, or in a new tab)')}
+      ${kpi('Unique players', players ? num(players.current) : '—', players ? delta(players.current, players.previous, sel, true) : html`<div class="d"></div>`, 'People (browsers) who started at least one play')}
+      ${kpi('Average play time', duration(avgCur), avgNote ? html`<div class="d">${avgNote}</div>` : delta(avgCur, avgPrev, sel, true), 'Time the game was open in the player with the page on screen, per play in the player. Games opened in a new tab can’t be timed.')}
     </div>
     ${!ov.plays.ok ? problem(ov.plays.error, o.staff, kind === 'game' ? 'this game’s plays can’t be counted' : kind === 'studio' ? 'this studio’s plays can’t be counted' : 'plays') : ''}
     ${!ov.players.ok && ov.plays.ok ? problem(ov.players.error, o.staff, 'players') : ''}`;
@@ -212,22 +275,21 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   let page: Html | string = '';
   if (ov.pages) {
     const pv = ov.pages.ok ? ov.pages.value : null;
-    const k = (label: string, v: Pair | null, title: string) => kpi(label, v ? num(v.current) : '—', v ? delta(v.current, v.previous, ov.range) : html`<div class="d"></div>`, title);
+    const k = (label: string, v: Pair | null, title: string) => kpi(label, v ? num(v.current) : '—', v ? delta(v.current, v.previous, sel) : html`<div class="d"></div>`, title);
     const its = kind === 'studio' ? 'the studio’s game pages' : 'the game’s page';
-    page = html`<h3 class="sec">${kind === 'studio' ? 'Its games’ pages' : 'The game’s page'} <small class="muted small">${def.long} · counted since the Squarespace site, before the play events</small></h3>
+    page = html`<h3 class="sec">${kind === 'studio' ? 'Its games’ pages' : 'The game’s page'} <small class="muted small">${spanLabel(sel.current)} · counted since the Squarespace site, before the play events</small></h3>
       <div class="kpis ga-k3">${k('Page views', pv?.views ?? null, `Views of ${its} on vaultlearninggames.org (their addresses on the Squarespace site too)`)}${k('Visitors', pv?.visitors ?? null, `People (browsers) who viewed ${its}`)}${k('Play-button clicks', pv?.clicks ?? null, `Outbound link clicks on ${its} (Google Analytics enhanced measurement). The old site’s Play button linked out to the game, so before the play events these are mostly plays; they also count other links out, such as curriculum.`)}</div>
       <p class="small muted">Play-button clicks: outbound clicks from ${its}.</p>
       ${!ov.pages.ok ? problem(ov.pages.error, o.staff, its) : ''}`;
   }
 
   let site: Html | string = '';
-  if (ov.site) {
-    const sv = ov.site.ok ? ov.site.value : null;
-    const pair = (k: 'screenPageViews' | 'sessions' | 'totalUsers') => (sv ? sv[k] : null);
-    const k = (label: string, v: Pair | null, title: string) => kpi(label, v ? num(v.current) : '—', v ? delta(v.current, v.previous, ov.range) : html`<div class="d"></div>`, title);
-    site = html`<h3 class="sec">The website <small class="muted small">${def.long}</small></h3>
+  if (kind === 'site') {
+    const pair = (k: 'screenPageViews' | 'sessions' | 'totalUsers') => (tr ? tr[k] : null);
+    const k = (label: string, v: Pair | null, title: string) => kpi(label, v ? num(v.current) : '—', v ? delta(v.current, v.previous, sel) : html`<div class="d"></div>`, title);
+    site = html`<h3 class="sec">The website <small class="muted small">${spanLabel(sel.current)}</small></h3>
       <div class="kpis ga-k3">${k('Page views', pair('screenPageViews'), 'Every page shown on the site')}${k('Sessions', pair('sessions'), 'Visits to the site')}${k('Visitors', pair('totalUsers'), 'People (browsers) who visited')}</div>
-      ${!ov.site.ok ? problem(ov.site.error, o.staff, 'the website’s visits') : ''}`;
+      ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the website’s visits') : ''}`;
   }
 
   const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">${kind === 'site' ? 'On the site now' : 'Playing now'}</span><small>last 30 minutes · updates every minute</small></h2>
@@ -242,14 +304,14 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   if (!o.scope.game && tp && (!p || !p.games.length)) {
     // No game has plays (yet): the games whose pages were viewed most.
     const rows = tp.ok ? tp.value.slice(0, 10).map((g) => html`<tr>${name(g.slug)}<td class="r num">${num(g.views)}</td><td class="r num">${num(g.clicks)}</td></tr>`) : [];
-    top = html`<div class="card ga-games"><h2>Top games <small>by page views, ${def.long.toLowerCase()}</small></h2>
+    top = html`<div class="card ga-games"><h2>Top games <small>by page views, ${spanLabel(sel.current)}</small></h2>
       ${!tp.ok ? problem(tp.error, o.staff, 'the game pages')
         : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Page views</th><th class="r" title="Outbound link clicks from the game’s page: the old site’s Play button linked out to the game">Play-button clicks</th></tr></thead><tbody>${rows}</tbody></table></div>
           <p class="small muted">No plays by game yet${p && !p.timed ? ' (Google Analytics doesn’t know the custom dimension game_slug yet)' : ''}, so these are views of each game’s page. Play-button clicks: outbound clicks from the game’s page.</p>`
         : html`<p class="small muted">No views of game pages in this range.</p>`}</div>`;
   } else if (!o.scope.game && p) {
     const rows = p.games.slice(0, 10).map((g) => html`<tr>${name(g.slug)}<td class="r num">${num(g.plays)}</td><td class="r num">${duration(averageSeconds(g))}</td></tr>`);
-    top = html`<div class="card ga-games"><h2>Top games <small>by plays, ${def.long.toLowerCase()}</small></h2>
+    top = html`<div class="card ga-games"><h2>Top games <small>by plays, ${spanLabel(sel.current)}</small></h2>
       ${!p.timed ? html`<p class="small muted">Games can be told apart once the custom dimension game_slug is registered in Google Analytics.</p>`
         : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Plays</th><th class="r">Avg time</th></tr></thead><tbody>${rows}</tbody></table></div>`
         : html`<p class="small muted">No plays in this range yet.</p>`}</div>`;
@@ -257,7 +319,7 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
 
   return html`${assets}<div class="ga">${chartCard}${kpis}${page}
     <div class="grid ${top ? 'ga-split' : ''}">${realtime}${top}</div>${site}
-    <p class="small muted ga-foot">From Google Analytics (the site’s ${p && !p.timed ? 'page views and play counts' : 'play events'}; days are ${o.timeZone.replace(/_/g, ' ')} days, weeks start on Sunday). Figures are cached for up to 10 minutes; the realtime map for a minute.</p></div>`;
+    <p class="small muted ga-foot">From Google Analytics (the site’s visits and ${p && !p.timed ? 'play counts' : 'play events'}, which began on ${longDate(PLAYS_SINCE)}; days are ${o.timeZone.replace(/_/g, ' ')} days, weeks start on Sunday). Figures are cached for up to 10 minutes; the realtime map for a minute.</p></div>`;
 }
 
 // ---------- routes ----------
@@ -292,18 +354,23 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
       ...(withStudio && mine ? { studio: { name: l.studio_name, href: `/s/${l.studio_slug}/analytics` } } : {}) };
   };
 
-  async function render(u: User, scope: Scope, range: RangeKey, base: string, cat = catalog()) {
-    const q = scope.game ? `?game=${encodeURIComponent(scope.game)}` : scope.studio ? `?studio=${encodeURIComponent(scope.studio)}` : '';
+  // The range picked on the page: ?range=PRESET or ?range=custom&start=&end=, and compare (the form sends compare=0
+  // and, when ticked, compare=1 after it: the last one counts).
+  type Query = { range?: string; start?: string; end?: string; compare?: string };
+  const queryOf = (c: { req: { query(k: string): string | undefined; queries(k: string): string[] | undefined } }): Query =>
+    ({ range: c.req.query('range'), start: c.req.query('start'), end: c.req.query('end'), compare: c.req.queries('compare')?.at(-1) });
+
+  async function render(u: User, scope: Scope, q: Query, base: string, cat = catalog()) {
+    const rtq = scope.game ? `?game=${encodeURIComponent(scope.game)}` : scope.studio ? `?studio=${encodeURIComponent(scope.studio)}` : '';
     const full = scope.game ? { ...scope, pages: cat[scope.game] ?? pagePaths(scope.game, legacy) } : scope;
-    const [ov, rt] = await Promise.all([analytics.overview(range, full, cat), analytics.realtime(scope)]);
-    return view(ov, rt, { timeZone: analytics.timeZone, scope, range, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${q}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio) });
+    const [ov, rt] = await Promise.all([analytics.overview(analytics.selection(q), full, cat), analytics.realtime(scope)]);
+    return view(ov, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio) });
   }
 
   app.get('/vault/analytics', async (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isStaff(u)) return h.denied(c, 'Only Vault staff can see this page.');
-    const range = rangeOf(c.req.query('range'));
-    const body = await render(u, {}, range, '/vault/analytics');
+    const body = await render(u, {}, queryOf(c), '/vault/analytics');
     return h.page(c, 'Analytics', html`${head('Analytics', 'Plays of the games on vaultlearninggames.org, and visits to the site. Each studio and each game in the portal has the same view for its games.')}${body}`, { active: 'analytics' });
   });
 
@@ -314,7 +381,7 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     const { scope, catalog: cat } = studioScope(s);
     const sub = `Plays of ${s.name}’s games on vaultlearninggames.org. Each game’s page has the same view for that game (its Analytics tab).`;
     const body = scope.games!.length
-      ? await render(u, scope, rangeOf(c.req.query('range')), `/s/${s.slug}/analytics`, cat)
+      ? await render(u, scope, queryOf(c), `/s/${s.slug}/analytics`, cat)
       : html`<div class="card"><p class="muted">None of this studio’s games are on the site yet, so there are no plays to show. Analytics count plays from a game’s page on vaultlearninggames.org.</p></div>`;
     return h.page(c, 'Analytics', html`${head('Analytics', sub)}${body}`, { studio: s, active: 'studio-analytics' });
   });
@@ -339,10 +406,9 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
 
   return {
     // A game's Analytics tab (routes.ts): its listing's plays. A game that isn't on the site has none.
-    async gameTab(u: User, s: Studio, l: ListingRow | null, query: { range?: string }): Promise<Html> {
+    async gameTab(u: User, s: Studio, l: ListingRow | null, c: Parameters<typeof queryOf>[0]): Promise<Html> {
       if (!l) return html`<div class="card"><p class="muted">This game isn’t on the site, so there are no plays to show. Analytics count plays from a game’s page on vaultlearninggames.org.</p></div>`;
-      const range = rangeOf(query.range);
-      const body = await render(u, { game: l.slug }, range, `/s/${s.slug}/g/${l.slug}?tab=analytics`);
+      const body = await render(u, { game: l.slug }, queryOf(c), `/s/${s.slug}/g/${l.slug}?tab=analytics`);
       return html`${l.published ? '' : html`<p class="small muted">This game isn’t published on the site yet.</p>`}${body}`;
     },
   };

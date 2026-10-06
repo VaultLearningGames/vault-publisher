@@ -570,7 +570,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const tabs = html`<div class="tabs"><a href="?tab=listing" class="${tab === 'listing' ? 'on' : ''}">Site listing</a><a href="?tab=cdn" class="${tab === 'cdn' ? 'on' : ''}">Vault CDN${g ? html` · ${db.currentRelease(g.id)?.version ?? 'no release'}` : ''}</a><a href="?tab=analytics" class="${tab === 'analytics' ? 'on' : ''}">Analytics</a></div>`;
     let content: Html | string;
     let dialogs: Html | string = '';
-    if (tab === 'analytics') content = await AN.gameTab(u, s, l ?? null, { range: c.req.query('range') });
+    if (tab === 'analytics') content = await AN.gameTab(u, s, l ?? null, c);
     else if (tab === 'listing') {
       if (l) { const ed = LP.editor(u, s, l, g); content = html`<div class="grid g-main">${ed.form}<div class="grid" style="align-content:start">${ed.side}</div></div>`; }
       else {

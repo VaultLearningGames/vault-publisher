@@ -119,19 +119,27 @@ await each(pages, async (dir) => {
 
 // 4. Every line of the build's _redirects does what it says: a 301 line answers 301 to its target, which is there
 // at once (Squarespace's /game-cards/<card> addresses → the game's page; the PDF); a 200 line serves its target's
-// file at the line's address (the filter pages), which section 1 has fetched.
+// file at the line's address (the filter pages), which section 1 has fetched; a 302 /cdn/<folder>/ line sends a CDN
+// game's build, opened outside the player, to its page with the player open.
 const lines = (await readFile(join(build, '_redirects'), 'utf8')).split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.split(' '));
 const cards = lines.filter(([from, , status]) => status === '301' && /^\/game-cards\/[^/]+$/.test(from));
 expect(cards.length > 0 || !files.includes('game-cards/index.html'), 'redirects: the Game Card addresses are there', 'no /game-cards/<card> line in _redirects');
 await each(lines, async ([from, to, status]) => {
   if (status === '200') return expect(bodies.get(from)?.status === 200, 'redirects: a 200 line\'s address is a page', from);
+  if (status === '302' && from.startsWith('/cdn/')) {
+    const [page, frag = ''] = to.split('#');
+    const hop = await get(base + from);
+    const end = await get(base + page);
+    return expect(hop.status === 302 && hop.location === base + page + (frag ? `#${frag}` : '') && end.status === 200, 'redirects: a /cdn/ line answers 302, to the game\'s page with the player open', `${from} → ${hop.status} ${hop.location}; ${page} → ${end.status}`);
+  }
+
   const hop = await get(base + from);
   const end = await get(base + to);
   expect(hop.status === 301 && hop.location === base + to && end.status === 200, 'redirects: a 301 line answers 301, to an address that is there at once', `${from} → ${hop.status} ${hop.location}; ${to} → ${end.status}`);
 });
 
 // 5. Addresses that don't exist: status 404 and the site's own page, at any depth, never indexed.
-await each(['/nope', '/nope/', '/a/b/c/', '/a/b/c', '/game-cards/category/Nope/', '/game-cards/nope', '/sq/img/nope.jpg', '/_headers', '/_redirects', '/.assetsignore', '/card-redirects.json'], async (path) => {
+await each(['/nope', '/nope/', '/a/b/c/', '/a/b/c', '/game-cards/category/Nope/', '/game-cards/nope', '/sq/img/nope.jpg', '/_headers', '/_redirects', '/.assetsignore', '/card-redirects.json', '/cdn-redirects.json'], async (path) => {
   const got = await get(base + path);
   expect(got.status === 404 && got.body.equals(notFound), 'missing address: 404 with the site\'s page', `${path} → ${got.status}, ${got.body.length} bytes`);
   expect(/noindex/.test(notFound.toString()) && (got.headers.get('x-robots-tag') === robots), 'missing address: robots', `${path}: ${got.headers.get('x-robots-tag')}`);

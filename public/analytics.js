@@ -1,5 +1,35 @@
-// Analytics pages: refresh the realtime card every minute while the page is on screen, and make its map zoomable
-// (buttons, double-click, pinch or ctrl/⌘-scroll, drag to pan), keeping the view across refreshes (src/portal/analytics.ts).
+// Analytics pages: the date range picker (a preset fills in its dates, editing a date picks Custom); the realtime card,
+// refreshed every minute while the page is on screen, and its map made zoomable (buttons, double-click, pinch or
+// ctrl/⌘-scroll, drag to pan), keeping the view across refreshes (src/portal/analytics.ts).
+(function () {
+  var box = document.querySelector('.ga-dates');
+  if (!box) return;
+  var form = box.querySelector('form'), start = form.querySelector('[name=start]'), end = form.querySelector('[name=end]');
+  var custom = form.querySelector('[name=range][value=custom]');
+  function check() {
+    var days = (Date.parse(end.value) - Date.parse(start.value)) / 86400000;
+    end.setCustomValidity(start.value && end.value && days < 0 ? 'The end date is before the start date.'
+      : days >= 3 * 366 ? 'Pick at most three years.' : '');
+  }
+  form.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.name === 'range' && t.value !== 'custom') { start.value = t.getAttribute('data-start'); end.value = t.getAttribute('data-end'); }
+    if (t === start || t === end) custom.checked = true;
+    check();
+  });
+  // Keep the address short: a preset needs no dates, and comparing (the default) needs no compare.
+  form.addEventListener('submit', function () {
+    var r = form.querySelector('[name=range]:checked');
+    if (r && r.value !== 'custom') start.disabled = end.disabled = true;
+    var cmp = form.querySelectorAll('[name=compare]');
+    if (cmp[1].checked) cmp[0].disabled = cmp[1].disabled = true;
+  });
+  function close() { form.reset(); check(); box.open = false; }
+  box.querySelector('[data-cancel]').addEventListener('click', close);
+  document.addEventListener('click', function (e) { if (box.open && !box.contains(e.target)) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && box.open) { close(); box.querySelector('summary').focus(); } });
+})();
+
 (function () {
   var box = document.querySelector('[data-realtime]');
   if (!box) return;

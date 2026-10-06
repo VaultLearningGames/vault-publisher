@@ -245,6 +245,12 @@ tag is the best thing to release, because a branch can change after it was teste
 
 ## Games on the site and on the CDN
 
+> **CDN builds only play inside the Vault player, and that is enforced by a Cloudflare Redirect Rule kept only in the
+> dashboard** (zone `vaultlearninggames.org` → Rules → Redirect Rules, "CDN builds only play in the Vault player"), not
+> by anything in this repository. It has a PBS Wisconsin exception so PBS players get Jo Wilder and Emerald without the
+> Vault bar. Before changing how a game's build is reached, read
+> [docs/setup.md, "Cloudflare rules that live only in the dashboard"](docs/setup.md#cloudflare-rules-that-live-only-in-the-dashboard).
+
 Each studio's **Games** page in the portal lists every game it has on Vault. A game is its **site listing** (what
 vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, connected:
 
@@ -411,6 +417,22 @@ Notes on each task:
   listing that has other unpublished draft changes (e.g. a studio's edits waiting for review), or isn't on the site
   yet, is refused unless `publish_pending: true`. With `publish: false` only drafts change. Listings the update
   wouldn't change are answered as `unchanged` and not written.
+* **`release`** that stops part-way (a timeout such as `{"error":"upstream request timeout"}`, or a failed run) is
+  safe to run again with the same args: the approval resumes the files it already copied, and the switch carries on
+  from the progress it saved (`release_live:<game id>` in settings). Only one switch per game runs at a time, so a
+  call that arrives while another is still copying gets HTTP 409 *"… is already switching versions (started N s ago,
+  last progress N s ago)"*. Wait a minute and run it again. Every storage request has a 60-second timeout, so a
+  switch that is still running keeps making progress; one that has made **no progress for 5 minutes** is treated as
+  abandoned, and the next call takes over its lock, stops it, and carries on (the audit log records
+  `release.lock_takeover`). So if a release reports "already switching versions" for more than a few minutes:
+  1. Read the message: if "last progress" keeps going up between tries, nothing is copying. Run the task again after
+     the 5 minutes; it takes over and finishes the switch.
+  2. If it still answers 409 with "last progress" under a minute, something else really is switching this game (a
+     second run, or someone in the portal). Wait for that to finish, or cancel the other run.
+  3. Only if neither works: the lock lives in the memory of the portal's single Cloud Run instance, so deploying a new
+     revision (or restarting the service) clears it, and the next run resumes from the saved progress. Check the
+     game's page (`play_url`) afterwards. Players get the previous release until the switch ends, because the new
+     release's `index.html` and `current.json` are written last.
 
 Locally: `node scripts/admin-task.ts --portal URL --task TASK --args 'JSON' [--dry-run=false]` (a dry run unless
 `--dry-run=false`; `--pages FILE --overrides FILE` send an export from disk for `import`). Against

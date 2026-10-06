@@ -4,7 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { randomUUID } from 'node:crypto';
 import { bearerToken, type GitHubIdentity, type Verifier } from './auth.ts';
 import type { Db, Game, ManifestFile, Release, Studio } from './db.ts';
-import { copyRelease, makeLive, ReleaseLayoutError, releasePrefix, type Budget } from './releases.ts';
+import { copyRelease, makeLive, ReleaseLayoutError, releasePrefix, storageCall, type Budget } from './releases.ts';
 import { buildCatalog } from './catalog.ts';
 import type { PreviewSite } from './config.ts';
 import { parseRun } from './game-checks.ts';
@@ -57,6 +57,8 @@ export interface AppDeps {
   fetch?: typeof fetch;
   // How URL monitors fetch a studio's hosted game (net-guard.ts: public addresses only). Injected in tests.
   fetcher?: Fetcher;
+  // How long one storage request of a release copy or switch may take (default STORAGE_CALL_TIMEOUT_MS). Shorter in tests.
+  storageTimeoutMs?: number;
 }
 
 const PRESIGN_SECONDS = 15 * 60;
@@ -70,6 +72,10 @@ const MONITOR_TASK_BUDGET_MS = 12 * 60_000;
 // What one admin `release` call may spend copying files (Cloudflare ends a proxied request after 100 seconds).
 const DEFAULT_RELEASE_BUDGET_SECONDS = 75;
 const MAX_RELEASE_BUDGET_SECONDS = 280;
+// A version switch that has made no progress (no storage call completed) for this long is abandoned, and the next
+// call for the game takes its lock over. Well above a call's budget (at most 280 s) and the storage timeout (60 s),
+// so by then every request the old switch made has already been given up on.
+export const SWITCH_STALE_MS = 5 * 60_000;
 
 export function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 413 | 503, message: string, detail?: unknown): never {
   throw new HTTPException(status, { res: Response.json({ error: message, detail }, { status }) });
@@ -222,10 +228,10 @@ export function createApp(deps: AppDeps) {
     const dstPrefix = releasePrefix(`${studio.slug}/${game.slug}/`, version);
     const marker = `release_copy:${game.id}:${version}`;
     const of = `${build.id}:${build.updated_at}:${build.commit_sha}`;
-    const resume = (await production.list(dstPrefix)).length > 0;
+    const resume = (await storageCall({ callTimeoutMs: deps.storageTimeoutMs }, `list ${dstPrefix}`, (signal) => production.list(dstPrefix, signal))).length > 0;
     if (resume && db.setting(marker) !== of) fail(409, `production already has files under ${dstPrefix}`);
     db.setSetting(marker, of);
-    const copied = await copyRelease({ staging, production, srcPrefix: previewPrefix(studio, game, ref), dstPrefix, resume, ...budget })
+    const copied = await copyRelease({ staging, production, srcPrefix: previewPrefix(studio, game, ref), dstPrefix, resume, callTimeoutMs: deps.storageTimeoutMs, ...budget })
       .catch((err) => { if (err instanceof ReleaseLayoutError) fail(400, `Can’t release ${ref}: ${err.message}.`); throw err; });
     if (copied.remaining) return { pending: copied.remaining, files: copied.files };
     if (db.release(game.id, version)) fail(409, `release ${version} already exists and can't be changed`); // a parallel call finished it
@@ -248,15 +254,31 @@ export function createApp(deps: AppDeps) {
   // if a copy fails part-way, the previous release is put back so players never keep a mixed folder.
   // With a deadline (the admin task `release`) it may stop part-way and answer { pending: remaining }; a settings
   // key remembers how far it got, and the next call for the same version carries on from there.
-  const switching = new Set<number>();
+  // The lock: one switch per game, taken over when it goes stale (no progress for SWITCH_STALE_MS, e.g. a request
+  // that hung, or a handler whose client went away). Taking it over aborts what the old switch still has in flight;
+  // the old switch then touches neither the files nor the settings key again, and the new one carries on from that
+  // key (copying the same file twice is harmless; a different version starts from the top and removes stale files).
+  const switching = new Map<number, { startedAt: number; touchedAt: number; stop: AbortController }>();
   async function promoteStep(studio: Studio, game: Game, version: string, actor: string, budget: Budget = {}):
     Promise<{ current: string; previous: string | null; rollback: boolean; url: string } | { pending: number; files: number }> {
     const production = productionStorage();
     const release = db.release(game.id, version);
     if (!release) fail(404, `${version} hasn't been approved for ${studio.slug}/${game.slug}`);
     if (release.withdrawn_at) fail(409, `${version} was withdrawn by Vault${release.withdrawn_note ? `: ${release.withdrawn_note}` : ''}. Restore it before making it current.`);
-    if (switching.has(game.id)) fail(409, `${studio.slug}/${game.slug} is already switching versions; try again in a minute`);
-    switching.add(game.id);
+    const now = Date.now();
+    const held = switching.get(game.id);
+    if (held && now - held.touchedAt <= SWITCH_STALE_MS) {
+      const ago = (t: number) => `${Math.round((now - t) / 1000)} s ago`;
+      fail(409, `${studio.slug}/${game.slug} is already switching versions (started ${ago(held.startedAt)}, last progress ${ago(held.touchedAt)}); try again in a minute. A switch with no progress for ${SWITCH_STALE_MS / 60_000} minutes is taken over.`);
+    }
+    if (held) {
+      held.stop.abort(new Error(`the switch was taken over after ${Math.round((now - held.touchedAt) / 1000)} s without progress`));
+      db.audit(actor, 'release.lock_takeover', `${studio.slug}/${game.slug}/`, { version, held_since: new Date(held.startedAt).toISOString(), last_progress: new Date(held.touchedAt).toISOString() });
+    }
+    const lock = { startedAt: now, touchedAt: now, stop: new AbortController() };
+    switching.set(game.id, lock);
+    const owned = () => switching.get(game.id) === lock;
+    const steps: Budget = { callTimeoutMs: deps.storageTimeoutMs, ...budget, signal: lock.stop.signal, onProgress: () => { lock.touchedAt = Date.now(); } };
     try {
       const previous = db.currentRelease(game.id);
       const gamePrefix = `${studio.slug}/${game.slug}/`;
@@ -265,12 +287,16 @@ export function createApp(deps: AppDeps) {
       const skip = saved?.version === version ? saved.done : 0;
       let live;
       try {
-        live = await makeLive(production, gamePrefix, version, { ...budget, skip });
+        live = await makeLive(production, gamePrefix, version, { ...steps, skip });
       } catch (err) {
+        // Taken over: the new owner has the folder and the settings key now.
+        if (!owned()) fail(409, `${studio.slug}/${game.slug}: ${(err as Error).message}`);
         db.setSetting(marker, '');
-        if (previous) await makeLive(production, gamePrefix, previous.version).catch(() => {});
+        // Put the previous release back in full: no deadline, so it can't stop half-way.
+        if (previous) await makeLive(production, gamePrefix, previous.version, { ...steps, deadline: undefined }).catch(() => {});
         throw err;
       }
+      if (!owned()) fail(409, `${studio.slug}/${game.slug}: the switch was taken over by a later call`);
       if (live.remaining) {
         db.setSetting(marker, JSON.stringify({ version, done: live.done }));
         return { pending: live.remaining, files: live.files };
@@ -281,7 +307,7 @@ export function createApp(deps: AppDeps) {
       db.audit(actor, rollback ? 'release.rollback' : 'release.promote', gamePrefix, { from: previous?.version ?? null, to: version });
       return { current: version, previous: previous?.version ?? null, rollback, url: `${deps.prodPublicUrl}/${gamePrefix}` };
     } finally {
-      switching.delete(game.id);
+      if (owned()) switching.delete(game.id);
     }
   }
   async function promoteRelease(studio: Studio, game: Game, version: string, actor: string) {

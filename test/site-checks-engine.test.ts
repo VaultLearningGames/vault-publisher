@@ -129,7 +129,7 @@ describe('the services check', () => {
 });
 
 describe('site checks engine', { skip: chromium ? false : 'Chromium is not installed (npx playwright install chromium-headless-shell)' }, () => {
-  let site: http.Server, games: http.Server, origin = '', gamePort = 0;
+  let site: http.Server, games: http.Server, origin = '', gamePort = 0, analyticsHits = 0;
   let run: SiteCheckRun;
   const png = bigPng();
 
@@ -138,12 +138,19 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
       const path = req.url?.split('?')[0];
       const canvasPage = '<!doctype html><title>g</title><body style="margin:0"><canvas id=c width=400 height=300 style="width:100%;height:100vh"></canvas><script>var c=document.getElementById("c").getContext("2d");for(var i=0;i<12;i++){c.fillStyle="hsl("+i*30+",80%,50%)";c.fillRect(i*30,i*20,60,60)}</script></body>';
       if (path === '/denied/') { res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'DENY' }); res.end(canvasPage); return; }
-      if (path === '/game/' || path === '/tab/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(canvasPage); return; }
+      if (path === '/game/' || path === '/tab/' || path === '/away/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(canvasPage); return; }
+      // Games that get away from the Vault player: by taking the whole tab, by opening a window, or as a launcher whose
+      // Play opens the game in a new tab.
+      if (path === '/bust/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html><title>b</title><script>top.location.href = location.origin + "/away/";</script>'); return; }
+      if (path === '/popup/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(canvasPage.replace('</body>', '<script>window.open(location.origin + "/away/")</script></body>')); return; }
+      if (path === '/launcher/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html><title>l</title><body style="background:#246"><h1 style="color:#fff">A great game</h1><a href="/game/" target="_blank" style="display:inline-block;padding:20px;background:#fc0">Play now</a></body>'); return; }
       res.writeHead(404); res.end('no');
     });
     gamePort = await listen(games);
     site = http.createServer(async (req, res) => {
       const path = (req.url ?? '/').split('?')[0];
+      // Cloudflare Web Analytics' beacon address: the checker must never reach it (it would count as a visit).
+      if (path === '/cdn-cgi/rum') { analyticsHits++; res.writeHead(204); res.end(); return; }
       if (path === '/img/bad.png') { res.writeHead(200, { 'content-type': 'image/png' }); res.end('this is not a png'); return; }
       // A 200 KB script that doesn't compress, as /lazy/ asks for it only after its load event (like the site's analytics).
       if (path === '/js/late.js') { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(`/* ${png.subarray(0, 150_000).toString('base64')} */`); return; }
@@ -168,7 +175,7 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
   test('the run finishes with a summary for every check', () => {
     assert.equal(run.status, 'done', run.error ?? '');
     assert.deepEqual(run.summaries.map((s) => [s.check, s.status]), [['games', 'done'], ['assets', 'done'], ['links', 'done'], ['spelling', 'done'], ['performance', 'done'], ['responsive', 'done']]);
-    assert.equal(run.pages, 11);                    // home, 8 pages, /ghost/ from the sitemap and /nope/ from a link (both 404)
+    assert.equal(run.pages, 14);                    // home, 11 pages, /ghost/ from the sitemap and /nope/ from a link (both 404)
     assert.ok(run.summaries.find((s) => s.check === 'responsive')!.checked >= 4 * 8);
   });
 
@@ -221,6 +228,11 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
     assert.ok(run.findings.some((f) => f.code === 'perf.large-file' && f.target.endsWith('/js/late.js')));
   });
 
+  test('the checker never reports a visit to analytics; the beacon isn\'t a failed request either', () => {
+    assert.equal(analyticsHits, 0);
+    assert.ok(!run.findings.some((f) => f.target.includes('/cdn-cgi/rum')), JSON.stringify(run.findings.filter((f) => f.target.includes('/cdn-cgi/rum'))));
+  });
+
   test('performance: timings come from a throttled load (Slow 4G)', () => {
     // 720 KB at about 1.4 Mbps takes over four seconds, which the runner's own connection never would.
     const slow = run.findings.find((f) => f.check === 'performance' && f.code === 'perf.slow-paint' && f.target === '/lazy/');
@@ -230,10 +242,26 @@ describe('site checks engine', { skip: chromium ? false : 'Chromium is not insta
   });
 
   test('games: one opens in the player, one refuses framing, one opens in a new tab', () => {
-    assert.equal(run.games, 3);                     // the player opened for /game/ and /noframe/ (empty), and /tab/ in its own tab
+    // The player opened for /game/, /noframe/ (empty), /bust/, /popup/ and /launcher/, and /tab/ in its own tab.
+    assert.equal(run.games, 6);
     assert.ok(has('games', 'game.failed', (f) => f.page === '/noframe/' && /refused to be shown/.test(f.message)));
-    assert.ok(!run.findings.some((f) => f.check === 'games' && (f.page === '/game/' || f.page === '/tab/')), JSON.stringify(run.findings.filter((f) => f.check === 'games')));
-    assert.equal(run.summaries.find((s) => s.check === 'games')!.checked, 3);
+    assert.ok(!run.findings.some((f) => f.check === 'games' && f.page === '/game/' && f.code !== 'game.slow'), JSON.stringify(run.findings.filter((f) => f.check === 'games')));
+    // The tab game works; it is only without the Vault player's bar.
+    assert.deepEqual(run.findings.filter((f) => f.check === 'games' && f.page === '/tab/' && f.code !== 'game.slow').map((f) => `${f.level}:${f.code}`), ['warn:game.own-tab']);
+    assert.equal(run.summaries.find((s) => s.check === 'games')!.checked, 6);
+  });
+
+  test('games that get away from the Vault player: warnings, each saying how', () => {
+    const on = (page: string) => run.findings.filter((f) => f.check === 'games' && f.page === page);
+    const show = () => JSON.stringify(run.findings.filter((f) => f.check === 'games').map((f) => `${f.page} ${f.level}:${f.code} ${f.message}`));
+    assert.deepEqual(on('/bust/').map((f) => `${f.level}:${f.code}`), ['warn:game.leaves-player'], show());
+    assert.match(on('/bust/')[0].message, /takes the whole tab away from Vault to http:\/\/127\.0\.0\.1:\d+\/away\//);
+    assert.ok(on('/popup/').some((f) => f.level === 'warn' && f.code === 'game.leaves-player' && /opens a window of its own/.test(f.message)), show());
+    assert.ok(on('/launcher/').some((f) => f.level === 'warn' && f.code === 'game.launcher' && /“Play now” opens the game in a new tab/.test(f.message)), show());
+    assert.ok(on('/tab/').some((f) => f.level === 'warn' && f.code === 'game.own-tab'), show());
+    for (const p of ['/bust/', '/popup/', '/launcher/', '/tab/']) assert.ok(on(p).every((f) => f.level === 'warn'), show());
+    // A game that stays in the player has nothing to say about it (a busy test machine may still find it slow).
+    assert.deepEqual(on('/game/').filter((f) => f.code !== 'game.slow'), [], show());
   });
 
   test('every finding keeps the details the portal’s tables show', () => {

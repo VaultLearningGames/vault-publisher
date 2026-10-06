@@ -2,7 +2,7 @@
 // what it saw to src/site-checks.ts, which decides what is wrong. This file only gathers and routes; it holds no
 // thresholds or wording about findings.
 import type { Browser, BrowserContext } from 'playwright';
-import { assetFindings, CHECKS, finishRun, LIMITS, performanceFindings, responsiveFindings, gameFindings, SERVICES } from '../site-checks.ts';
+import { assetFindings, CHECKS, finishRun, gameIdentityFindings, LIMITS, performanceFindings, responsiveFindings, gameFindings, SERVICES } from '../site-checks.ts';
 import type { CheckName, CheckResult, Engine, GameLoad, PageText, RawFinding, RunOptions, SiteCheckRun } from '../site-checks.ts';
 import { launchBrowser, makeHostGuard, NO_BROWSER, newContext } from './browser.ts';
 import type { HostGuard } from './browser.ts';
@@ -204,6 +204,8 @@ export const runSiteChecks: Engine = async (options) => {
           });
           base.games = loads.filter((g) => g.opened).length;
           const findings: RawFinding[] = loads.flatMap(gameFindings);
+          // Each game page plays its own listing's game, and no two listings play the same one.
+          if (options.catalog?.length) findings.push(...gameIdentityFindings(options.catalog, all.map((v) => ({ path: v.load.path, game: v.game, plays: v.plays }))));
           return { checked: loads.length, findings };
         } finally { await scratchCtx.close().catch(() => {}); }
       });

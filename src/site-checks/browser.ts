@@ -37,9 +37,16 @@ export function makeHostGuard(): HostGuard {
 
 type ContextOptions = NonNullable<Parameters<Browser['newContext']>[0]>;
 
+// Analytics reports: a check must not count as a visit. The checker loads hundreds of pages a run in a real browser,
+// which Cloudflare Web Analytics and Google Analytics would record as visitors (staging showed 2.3k page views a day,
+// nearly all ours). Their scripts still download, so they still count toward a page's weight; only the hits that
+// report a page view or an event are answered here, with an empty 204, so they aren't failed requests either.
+export const ANALYTICS_HIT = /^https?:\/\/(?:[^/]+\/cdn-cgi\/rum\b|(?:[a-z0-9-]+\.)*(?:google-analytics\.com|analytics\.google\.com|doubleclick\.net)\/(?:[a-z]\/|mp\/)?collect\b)/i;
+
 export async function newContext(browser: Browser, options: ContextOptions, guard: HostGuard | null): Promise<BrowserContext> {
   // Service workers would answer requests before the guard sees them.
   const ctx = await browser.newContext({ ...options, serviceWorkers: 'block' });
+  await ctx.route(ANALYTICS_HIT, (route) => route.fulfill({ status: 204, body: '' }).catch(() => {}));
   if (guard) {
     await ctx.route('**/*', async (route) => {
       let host = '';

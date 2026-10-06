@@ -14,6 +14,7 @@ export interface Visit {
   text: string;                         // what a reader reads, for spelling
   title: string;                        // the page's h1, or its title
   plays: { wired: string[]; newTab: string[] };
+  game: string;                         // the listing a game page is for (its vault:game), else ''
   views: ViewSeen[];
 }
 
@@ -48,7 +49,7 @@ async function resize(page: Page, name: ViewportName) {
 const quiet = (page: Page, ms: number) => page.waitForLoadState('networkidle', { timeout: ms }).catch(() => {});
 
 export async function visitPage(env: VisitEnv, path: string): Promise<Visit> {
-  const empty = (load: PageLoad): Visit => ({ load, links: [], ids: new Set(), text: '', title: '', plays: { wired: [], newTab: [] }, views: [] });
+  const empty = (load: PageLoad): Visit => ({ load, links: [], ids: new Set(), text: '', title: '', plays: { wired: [], newTab: [] }, game: '', views: [] });
   const page = await env.laptop.newPage();
   let visit: Visit;
   try {
@@ -114,7 +115,7 @@ export async function visitPage(env: VisitEnv, path: string): Promise<Visit> {
     visit = {
       load: { path, status, error: null, timing, images: data.images, scriptErrors, resources, refs: data.refs },
       links: data.links.map((l) => ({ ...l, page: path })),
-      ids: new Set(data.ids), text: data.text, title: data.heading || data.title, plays: data.plays, views,
+      ids: new Set(data.ids), text: data.text, title: data.heading || data.title, plays: data.plays, game: data.game ?? '', views,
     };
   } catch (e) {
     return empty(emptyLoad(path, null, shortError(e)));

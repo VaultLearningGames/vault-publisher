@@ -232,6 +232,28 @@
     findStudio(function (name) { if (studioEl) studioEl.textContent = name ? 'by ' + name : ''; });
     document.documentElement.classList.add('vault-player-open');
     if (!(history.state && history.state.vaultPlayer)) history.pushState({ vaultPlayer: true }, '', '#play');
+    fitPopup();
+  }
+
+  // A popup another site opened for a game (PBS Wisconsin Education's "Play the Game" opens the old game addresses,
+  // now redirected here, in an 880 x 582 window: the size the game was made for) grows by the bar's height, so the
+  // game keeps the whole window it was given and the bar sits above it. Only a window opened by script can be
+  // resized; in a tab, or a window the person sized, browsers ignore it. Once per page.
+  var popupFitted = false;
+  function fitPopup() {
+    if (popupFitted || !window.opener) return;
+    popupFitted = true;
+    var bar = player && player.querySelector('.vault-player__bar');
+    var h = bar ? bar.offsetHeight : 0;
+    if (h <= 0) return;
+    var want = window.innerHeight + h;
+    try { window.resizeBy(0, h); } catch (e) { return; /* not allowed: the game plays a little smaller */ }
+    // Browsers can round the first resize by a pixel or so: top it up once, after it lands.
+    window.addEventListener('resize', function once() {
+      window.removeEventListener('resize', once);
+      var short = want - window.innerHeight;
+      if (short > 0 && short <= 8) try { window.resizeBy(0, short); } catch (e) { /* close enough */ }
+    });
   }
 
   // Load game i into the player.

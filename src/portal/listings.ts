@@ -54,12 +54,48 @@ export function listingPieces(h: ListingHelpers) {
   const currentOf = (g: Game | null) => (g ? db.currentRelease(g.id) ?? null : null);
   const cdnUrl = (s: Studio, g: Game) => `${h.deps.prodPublicUrl}/${s.slug}/${g.slug}/`;
 
+  // Whether vaultlearninggames.org shows a listing's latest published change yet. The site is a build of the catalog,
+  // made by the deploy workflow ("Rebuild the site only" after a publish), which reports each build to the portal
+  // (POST /v1/admin/site-builds). A change after the newest build's catalog is on its way; with no build reported yet,
+  // nothing is known and nothing is shown.
+  function siteSync(l: ListingRow | null) {
+    const b = db.lastSiteBuild();
+    if (!l || !b || !l.site_changed_at || l.site_changed_at <= b.catalog_at) return null;
+    return { onSite: b.slugs.includes(l.slug), removing: !l.published, since: l.site_changed_at, builtAt: b.catalog_at };
+  }
+
+  // "Publishing to the site" (a first publish), "Publishing changes" (it's on the site, a newer version is on its way)
+  // or "Coming off the site", while the site hasn't been rebuilt since; '' otherwise.
+  function publishing(l: ListingRow | null): Html | '' {
+    const p = siteSync(l);
+    if (!p) return '';
+    const label = p.removing ? 'Coming off the site' : p.onSite ? 'Publishing changes' : 'Publishing to the site';
+    const what = p.removing ? 'Taken off the site' : 'Published';
+    const title = `${what} ${ago(p.since)}. The site was last built ${ago(p.builtAt)}, before that; it changes with its next build.`;
+    return html`<span class="pill p-run" title="${title}"><span class="spin" aria-hidden="true"></span>${label}</span>`;
+  }
+
+  // The sentence under the status on a game page while a change is on its way, with how to rebuild for Vault staff.
+  function publishingNote(u: User, l: ListingRow | null): Html | '' {
+    const p = siteSync(l);
+    if (!p) return '';
+    const what = p.removing ? 'Taken off the site' : 'Published';
+    const rebuild = h.isStaff(u)
+      ? html` <a href="https://github.com/${h.deps.adminRepository}/actions/workflows/deploy.yml" target="_blank" rel="noopener">Rebuild the site</a> (Deploy, “Rebuild the site only”) to put it there now; it takes about two minutes.`
+      : ' Vault rebuilds the site to put it there.';
+    return html`<p class="small">${what} ${ago(p.since)}; vaultlearninggames.org was last built ${ago(p.builtAt)} and doesn’t show this yet.${rebuild}</p>`;
+  }
+
   function state(l: ListingRow | null): Html {
     if (!l) return pill('off', 'Not on the site');
-    if (l.review === 'submitted') return pill('wait', 'Waiting for Vault');
-    if (l.review === 'returned') return pill('bad', 'Sent back');
-    if (!l.published) return pill('off', 'Not on the site');
-    return changedFields(l.published, l.draft).length ? pill('run', 'Unpublished changes') : pill('ok', 'On the site');
+    const p = siteSync(l);
+    const coming = publishing(l);
+    if (l.review === 'submitted') return html`${pill('wait', 'Waiting for Vault')}${coming ? html` ${coming}` : ''}`;
+    if (l.review === 'returned') return html`${pill('bad', 'Sent back')}${coming ? html` ${coming}` : ''}`;
+    if (!l.published) return p?.onSite ? (coming as Html) : pill('off', 'Not on the site');
+    if (p && !p.onSite) return coming as Html;   // published, but not on the site until the next build
+    const main = changedFields(l.published, l.draft).length ? pill('run', 'Unpublished changes') : pill('ok', 'On the site');
+    return coming ? html`${main} ${coming}` : main;
   }
 
   // The "Hosted by" column: how the site hosts the game today (its published listing, else the draft).
@@ -152,8 +188,10 @@ export function listingPieces(h: ListingHelpers) {
       </div>
       ${edit ? html`<div class="form-foot">${saveControls(vault, l)}${previewButtons(api, h.deps.previewSites)}${err}</div>` : ''}
     </form>`;
+    const coming = siteSync(l);
     const side = html`<div class="card"><h2>Site listing</h2><p>${state(l)}</p>
-        ${l.published ? html`<p class="small">On the site since ${l.published_at?.slice(0, 10)} (${who(l.published_by ?? '')}).</p>` : html`<p class="small muted">Not on the site yet.</p>`}
+        ${coming ? publishingNote(u, l)
+          : l.published ? html`<p class="small">On the site since ${l.published_at?.slice(0, 10)} (${who(l.published_by ?? '')}).</p>` : html`<p class="small muted">Not on the site yet.</p>`}
         ${l.review === 'submitted' ? html`<p class="small">Submitted ${ago(l.submitted_at)} by ${who(l.submitted_by ?? '')}.</p>` : ''}
         ${l.review_note ? html`<p class="small"><b>Vault:</b> ${l.review_note}</p>` : ''}
         ${changed.length ? html`<p class="small"><b>Not on the site yet:</b> ${changed.map((k) => FIELD_LABEL[k]).join(', ')}</p>` : ''}
@@ -186,7 +224,7 @@ export function listingPieces(h: ListingHelpers) {
         <button class="btn">Connect</button>${err}</form>` : ''}</div>`;
   }
 
-  return { canEdit, canPublish, state, hosting, playCard, editor, createListingCard, linkCard };
+  return { canEdit, canPublish, state, publishing, hosting, playCard, editor, createListingCard, linkCard };
 }
 
 export function registerListingPages(app: Hono, h: ListingHelpers) {
@@ -276,7 +314,8 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
           ${availabilityCells(run, l.slug)}<td class="small nowrap">${ago(l.updated_at)}</td></tr>${e ? featRow(l, e) : ''}`;
       });
     const checked = run ? html` Availability from the latest daily check, ${ago(run.checked_at)}: ${run.fail_count} failing, ${run.warn_count} worth a look (hover a result for why).` : ' No availability checks yet.';
-    const sub = html`${count((l) => !!l.published)} of ${all.length} games are on the site; ${count(onCdn)} play from the Vault CDN. ${feat.games.length} of at most ${MAX_FEATURED} are featured on the home page, in ascending sequence (ties by title). Rows are in Testing Status order — Failure first, then Needs Review, then Passing — and within each group, featured games keep that order, then the rest by page address.${checked} The site is built from /v1/catalog.`;
+    const coming = count((l) => !!P.publishing(l));
+    const sub = html`${count((l) => !!l.published)} of ${all.length} games are published${coming ? html` (${coming} on ${coming === 1 ? 'its' : 'their'} way to the site)` : ''}; ${count(onCdn)} play from the Vault CDN. ${feat.games.length} of at most ${MAX_FEATURED} are featured on the home page, in ascending sequence (ties by title). Rows are in Testing Status order — Failure first, then Needs Review, then Passing — and within each group, featured games keep that order, then the rest by page address.${checked} The site is built from /v1/catalog.`;
     const actions = html`<a class="btn" href="https://github.com/${h.deps.adminRepository}/actions/workflows/check-games.yml" target="_blank" rel="noopener">Run a check ↗</a><a class="btn" href="/v1/catalog" target="_blank">Catalog JSON ↗</a>`;
     const body = html`${head('Game Catalog', sub, actions)}
       ${queue.length ? html`<h2>Waiting for Vault (${queue.length})</h2><div class="grid">${queue}</div>` : html`<div class="card"><p class="muted">No site changes are waiting for review.</p></div>`}

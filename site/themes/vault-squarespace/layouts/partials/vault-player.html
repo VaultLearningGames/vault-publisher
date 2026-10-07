@@ -277,12 +277,26 @@
     for (var k = 0; k < SOURCE_CHANNELS.length; k++) if (SOURCE_CHANNELS[k][0] === origin) return SOURCE_CHANNELS[k][1];
     return 'other';
   }
+  // A CDN redirect can land a second Vault player wrapper here. Preserve its query contract instead of letting the
+  // wrapper's own referrer (the CDN) replace the original source, then re-stamp the contract on the real game frame.
+  function acquisition() {
+    try {
+      var q = new URL(location.href).searchParams, src = q.get('vault_src') || q.get('vault_referrer');
+      if (src) {
+        var parsed = new URL(src);
+        return { origin: parsed.origin + '/', channel: q.get('vault_ch') || sourceChannel(parsed.origin) };
+      }
+      var ref = document.referrer && new URL(document.referrer);
+      if (!ref || ref.host === location.host) return null;
+      return { origin: ref.origin + '/', channel: sourceChannel(ref.origin) };
+    } catch (e) { return null; }
+  }
   function withReferrer(src) {
     try {
-      var u = new URL(src, location.href), ref = document.referrer && new URL(document.referrer);
-      if (!ref || ref.host === location.host) return src;   // no off-site acquisition path to pass
-      u.searchParams.set('vault_src', ref.origin + '/');
-      u.searchParams.set('vault_ch', sourceChannel(ref.origin));
+      var u = new URL(src, location.href), source = acquisition();
+      if (!source) return src;
+      u.searchParams.set('vault_src', source.origin);
+      u.searchParams.set('vault_ch', source.channel);
       return u.href;
     } catch (e) { return src; }
   }

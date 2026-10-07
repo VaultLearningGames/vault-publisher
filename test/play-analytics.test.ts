@@ -152,11 +152,19 @@ describe('on a game page', () => {
       ...(withGtag ? { gtag: (...a: unknown[]) => calls.push(a) } : {}),
     };
     const fire = (k: string, e: any = {}) => (listeners[k] ?? []).forEach((f) => f(e));
-    return { tracker: install(win), calls, fire, doc };
+    return { tracker: install(win), calls, fire, doc, win };
   }
   const link = (href: string, text: string, wired = false) => ({ closest: () => ({ getAttribute: () => href, hasAttribute: (a: string) => wired && a === 'data-vault-play', textContent: text }) });
 
-  test('the player’s open and close become play events, with the game in a user property', () => {
+  test('the player contract can restore source attribution from a passed query string', () => {
+    const p = page({ 'vault:game': 'wake', 'vault:studio-slug': 'fieldday' });
+    p.win.location.href = 'https://vaultlearninggames.org/wake?vault_src=https%3A%2F%2Fpbslearningmedia.org%2F&vault_ch=pbslm';
+    p.fire('vault-player:open');
+    assert.equal((p.calls[1][2] as Record<string, unknown>).source_referrer, 'https://pbslearningmedia.org/');
+    assert.equal((p.calls[1][2] as Record<string, unknown>).source_channel, 'pbslm');
+  });
+
+  test('a player’s open and close become play events, with the game in a user property', () => {
     const p = page({ 'vault:game': 'wake', 'vault:studio-slug': 'fieldday' });
     p.fire('vault-player:open');
     assert.deepEqual(p.calls[0], ['set', 'user_properties', { vault_game: 'wake' }]);

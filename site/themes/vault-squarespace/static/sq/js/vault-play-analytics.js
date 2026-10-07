@@ -108,7 +108,12 @@ const SOURCE_CHANNELS = {
 /** The acquisition path as GA event params: {} when the visitor came straight to this page (or from this site). */
 function sourceOf(win) {
   let ref;
-  try { ref = win.document.referrer && new URL(win.document.referrer); } catch { return {}; }
+  try {
+    const q = new URL(win.location.href).searchParams;
+    const passed = q.get('vault_src') || q.get('vault_referrer');
+    if (passed) { const parsed = new URL(passed); return { source_referrer: parsed.origin + '/', source_channel: q.get('vault_ch') || SOURCE_CHANNELS[parsed.origin] || 'other' }; }
+    ref = win.document.referrer && new URL(win.document.referrer);
+  } catch { return {}; }
   if (!ref || ref.host === win.location.host) return {};
   return { source_referrer: ref.origin + '/', source_channel: SOURCE_CHANNELS[ref.origin] || 'other' };
 }

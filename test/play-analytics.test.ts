@@ -136,7 +136,7 @@ describe('play events', () => {
 });
 
 describe('on a game page', () => {
-  function page(metas: Record<string, string>, withGtag = true) {
+  function page(metas: Record<string, string>, withGtag = true, locationHref = 'https://vaultlearninggames.org/wake#play') {
     const listeners: Record<string, ((e: any) => void)[]> = {};
     const on = (k: string, fn: (e: any) => void) => { (listeners[k] ??= []).push(fn); };
     const calls: unknown[][] = [];
@@ -146,7 +146,7 @@ describe('on a game page', () => {
       addEventListener: (k: string, fn: (e: any) => void) => on(k, fn),
     };
     const win: any = {
-      document: doc, location: { href: 'https://vaultlearninggames.org/wake#play', host: 'vaultlearninggames.org' },
+      document: doc, location: { href: locationHref, host: 'vaultlearninggames.org' },
       addEventListener: (k: string, fn: (e: any) => void) => on(`win:${k}`, fn),
       setInterval: () => 1, clearInterval: () => {}, crypto: { randomUUID: () => 'uuid' },
       ...(withGtag ? { gtag: (...a: unknown[]) => calls.push(a) } : {}),
@@ -157,8 +157,7 @@ describe('on a game page', () => {
   const link = (href: string, text: string, wired = false) => ({ closest: () => ({ getAttribute: () => href, hasAttribute: (a: string) => wired && a === 'data-vault-play', textContent: text }) });
 
   test('the player contract can restore source attribution from a passed query string', () => {
-    const p = page({ 'vault:game': 'wake', 'vault:studio-slug': 'fieldday' });
-    p.win.location.href = 'https://vaultlearninggames.org/wake?vault_src=https%3A%2F%2Fpbslearningmedia.org%2F&vault_ch=pbslm';
+    const p = page({ 'vault:game': 'wake', 'vault:studio-slug': 'fieldday' }, true, 'https://vaultlearninggames.org/wake?vault_src=https%3A%2F%2Fpbslearningmedia.org%2F&vault_ch=pbslm');
     p.fire('vault-player:open');
     assert.equal((p.calls[1][2] as Record<string, unknown>).source_referrer, 'https://pbslearningmedia.org/');
     assert.equal((p.calls[1][2] as Record<string, unknown>).source_channel, 'pbslm');

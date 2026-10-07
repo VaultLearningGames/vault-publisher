@@ -53,6 +53,8 @@
   .vault-player__frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
   .vault-player__frame.is-fit { inset: auto; left: 0; top: 0; transform-origin: 0 0; }
   html.vault-player-open, html.vault-player-open body { overflow: hidden !important; }
+  /* ?no-vault-nav=1 on the game page: the bar is for show, the game gets the whole window. Analytics run as usual. */
+  .vault-player.no-vault-nav .vault-player__bar { display: none; }
   /* The Play gate: shown in the stage instead of the game when the game's smallest play area doesn't fit (below). */
   .vault-gate { position: absolute; inset: 0; overflow: auto; display: flex; padding: 24px 20px; color: #fff;
     background: radial-gradient(ellipse at 50% 30%, #12201d 0%, #000 70%);
@@ -224,6 +226,8 @@
   function show() {
     if (!player) build();
     if (player.classList.contains('is-open')) return;
+    // ?no-vault-nav=1: hide the bar (the game gets the whole window); everything else, analytics included, is unchanged.
+    try { if (new URL(location.href).searchParams.get('no-vault-nav')) player.classList.add('no-vault-nav'); } catch (e) {}
     lastFocus = document.activeElement;
     player.classList.add('is-open');
     var h1 = document.querySelector('h1');

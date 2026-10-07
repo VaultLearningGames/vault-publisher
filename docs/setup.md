@@ -334,7 +334,7 @@ the [staging cutover](#cutover-vaultlearninggames-stagingorg-from-r2-to-the-work
 | `/lakeland/` → 301 `/lakeland`, query string kept | A line per page in `_redirects` (`/lakeland/ /lakeland 301`). Without the line the hosting redirects too, with a 307 |
 | `/game-cards/category/Dev%3A+Field+Day+Lab`, `/game-cards/tag/Subject%3A+Family%2FConsumer+Science` (68 filter pages, spelled as Squarespace spelled them; the folders are `Dev:+Field+Day+Lab` and `Subject:+Family/Consumer+Science`) | The hosting serves a file only at the spelling `encodeURIComponent` gives each folder (`Dev%3A%2BField%2BDay%2BLab`) and redirects any other spelling there. A `200` line in `_redirects` per filter page serves Squarespace's spelling at once: `/…/Dev%3A+Field+Day+Lab /…/Dev%3A%2BField%2BDay%2BLab 200` |
 | `/game-cards/<card>` (99 on Squarespace: each game's Game Card, an indexed page of its own, some with ids like `blog-post-title-one-kma9a`) → 301 to the game's page | Hugo writes the list (`card-redirects.json`, from `data/squarespace/games.json`; not published), `src/site-hosting.ts` turns it into `_redirects` lines and refuses a target that isn't a page |
-| A game's build on the Vault CDN, opened outside the Vault player (address bar, new tab, bookmark, another site's iframe) → 302 to the game's page with the player open (`/wake#play`) | A Redirect Rule on each CDN hostname's zone, kept only in the Cloudflare dashboard ([Cloudflare rules that live only in the dashboard](#cloudflare-rules-that-live-only-in-the-dashboard), which also has its PBS Wisconsin exception) (Cloudflare → `vaultlearninggames.org` / `vaultlearninggames-staging.org` → Rules → Redirect Rules, "CDN builds only play in the Vault player") sends a browser's page load of a build (`Sec-Fetch-Dest: document`, or an iframe from another site: `Sec-Fetch-Site: cross-site`; paths ending in `/`, `.html` or `.htm`) to `https://<site>/cdn<path>`. Hugo writes each CDN game's folder and page (`cdn-redirects.json`, from the catalog; not published), and `src/site-hosting.ts` writes `/cdn/<folder>/` and `/cdn/<folder>/index.html` lines into `_redirects`. These are exact addresses, because a `*` line stops Cloudflare matching the percent-encoded filter lines. The player's own frame (same site), the game's scripts and data, curl and browsers without `Sec-Fetch-*` headers are not affected |
+| A game's build on the Vault CDN, opened outside the Vault player (address bar, new tab, bookmark, another site's iframe) → 302 to the game's page with the player open (`/wake#play`) | A Redirect Rule on each CDN hostname's zone, kept only in the Cloudflare dashboard ([Cloudflare rules that live only in the dashboard](#cloudflare-rules-that-live-only-in-the-dashboard)) (Cloudflare → `vaultlearninggames.org` / `vaultlearninggames-staging.org` → Rules → Redirect Rules, "CDN builds only play in the Vault player") sends a browser's page load of a build (`Sec-Fetch-Dest: document`, or an iframe from another site: `Sec-Fetch-Site: cross-site`; paths ending in `/`, `.html` or `.htm`) to `https://<site>/cdn<path>`. Hugo writes each CDN game's folder and page (`cdn-redirects.json`, from the catalog; not published), and `src/site-hosting.ts` writes `/cdn/<folder>/`, `/cdn/<folder>/index.html` and `/cdn/<folder>/iframe.html` lines into `_redirects`. These are exact addresses, because a `*` line stops Cloudflare matching the percent-encoded filter lines. The player's own frame (same site), the game's scripts and data, curl and browsers without `Sec-Fetch-*` headers are not affected |
 | `robots.txt` | Written by `src/site-hosting.ts`: nothing disallowed (Squarespace's file only kept crawlers out of its own machinery); production's names `https://vaultlearninggames.org/sitemap.xml`, other builds name none. Without a file of the site's, Cloudflare answers `/robots.txt` with its own comment-only "content signals" text; with one, the site's is served unchanged (checked on staging), as long as the zone's *managed robots.txt* (AI Crawl Control) stays off |
 | Title, description, canonical, Open Graph and structured data (JSON-LD: WebSite and Organization; on a game's page also the WebPage) | `partials/sq/head.html`. Titles and descriptions are Squarespace's where it had them (`seo_title`, `seo_description`); a game without one gets its short description |
 | `/s/keys-to-the-vault.pdf` → 301 `/files/keys-to-the-vault.pdf` | `_redirects` |
@@ -382,28 +382,26 @@ Read it there before changing how a game's build is reached, and update this sec
 
 Cloudflare → zone `vaultlearninggames.org` (and `vaultlearninggames-staging.org`) → Rules → Redirect Rules →
 **"CDN builds only play in the Vault player"**: a 302 to `https://<site>/cdn<path>`, keeping the query string. The
-production expression, as of 2026-10-06:
+production expression, as of 2026-10-07 (the same as staging's, with the host changed):
 
 ```
-(http.host eq "cdn.vaultlearninggames.org" and (ends_with(http.request.uri.path, "/") or ends_with(lower(http.request.uri.path), ".html") or ends_with(lower(http.request.uri.path), ".htm")) and (any(http.request.headers["sec-fetch-dest"][*] eq "document") or (any(http.request.headers["sec-fetch-dest"][*] in {"iframe" "frame" "embed" "object"}) and any(http.request.headers["sec-fetch-site"][*] eq "cross-site"))) and not (http.request.uri.path eq "/fieldday/jowilder/iframe.html" and (starts_with(http.referer, "https://pbswisconsineducation.org/") or starts_with(http.referer, "https://www.pbswisconsineducation.org/"))))
+(http.host eq "cdn.vaultlearninggames.org" and (ends_with(http.request.uri.path, "/") or ends_with(lower(http.request.uri.path), ".html") or ends_with(lower(http.request.uri.path), ".htm")) and (any(http.request.headers["sec-fetch-dest"][*] eq "document") or (any(http.request.headers["sec-fetch-dest"][*] in {"iframe" "frame" "embed" "object"}) and any(http.request.headers["sec-fetch-site"][*] eq "cross-site"))))
 ```
 
-- **The PBS Wisconsin exception** (the final `and not (...)`, production only): PBS Wisconsin Education's "Play the
-  game" pages open these games' old fielddaylab.wisc.edu addresses in a popup, and fielddaylab.wisc.edu's `.htaccess`
-  (fielddaylab/fielddaysite, branches `production`/`wwwtest`, README "PBS Wisconsin Education") sends PBS-referred
-  visitors straight to the build, without the Vault bar, as before Vault. The rule must let exactly those files
-  through for a PBS Referer: Jo Wilder's `/fieldday/jowilder/iframe.html`, and (to add) Legend of the Lost Emerald's
-  `/fieldday/emerald/` and `/fieldday/emerald/index.html`. A game that PBS should get without the bar needs **both** an
-  `.htaccess` rule there and its paths here. Without the exception, PBS players are bounced into the Vault player.
-  Each game's own analytics then tells PBS players (referrer `pbswisconsineducation.org`) from Vault players
-  (`vaultlearninggames.org`).
-- **What the rule's 302 lands on:** `_redirects` only has `/cdn/<folder>/` and `/cdn/<folder>/index.html` for each
-  CDN game. Any other page of a build (Jo Wilder's `iframe.html`, for example) opened outside the player goes to
+- **No exceptions.** Until 2026-10-07 a final `and not (...)` let PBS Wisconsin Education's popup (a PBS Referer on
+  `/fieldday/jowilder/iframe.html`) have the bare build. Now PBS players get the Vault player like everyone else:
+  fielddaylab.wisc.edu's `.htaccess` (fielddaylab/fielddaysite, README "PBS Wisconsin Education") 301s their old
+  addresses to the game's page, and the player passes the site that sent it to every game it opens as
+  `?vault_src=<origin>&vault_ch=<channel>` (`withReferrer` in `vault-player.html`; the embed contract — a game that
+  reads it reports it as its acquisition source; Jo Wilder does, so PBS plays stay distinguishable). The site's own
+  play events carry the same thing as `source_referrer`/`source_channel` (`sq/js/vault-play-analytics.js`), so the
+  acquisition path is visible to Vault even for games that ignore the param.
+- **What the rule's 302 lands on:** `_redirects` only has `/cdn/<folder>/`, `/cdn/<folder>/index.html` and
+  `/cdn/<folder>/iframe.html` for each CDN game. Any other page of a build opened outside the player goes to
   `/cdn/...` and gets the site's 404.
 - **Check it** from a terminal (`curl` sends no `Sec-Fetch-*` headers unless told to):
   `curl -sI -H 'sec-fetch-dest: document' -H 'sec-fetch-site: cross-site' https://cdn.vaultlearninggames.org/fieldday/wake/`
-  must answer 302 to `https://vaultlearninggames.org/cdn/fieldday/wake/`; the same with
-  `-H 'Referer: https://pbswisconsineducation.org/'` on `/fieldday/jowilder/iframe.html` must answer 200.
+  must answer 302 to `https://vaultlearninggames.org/cdn/fieldday/wake/`, whatever the Referer.
 
 ### The deploy's Cloudflare token
 
@@ -663,8 +661,7 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
 ## Operating notes
 
 - **The CDN's player-only rule is a Cloudflare dashboard rule, not code:** see
-  [Cloudflare rules that live only in the dashboard](#cloudflare-rules-that-live-only-in-the-dashboard), including
-  its PBS Wisconsin exception for Jo Wilder and Emerald.
+  [Cloudflare rules that live only in the dashboard](#cloudflare-rules-that-live-only-in-the-dashboard).
 - **Getting builds in:** the four paths studios have (a GitHub Action step, an automatic publish request, a .zip in
   the portal, a monitored web address) are described in the [README](../README.md#upload-builds). Studios pin the
   action at `@v1`, so a change to `action/` reaches them only when the `v1` tag is moved to a commit that has it:

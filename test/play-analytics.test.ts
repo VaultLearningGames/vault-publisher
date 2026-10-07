@@ -6,14 +6,14 @@ import assert from 'node:assert/strict';
 import { createPlayTracker, HEARTBEAT_MS, install } from '../site/themes/vault-squarespace/static/sq/js/vault-play-analytics.js';
 
 type Sent = { name: string; params: Record<string, unknown>; beacon: boolean };
-function rig(visible = true) {
+function rig(visible = true, source: Record<string, string> = {}) {
   let now = 1_000_000, visibleNow = visible, ids = 0;
   const sent: Sent[] = [];
   const timers = new Map<number, { fn: () => void; ms: number; next: number }>();
   let tid = 0;
   const t = createPlayTracker({
     send: (name: string, params: Record<string, unknown>, beacon: boolean) => sent.push({ name, params, beacon }),
-    now: () => now, visible: () => visibleNow, game: 'wake', studio: 'fieldday', newId: () => `p${++ids}`,
+    now: () => now, visible: () => visibleNow, game: 'wake', studio: 'fieldday', newId: () => `p${++ids}`, source,
     every: (fn: () => void, ms: number) => { timers.set(++tid, { fn, ms, next: now + ms }); return tid; },
     cancel: (h: number) => { timers.delete(h); },
   });
@@ -97,6 +97,19 @@ describe('play events', () => {
     assert.equal(total(r.sent), 60);
   });
 
+  test('an off-site acquisition source rides on every event of the play', () => {
+    const src = { source_referrer: 'https://www.sciencegamecenter.org/', source_channel: 'sciencegamecenter' };
+    const r = rig(true, src);
+    r.t.start('player');
+    r.advance(31_000);
+    r.t.close();
+    assert.ok(r.sent.length >= 3);
+    for (const e of r.sent) {
+      assert.equal(e.params.source_referrer, 'https://www.sciencegamecenter.org/');
+      assert.equal(e.params.source_channel, 'sciencegamecenter');
+    }
+  });
+
   test('a new-tab play is counted but not timed; a second play ends the first', () => {
     const r = rig();
     r.t.start('new_tab');
@@ -123,7 +136,7 @@ describe('play events', () => {
 });
 
 describe('on a game page', () => {
-  function page(metas: Record<string, string>, withGtag = true) {
+  function page(metas: Record<string, string>, withGtag = true, locationHref = 'https://vaultlearninggames.org/wake#play') {
     const listeners: Record<string, ((e: any) => void)[]> = {};
     const on = (k: string, fn: (e: any) => void) => { (listeners[k] ??= []).push(fn); };
     const calls: unknown[][] = [];
@@ -133,17 +146,24 @@ describe('on a game page', () => {
       addEventListener: (k: string, fn: (e: any) => void) => on(k, fn),
     };
     const win: any = {
-      document: doc, location: { href: 'https://vaultlearninggames.org/wake#play', host: 'vaultlearninggames.org' },
+      document: doc, location: { href: locationHref, host: 'vaultlearninggames.org' },
       addEventListener: (k: string, fn: (e: any) => void) => on(`win:${k}`, fn),
       setInterval: () => 1, clearInterval: () => {}, crypto: { randomUUID: () => 'uuid' },
       ...(withGtag ? { gtag: (...a: unknown[]) => calls.push(a) } : {}),
     };
     const fire = (k: string, e: any = {}) => (listeners[k] ?? []).forEach((f) => f(e));
-    return { tracker: install(win), calls, fire, doc };
+    return { tracker: install(win), calls, fire, doc, win };
   }
   const link = (href: string, text: string, wired = false) => ({ closest: () => ({ getAttribute: () => href, hasAttribute: (a: string) => wired && a === 'data-vault-play', textContent: text }) });
 
-  test('the player’s open and close become play events, with the game in a user property', () => {
+  test('the player contract can restore source attribution from a passed query string', () => {
+    const p = page({ 'vault:game': 'wake', 'vault:studio-slug': 'fieldday' }, true, 'https://vaultlearninggames.org/wake?vault_src=https%3A%2F%2Fpbslearningmedia.org%2F&vault_ch=pbslm');
+    p.fire('vault-player:open');
+    assert.equal((p.calls[1][2] as Record<string, unknown>).source_referrer, 'https://pbslearningmedia.org/');
+    assert.equal((p.calls[1][2] as Record<string, unknown>).source_channel, 'pbslm');
+  });
+
+  test('a player’s open and close become play events, with the game in a user property', () => {
     const p = page({ 'vault:game': 'wake', 'vault:studio-slug': 'fieldday' });
     p.fire('vault-player:open');
     assert.deepEqual(p.calls[0], ['set', 'user_properties', { vault_game: 'wake' }]);

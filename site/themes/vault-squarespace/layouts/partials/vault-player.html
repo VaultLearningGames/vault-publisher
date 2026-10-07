@@ -53,6 +53,8 @@
   .vault-player__frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
   .vault-player__frame.is-fit { inset: auto; left: 0; top: 0; transform-origin: 0 0; }
   html.vault-player-open, html.vault-player-open body { overflow: hidden !important; }
+  /* ?no-vault-nav=1 on the game page: the bar is for show, the game gets the whole window. Analytics run as usual. */
+  .vault-player.no-vault-nav .vault-player__bar { display: none; }
   /* The Play gate: shown in the stage instead of the game when the game's smallest play area doesn't fit (below). */
   .vault-gate { position: absolute; inset: 0; overflow: auto; display: flex; padding: 24px 20px; color: #fff;
     background: radial-gradient(ellipse at 50% 30%, #12201d 0%, #000 70%);
@@ -224,6 +226,8 @@
   function show() {
     if (!player) build();
     if (player.classList.contains('is-open')) return;
+    // ?no-vault-nav=1: hide the bar (the game gets the whole window); everything else, analytics included, is unchanged.
+    try { if (new URL(location.href).searchParams.get('no-vault-nav')) player.classList.add('no-vault-nav'); } catch (e) {}
     lastFocus = document.activeElement;
     player.classList.add('is-open');
     var h1 = document.querySelector('h1');
@@ -256,15 +260,48 @@
     });
   }
 
-  // A game on the Vault CDN gets the site that sent the player here, when that's another site, as ?vault_referrer=
-  // (its origin, e.g. https://pbswisconsineducation.org/ for PBS Wisconsin Education's "Play the game" popup). In the
-  // player the game's own referrer is always this page, so this is the only way its analytics can tell those plays
-  // from Vault's. Other sites' games are left alone.
+  // The acquisition source: the site that sent the visitor to this game page, when that's another site
+  // (e.g. https://pbswisconsineducation.org/ for PBS Wisconsin Education's "Play the game" popup). In the player the
+  // game's own referrer is always this page, so this is the only way a game's analytics can tell those plays from
+  // Vault's. The embed contract: every game the player opens gets ?vault_src=<source origin>&vault_ch=<channel>
+  // (CDN games and other sites' games alike; a game that reads it reports it as its acquisition source).
+  // vault_ch is a coarse label for the discovery sites that send us traffic, else "other" ("direct" with no referrer).
+  var SOURCE_CHANNELS = [
+    ['https://pbskids.org', 'pbskids'],
+    ['https://www.pbskids.org', 'pbskids'],
+    ['https://pbswisconsineducation.org', 'pbswi'],
+    ['https://www.pbswisconsineducation.org', 'pbswi'],
+    ['https://pbslearningmedia.org', 'pbslm'],
+    ['https://www.pbslearningmedia.org', 'pbslm'],
+    ['https://www.sciencegamecenter.org', 'sciencegamecenter'],
+    ['https://sciencegamecenter.org', 'sciencegamecenter']
+  ];
+  function sourceChannel(origin) {
+    if (!origin) return 'direct';
+    for (var k = 0; k < SOURCE_CHANNELS.length; k++) if (SOURCE_CHANNELS[k][0] === origin) return SOURCE_CHANNELS[k][1];
+    return 'other';
+  }
+  // A CDN redirect can land a second Vault player wrapper here. Preserve its query contract instead of letting the
+  // wrapper's own referrer (the CDN) replace the original source, then re-stamp the contract on the real game frame.
+  // A channel alone counts: ?vault_ch=pbswi on the game page is the partner's explicit statement of the path.
+  function acquisition() {
+    try {
+      var q = new URL(location.href).searchParams, src = q.get('vault_src') || q.get('vault_referrer');
+      if (src) {
+        var parsed = new URL(src);
+        return { origin: parsed.origin + '/', channel: q.get('vault_ch') || sourceChannel(parsed.origin) };
+      }
+      var ref = document.referrer && new URL(document.referrer);
+      if (!ref || ref.host === location.host) return q.get('vault_ch') ? { origin: '', channel: q.get('vault_ch') } : null;
+      return { origin: ref.origin + '/', channel: q.get('vault_ch') || sourceChannel(ref.origin) };
+    } catch (e) { return null; }
+  }
   function withReferrer(src) {
     try {
-      var u = new URL(src, location.href), ref = document.referrer && new URL(document.referrer);
-      if (!ref || ref.host === location.host || u.host !== 'cdn.' + location.host.replace(/^www\./, '')) return src;
-      u.searchParams.set('vault_referrer', ref.origin + '/');
+      var u = new URL(src, location.href), source = acquisition();
+      if (!source) return src;
+      if (source.origin) u.searchParams.set('vault_src', source.origin);
+      u.searchParams.set('vault_ch', source.channel);
       return u.href;
     } catch (e) { return src; }
   }
@@ -278,6 +315,7 @@
     frame.className = 'vault-player__frame';
     frame.setAttribute('allow', 'fullscreen; autoplay; gamepad; clipboard-write; accelerometer; gyroscope');
     frame.setAttribute('allowfullscreen', '');
+    frame.setAttribute('referrerpolicy', 'unsafe-url');   // let a game's own analytics see the full page that framed it
     frame.setAttribute('title', 'Game');
     fit = null;
     for (var k = 0; k < FIT.length; k++) if (games[i].indexOf(FIT[k][0]) === 0) fit = FIT[k];

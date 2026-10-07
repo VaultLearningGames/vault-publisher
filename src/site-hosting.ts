@@ -147,8 +147,9 @@ export function redirectsFile(files: string[], cards: CardRedirect[] = [], cdn: 
   }
   // A CDN build opened outside the player: its page with the player open (#play). 302, not 301: what the CDN holds at
   // a path can change. Exact addresses only (the folder and its index.html): one line with a "*" placeholder makes
-  // Cloudflare stop matching the percent-encoded filter lines above, which then get its own 307. Another page inside
-  // a build is the site's 404.
+  // Cloudflare stop matching the percent-encoded filter lines above, which then get its own 307. Field Day's builds
+  // also have an iframe.html (the game without its click-to-play page; Jo Wilder's is what PBS Wisconsin Education
+  // linked to), so that gets a line too. Another page inside a build is the site's 404.
   const cdnLines: string[] = [];
   const seen = new Map<string, string>();
   for (const { from, to } of [...cdn].sort((a, b) => a.from.localeCompare(b.from))) {
@@ -158,7 +159,7 @@ export function redirectsFile(files: string[], cards: CardRedirect[] = [], cdn: 
     if (before && before !== to) throw new Error(`CDN redirect ${from}: two games play it (${before}, ${to})`);
     if (before) continue;
     seen.set(from, to);
-    cdnLines.push(`${CDN_PREFIX}${from} ${to}#play 302`, `${CDN_PREFIX}${from}index.html ${to}#play 302`);
+    for (const page of ['', 'index.html', 'iframe.html']) cdnLines.push(`${CDN_PREFIX}${from}${page} ${to}#play 302`);
   }
   // Served at once (200) at the address everything links to, instead of a redirect to the hosting's spelling.
   const rewrites = pages.filter((p) => linkedPath(p) !== canonicalPath(p) && plain(linkedPath(p)))

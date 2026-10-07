@@ -146,12 +146,14 @@ describe('the static hosting files of the site', () => {
     ];
     const r = redirectsFile(SITE, CARDS, cdn);
     const lines = r.text.split('\n').filter((l) => l.startsWith('/cdn/'));
-    // Exact addresses, the folder and its index.html: no "*", which would stop Cloudflare matching the encoded lines.
+    // Exact addresses, the folder, its index.html and iframe.html: no "*", which would stop Cloudflare matching the encoded lines.
     assert.deepEqual(lines, [
       '/cdn/fieldday/wake/ /wake#play 302',
       '/cdn/fieldday/wake/index.html /wake#play 302',
+      '/cdn/fieldday/wake/iframe.html /wake#play 302',
       '/cdn/fieldday/yardgames/bacteria/ /pearl#play 302',
       '/cdn/fieldday/yardgames/bacteria/index.html /pearl#play 302',
+      '/cdn/fieldday/yardgames/bacteria/iframe.html /pearl#play 302',
     ]);
     assert.ok(!r.text.includes('*'), 'no placeholder anywhere in _redirects');
     assert.equal(r.cdn, 2);

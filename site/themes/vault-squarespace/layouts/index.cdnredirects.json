@@ -1,5 +1,5 @@
 {{- /* cdn-redirects.json: each game played from the Vault CDN, with its address there (path only) and its page. Read
-       by src/site-hosting.ts, which writes "/cdn<path>* <page>#play" into the hosting's _redirects. A Cloudflare
+       by src/site-hosting.ts, which writes "/cdn<path>{,index.html,iframe.html} <page>#play" into the hosting's _redirects. A Cloudflare
        rule on the CDN sends a browser that opens a game's build directly (address bar, new tab, another site's
        iframe) to /cdn<path> here, so a build is only ever played inside the Vault player. The file itself is not
        published. */ -}}

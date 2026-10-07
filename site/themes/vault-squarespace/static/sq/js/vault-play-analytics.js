@@ -6,7 +6,10 @@
 //   play_heartbeat  every 30 s while the player is open and the page is visible: play_seconds since the last event
 //   play_end        the player closed, or the page was hidden or left: the rest of the play's seconds
 // play_seconds adds up: the total of play_seconds over a play's events is how long the game was open and on screen.
-// Every event carries game_slug (the listing's slug in the portal), studio (its studio's slug), play_mode and play_id.
+// Every event carries game_slug (the listing's slug in the portal), studio (its studio's slug), play_mode and play_id,
+// and — when the visitor came from another site — source_referrer (that site's origin) and source_channel (a coarse
+// label: pbskids | pbswe | pbslm | sciencegamecenter | other; 'direct' with no referrer). The acquisition path is
+// captured here, at the page, because a game inside the player iframe never sees it (see the player's withReferrer).
 //
 // createPlayTracker is the timing logic, without the page (unit-tested in test/play-analytics.test.ts); install()
 // connects it to the page and gtag.
@@ -16,14 +19,14 @@ export const HEARTBEAT_MS = 30_000;
 /**
  * @param {{ send(name: string, params: Record<string, unknown>, beacon: boolean): void, now(): number,
  *   every(fn: () => void, ms: number): unknown, cancel(handle: unknown): void, visible(): boolean,
- *   game: string, studio: string, newId(): string, heartbeatMs?: number }} o
+ *   game: string, studio: string, newId(): string, heartbeatMs?: number, source?: Record<string, string> }} o
  */
 export function createPlayTracker(o) {
   const beat = o.heartbeatMs ?? HEARTBEAT_MS;
   // The play in the player: its id, milliseconds on screen not yet reported, since when it has been on screen (null
   // while the page is hidden), the heartbeat timer, and whether it has been reported up to date by a play_end.
   let play = null;
-  const base = () => ({ game_slug: o.game, studio: o.studio });
+  const base = () => ({ game_slug: o.game, studio: o.studio, ...(o.source || {}) });
 
   // Count the time on screen since `since`. A gap longer than two heartbeats means the timer didn't run (the computer
   // slept, or the browser stopped the page's timers): only up to two heartbeats of it are counted.
@@ -94,19 +97,38 @@ export function createPlayTracker(o) {
 // The links the player and the page treat as a game's Play button (the same test as partials/vault-player.html).
 const PLAY_LABEL = /^\s*(play( game| now)?|launch game)\s*$/i;
 
+// The discovery sites that send us traffic, as a coarse channel (the source_referrer/source_channel pair on the play
+// events; keep in step with the player's SOURCE_CHANNELS). Anything else off-site is 'other'; no referrer is 'direct'.
+const SOURCE_CHANNELS = {
+  'https://pbskids.org': 'pbskids', 'https://www.pbskids.org': 'pbskids',
+  'https://pbswisconsineducation.org': 'pbswe', 'https://www.pbswisconsineducation.org': 'pbswe',
+  'https://pbslearningmedia.org': 'pbslm', 'https://www.pbslearningmedia.org': 'pbslm',
+  'https://www.sciencegamecenter.org': 'sciencegamecenter', 'https://sciencegamecenter.org': 'sciencegamecenter',
+};
+/** The acquisition path as GA event params: {} when the visitor came straight to this page (or from this site). */
+function sourceOf(win) {
+  let ref;
+  try { ref = win.document.referrer && new URL(win.document.referrer); } catch { return {}; }
+  if (!ref || ref.host === win.location.host) return {};
+  return { source_referrer: ref.origin + '/', source_channel: SOURCE_CHANNELS[ref.origin] || 'other' };
+}
+
 export function install(win = window) {
   const doc = win.document;
   const meta = (name) => doc.querySelector(`meta[name="${name}"]`)?.getAttribute('content') || '';
   const game = meta('vault:game');
   if (!game || typeof win.gtag !== 'function') return null;
   const gtag = win.gtag;
+  // The acquisition path, captured here at the page — inside the player iframe the game's own referrer is always
+  // this page, so this is the last place the real source is visible. Kept for the whole play.
+  const source = sourceOf(win);
   // A user property, so the realtime report (which can't see event parameters) can tell which game someone is playing.
   const send = (name, params, beacon) => {
     if (name === 'play_start') gtag('set', 'user_properties', { vault_game: game });
     gtag('event', name, beacon ? { ...params, transport_type: 'beacon' } : params);
   };
   const tracker = createPlayTracker({
-    send, game, studio: meta('vault:studio-slug'),
+    send, game, studio: meta('vault:studio-slug'), source,
     now: () => Date.now(), every: (fn, ms) => win.setInterval(fn, ms), cancel: (h) => win.clearInterval(h),
     visible: () => doc.visibilityState !== 'hidden',
     newId: () => (win.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`),

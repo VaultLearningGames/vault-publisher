@@ -256,15 +256,33 @@
     });
   }
 
-  // A game on the Vault CDN gets the site that sent the player here, when that's another site, as ?vault_referrer=
-  // (its origin, e.g. https://pbswisconsineducation.org/ for PBS Wisconsin Education's "Play the game" popup). In the
-  // player the game's own referrer is always this page, so this is the only way its analytics can tell those plays
-  // from Vault's. Other sites' games are left alone.
+  // The acquisition source: the site that sent the visitor to this game page, when that's another site
+  // (e.g. https://pbswisconsineducation.org/ for PBS Wisconsin Education's "Play the game" popup). In the player the
+  // game's own referrer is always this page, so this is the only way a game's analytics can tell those plays from
+  // Vault's. The embed contract: every game the player opens gets ?vault_src=<source origin>&vault_ch=<channel>
+  // (CDN games and other sites' games alike; a game that reads it reports it as its acquisition source).
+  // vault_ch is a coarse label for the discovery sites that send us traffic, else "other" ("direct" with no referrer).
+  var SOURCE_CHANNELS = [
+    ['https://pbskids.org', 'pbskids'],
+    ['https://www.pbskids.org', 'pbskids'],
+    ['https://pbswisconsineducation.org', 'pbswe'],
+    ['https://www.pbswisconsineducation.org', 'pbswe'],
+    ['https://pbslearningmedia.org', 'pbslm'],
+    ['https://www.pbslearningmedia.org', 'pbslm'],
+    ['https://www.sciencegamecenter.org', 'sciencegamecenter'],
+    ['https://sciencegamecenter.org', 'sciencegamecenter']
+  ];
+  function sourceChannel(origin) {
+    if (!origin) return 'direct';
+    for (var k = 0; k < SOURCE_CHANNELS.length; k++) if (SOURCE_CHANNELS[k][0] === origin) return SOURCE_CHANNELS[k][1];
+    return 'other';
+  }
   function withReferrer(src) {
     try {
       var u = new URL(src, location.href), ref = document.referrer && new URL(document.referrer);
-      if (!ref || ref.host === location.host || u.host !== 'cdn.' + location.host.replace(/^www\./, '')) return src;
-      u.searchParams.set('vault_referrer', ref.origin + '/');
+      if (!ref || ref.host === location.host) return src;   // no off-site acquisition path to pass
+      u.searchParams.set('vault_src', ref.origin + '/');
+      u.searchParams.set('vault_ch', sourceChannel(ref.origin));
       return u.href;
     } catch (e) { return src; }
   }
@@ -278,6 +296,7 @@
     frame.className = 'vault-player__frame';
     frame.setAttribute('allow', 'fullscreen; autoplay; gamepad; clipboard-write; accelerometer; gyroscope');
     frame.setAttribute('allowfullscreen', '');
+    frame.setAttribute('referrerpolicy', 'unsafe-url');   // let a game's own analytics see the full page that framed it
     frame.setAttribute('title', 'Game');
     fit = null;
     for (var k = 0; k < FIT.length; k++) if (games[i].indexOf(FIT[k][0]) === 0) fit = FIT[k];

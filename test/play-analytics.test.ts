@@ -6,14 +6,14 @@ import assert from 'node:assert/strict';
 import { createPlayTracker, HEARTBEAT_MS, install } from '../site/themes/vault-squarespace/static/sq/js/vault-play-analytics.js';
 
 type Sent = { name: string; params: Record<string, unknown>; beacon: boolean };
-function rig(visible = true) {
+function rig(visible = true, source: Record<string, string> = {}) {
   let now = 1_000_000, visibleNow = visible, ids = 0;
   const sent: Sent[] = [];
   const timers = new Map<number, { fn: () => void; ms: number; next: number }>();
   let tid = 0;
   const t = createPlayTracker({
     send: (name: string, params: Record<string, unknown>, beacon: boolean) => sent.push({ name, params, beacon }),
-    now: () => now, visible: () => visibleNow, game: 'wake', studio: 'fieldday', newId: () => `p${++ids}`,
+    now: () => now, visible: () => visibleNow, game: 'wake', studio: 'fieldday', newId: () => `p${++ids}`, source,
     every: (fn: () => void, ms: number) => { timers.set(++tid, { fn, ms, next: now + ms }); return tid; },
     cancel: (h: number) => { timers.delete(h); },
   });
@@ -95,6 +95,19 @@ describe('play events', () => {
     r.advance(3 * 3600_000, true);
     r.t.close();
     assert.equal(total(r.sent), 60);
+  });
+
+  test('an off-site acquisition source rides on every event of the play', () => {
+    const src = { source_referrer: 'https://www.sciencegamecenter.org/', source_channel: 'sciencegamecenter' };
+    const r = rig(true, src);
+    r.t.start('player');
+    r.advance(31_000);
+    r.t.close();
+    assert.ok(r.sent.length >= 3);
+    for (const e of r.sent) {
+      assert.equal(e.params.source_referrer, 'https://www.sciencegamecenter.org/');
+      assert.equal(e.params.source_channel, 'sciencegamecenter');
+    }
   });
 
   test('a new-tab play is counted but not timed; a second play ends the first', () => {

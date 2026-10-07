@@ -85,6 +85,7 @@ realtime reports (the site; a studio: five and one; a game: four and one), well 
 | --- | --- |
 | Chart | `eventCount` of `play_start` and `page_view` by `date` (`dateHour` for Day) and `eventName`, from the start of the previous period to today |
 | Plays, play time, top games | `eventCount` and `customEvent:play_seconds` by `eventName`, `customEvent:play_mode`, `customEvent:game_slug`; periods `current` (so far) and `previous` (the same days) |
+| Acquisition (plays by where the visitor came from) | `eventCount` of `play_start` by `customEvent:source_channel` (and `source_referrer` for the exact origin); empty when the visitor came straight to the page — the events then carry no source params, so those plays group under `(not set)` |
 | Unique players | `totalUsers` of `play_start`, both periods |
 | The game's page, the studio's game pages | `screenPageViews`, `totalUsers`, `eventCount` by `eventName` (`page_view`, `click`), their `pagePath`s, both periods |
 | Top games by page views (site and studio views, when no game has plays) | `screenPageViews`, `eventCount` by `pagePath` and `eventName`, the games' paths, this period so far |

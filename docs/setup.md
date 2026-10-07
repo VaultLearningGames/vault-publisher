@@ -391,8 +391,11 @@ production expression, as of 2026-10-07 (the same as staging's, with the host ch
 - **No exceptions.** Until 2026-10-07 a final `and not (...)` let PBS Wisconsin Education's popup (a PBS Referer on
   `/fieldday/jowilder/iframe.html`) have the bare build. Now PBS players get the Vault player like everyone else:
   fielddaylab.wisc.edu's `.htaccess` (fielddaylab/fielddaysite, README "PBS Wisconsin Education") 301s their old
-  addresses to the game's page, and the player passes the site that sent it to a CDN game as `?vault_referrer=`
-  (`withReferrer` in `vault-player.html`), which Jo Wilder reports to GA so PBS plays stay distinguishable.
+  addresses to the game's page, and the player passes the site that sent it to every game it opens as
+  `?vault_src=<origin>&vault_ch=<channel>` (`withReferrer` in `vault-player.html`; the embed contract — a game that
+  reads it reports it as its acquisition source; Jo Wilder does, so PBS plays stay distinguishable). The site's own
+  play events carry the same thing as `source_referrer`/`source_channel` (`sq/js/vault-play-analytics.js`), so the
+  acquisition path is visible to Vault even for games that ignore the param.
 - **What the rule's 302 lands on:** `_redirects` only has `/cdn/<folder>/`, `/cdn/<folder>/index.html` and
   `/cdn/<folder>/iframe.html` for each CDN game. Any other page of a build opened outside the player goes to
   `/cdn/...` and gets the site's 404.

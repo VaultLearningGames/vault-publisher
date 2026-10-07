@@ -256,6 +256,19 @@
     });
   }
 
+  // A game on the Vault CDN gets the site that sent the player here, when that's another site, as ?vault_referrer=
+  // (its origin, e.g. https://pbswisconsineducation.org/ for PBS Wisconsin Education's "Play the game" popup). In the
+  // player the game's own referrer is always this page, so this is the only way its analytics can tell those plays
+  // from Vault's. Other sites' games are left alone.
+  function withReferrer(src) {
+    try {
+      var u = new URL(src, location.href), ref = document.referrer && new URL(document.referrer);
+      if (!ref || ref.host === location.host || u.host !== 'cdn.' + location.host.replace(/^www\./, '')) return src;
+      u.searchParams.set('vault_referrer', ref.origin + '/');
+      return u.href;
+    } catch (e) { return src; }
+  }
+
   // Load game i into the player.
   function start(i) {
     hideGate();
@@ -276,7 +289,7 @@
       if (n.length === 6 && n.every(function (v) { return v >= 0; })) fit = [games[i]].concat(n);
     }
     // Fit games are measured at a fixed page size; an #anchor would scroll the page away from those coordinates.
-    frame.src = fit ? games[i].split('#')[0] : games[i];
+    frame.src = withReferrer(fit ? games[i].split('#')[0] : games[i]);
     if (fit) {
       frame.classList.add('is-fit');
       frame.style.width = fit[1] + 'px';

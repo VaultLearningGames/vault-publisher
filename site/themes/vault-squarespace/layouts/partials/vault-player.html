@@ -269,8 +269,8 @@
   var SOURCE_CHANNELS = [
     ['https://pbskids.org', 'pbskids'],
     ['https://www.pbskids.org', 'pbskids'],
-    ['https://pbswisconsineducation.org', 'pbswe'],
-    ['https://www.pbswisconsineducation.org', 'pbswe'],
+    ['https://pbswisconsineducation.org', 'pbswi'],
+    ['https://www.pbswisconsineducation.org', 'pbswi'],
     ['https://pbslearningmedia.org', 'pbslm'],
     ['https://www.pbslearningmedia.org', 'pbslm'],
     ['https://www.sciencegamecenter.org', 'sciencegamecenter'],
@@ -283,7 +283,7 @@
   }
   // A CDN redirect can land a second Vault player wrapper here. Preserve its query contract instead of letting the
   // wrapper's own referrer (the CDN) replace the original source, then re-stamp the contract on the real game frame.
-  // A channel alone counts: ?vault_ch=pbswe on the game page is the partner's explicit statement of the path.
+  // A channel alone counts: ?vault_ch=pbswi on the game page is the partner's explicit statement of the path.
   function acquisition() {
     try {
       var q = new URL(location.href).searchParams, src = q.get('vault_src') || q.get('vault_referrer');

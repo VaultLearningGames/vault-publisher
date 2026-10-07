@@ -8,7 +8,7 @@
 // play_seconds adds up: the total of play_seconds over a play's events is how long the game was open and on screen.
 // Every event carries game_slug (the listing's slug in the portal), studio (its studio's slug), play_mode and play_id,
 // and — when the visitor came from another site — source_referrer (that site's origin) and source_channel (a coarse
-// label: pbskids | pbswe | pbslm | sciencegamecenter | other; 'direct' with no referrer). The acquisition path is
+// label: pbskids | pbswi | pbslm | sciencegamecenter | other; 'direct' with no referrer). The acquisition path is
 // captured here, at the page, because a game inside the player iframe never sees it (see the player's withReferrer).
 //
 // createPlayTracker is the timing logic, without the page (unit-tested in test/play-analytics.test.ts); install()
@@ -101,7 +101,7 @@ const PLAY_LABEL = /^\s*(play( game| now)?|launch game)\s*$/i;
 // events; keep in step with the player's SOURCE_CHANNELS). Anything else off-site is 'other'; no referrer is 'direct'.
 const SOURCE_CHANNELS = {
   'https://pbskids.org': 'pbskids', 'https://www.pbskids.org': 'pbskids',
-  'https://pbswisconsineducation.org': 'pbswe', 'https://www.pbswisconsineducation.org': 'pbswe',
+  'https://pbswisconsineducation.org': 'pbswi', 'https://www.pbswisconsineducation.org': 'pbswi',
   'https://pbslearningmedia.org': 'pbslm', 'https://www.pbslearningmedia.org': 'pbslm',
   'https://www.sciencegamecenter.org': 'sciencegamecenter', 'https://sciencegamecenter.org': 'sciencegamecenter',
 };

@@ -283,6 +283,7 @@
   }
   // A CDN redirect can land a second Vault player wrapper here. Preserve its query contract instead of letting the
   // wrapper's own referrer (the CDN) replace the original source, then re-stamp the contract on the real game frame.
+  // A channel alone counts: ?vault_ch=pbswe on the game page is the partner's explicit statement of the path.
   function acquisition() {
     try {
       var q = new URL(location.href).searchParams, src = q.get('vault_src') || q.get('vault_referrer');
@@ -291,15 +292,15 @@
         return { origin: parsed.origin + '/', channel: q.get('vault_ch') || sourceChannel(parsed.origin) };
       }
       var ref = document.referrer && new URL(document.referrer);
-      if (!ref || ref.host === location.host) return null;
-      return { origin: ref.origin + '/', channel: sourceChannel(ref.origin) };
+      if (!ref || ref.host === location.host) return q.get('vault_ch') ? { origin: '', channel: q.get('vault_ch') } : null;
+      return { origin: ref.origin + '/', channel: q.get('vault_ch') || sourceChannel(ref.origin) };
     } catch (e) { return null; }
   }
   function withReferrer(src) {
     try {
       var u = new URL(src, location.href), source = acquisition();
       if (!source) return src;
-      u.searchParams.set('vault_src', source.origin);
+      if (source.origin) u.searchParams.set('vault_src', source.origin);
       u.searchParams.set('vault_ch', source.channel);
       return u.href;
     } catch (e) { return src; }

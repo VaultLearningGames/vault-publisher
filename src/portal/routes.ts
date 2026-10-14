@@ -22,6 +22,7 @@ import { registerListingMakers } from './listing-makers.ts';
 import { registerImageMigration } from './image-migration.ts';
 import { githubAccount, githubRepository, registerPeople, type GitHubAccountLookup, type GitHubRepositoryLookup } from './people.ts';
 import { buildOrigin, registerUploads } from './uploads.ts';
+import { registerBlogAdmin } from './blog-admin.ts';
 import type { MonitorEnv } from '../url-monitor.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
@@ -794,5 +795,6 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   registerListingPreview(app, listingHelpers);
   registerListingMakers(app, listingHelpers);
   registerImageMigration(app, listingHelpers);
+  registerBlogAdmin(app, listingHelpers);
   registerPeople(app, { ...listingHelpers, canManageMembers, vaultAdmins: cfg.vaultAdmins, githubAccount: cfg.githubAccount ?? githubAccount, githubRepository: cfg.githubRepository ?? githubRepository });
 }

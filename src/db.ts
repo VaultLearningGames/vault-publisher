@@ -275,6 +275,40 @@ const MIGRATIONS = [
     created_at  TEXT NOT NULL
   );
   `,
+  // v17: blog (src/blog/). blocks is a JSON array validated by src/blog/blocks.ts. Join rows and redirects are deleted
+  // explicitly by src/blog/repo.ts, so nothing depends on foreign-key enforcement. IF NOT EXISTS keeps a re-run a no-op.
+  `
+  CREATE TABLE IF NOT EXISTS blog_posts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug           TEXT NOT NULL UNIQUE,
+    title          TEXT NOT NULL,
+    blocks         TEXT NOT NULL DEFAULT '[]',
+    excerpt        TEXT NOT NULL DEFAULT '',
+    featured_image TEXT,
+    author         TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'private' CHECK (status IN ('published', 'private')),
+    published_at   TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS blog_posts_status_published ON blog_posts (status, published_at);
+  CREATE TABLE IF NOT EXISTS blog_tags (
+    id   INTEGER PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS blog_post_tags (
+    post_id INTEGER NOT NULL REFERENCES blog_posts (id) ON DELETE CASCADE,
+    tag_id  INTEGER NOT NULL REFERENCES blog_tags (id) ON DELETE CASCADE,
+    PRIMARY KEY (post_id, tag_id)
+  );
+  CREATE TABLE IF NOT EXISTS blog_slug_redirects (
+    old_slug   TEXT PRIMARY KEY,
+    post_id    INTEGER NOT NULL REFERENCES blog_posts (id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS blog_slug_redirects_post ON blog_slug_redirects (post_id);
+  `,
 ];
 
 export interface Listing {

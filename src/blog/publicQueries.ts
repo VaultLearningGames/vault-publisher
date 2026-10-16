@@ -1,4 +1,4 @@
-// Read-only queries behind the public blog pages (src/blog/publicRoutes.ts). The single source of truth for visibility:
+// Read-only queries behind the public blog (GET /v1/blog: src/blog/publicPayload.ts). The single source of truth for visibility:
 // - listable: status 'published' with a published_at at or before now. These appear in the catalog, tag pages, the tag
 //   filter and "More posts".
 // - viewable by direct URL: listable posts, plus 'private' posts. Private posts are never listed, but a scheduled

@@ -13,7 +13,8 @@ import { registerPortal, type PortalConfig } from './portal/routes.ts';
 import type { SitePreviewer } from './portal/site-preview.ts';
 import { registerForms, type FormsConfig } from './forms.ts';
 import { registerAdminTasks } from './admin-tasks.ts';
-import { registerBlogPublic } from './blog/publicRoutes.ts';
+import { buildBlogPayload } from './blog/publicPayload.ts';
+import type { SiteRebuilder } from './blog/siteRebuild.ts';
 import {
   headersFor,
   isSafeFilePath,
@@ -54,9 +55,8 @@ export interface AppDeps {
   sitePreview?: Pick<SitePreviewer, 'page'> | null;
   // Google Analytics for the analytics pages (analytics/ga.ts). Left out: not connected.
   analytics?: Analytics;
-  // Write the public blog as static files to the CDN bucket (`production`) when a public post changes
-  // (blog/staticPublish.ts). Off when left out.
-  blogStaticPublish?: boolean;
+  // Rebuilds the website (and so its blog) when a public post changes (blog/siteRebuild.ts). Off when left out.
+  siteRebuild?: SiteRebuilder | null;
   // Injected in tests (image migration downloads).
   fetch?: typeof fetch;
   // How URL monitors fetch a studio's hosted game (net-guard.ts: public addresses only). Injected in tests.
@@ -454,6 +454,14 @@ export function createApp(deps: AppDeps) {
     return c.json(buildCatalog(db, deps.prodPublicUrl));
   });
 
+  // Public: the blog's public posts, tags and old-slug redirects, which the website builds its /blog pages from
+  // (blog/publicPayload.ts). Private posts are there for their own page only; drafts and scheduled posts never are.
+  app.get('/v1/blog', (c) => {
+    c.header('Access-Control-Allow-Origin', '*');
+    c.header('Cache-Control', 'public, max-age=60');
+    return c.json(buildBlogPayload(db.sqlite, { now: new Date() }));
+  });
+
   // Start a preview upload for the branch or tag in the caller's OIDC token.
   // Body: { game, files: [{ path, size }] }. Returns a presigned PUT URL and headers per file.
   // Presigned PUTs for a new build of `game` at `ref`; the caller uploads, then finalizes.
@@ -715,7 +723,6 @@ export function createApp(deps: AppDeps) {
 
   registerAdminTasks(app, deps, admin);
   registerForms(app, db, deps.forms);
-  registerBlogPublic(app, { sqlite: db.sqlite, siteUrl: deps.siteUrl ?? 'https://vaultlearninggames.org' });
   registerPortal(app, { ...deps, approveRelease, promoteRelease, startUpload, finishUpload, linkSameNamedListing, monitorEnv, previewUrl: (studio: Studio, game: Game, ref: string) => `${deps.stagingPublicUrl}/${previewPrefix(studio, game, ref)}` });
   return app;
 }

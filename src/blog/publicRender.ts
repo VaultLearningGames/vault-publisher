@@ -1,11 +1,12 @@
-// HTML for the public blog pages. The pages use the public site's stylesheet (sq/css/vault-sq.css from the Hugo theme)
-// and its blog-grid / blog-item card markup, so they look like the site. There are no blog-specific styles.
+// HTML for a blog post as the public site shows it, for the editor's preview (portal/blog-admin.ts), and the
+// paragraphs of GET /v1/blog (publicPayload.ts). The public blog itself is built by the website with Hugo
+// (site/themes/vault-squarespace/layouts/blog/), with this same markup: the public site's stylesheet
+// (sq/css/vault-sq.css) and its blog-grid / blog-item card markup. There are no blog-specific styles.
 // Every interpolated value is escaped by html``.
 import { html, raw, type Html } from '../portal/html.ts';
 import { isSafeHref, isSafeImageSrc, sanitizeParagraphHtml, type Block, type Span } from './blocks.ts';
 import type { BlogTag } from './repo.ts';
 import type { PublicPost } from './publicQueries.ts';
-import { feedPath, feedTitle } from './rss.ts';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -87,25 +88,6 @@ export function page(o: PageOptions, body: Html): Html {
 </body></html>`;
 }
 
-const grid = (posts: PublicPost[]) => posts.length
-  ? html`<div class="blog-grid">${posts.map(cardHtml)}</div>`
-  : html`<div class="blog-grid"><p class="blog-empty">No posts yet.</p></div>`;
-
-const allFeed = { title: feedTitle(), path: feedPath() };
-
-export function catalogPage(siteUrl: string, posts: PublicPost[], tags: BlogTag[]): Html {
-  const filter = tags.length
-    ? html`<nav class="blog-filter" aria-label="Tags"><ul>${tags.map((t) => html`<li><a href="${tagHref(t.slug)}">${t.name}</a></li>`)}</ul></nav>` : '';
-  return page({ siteUrl, title: 'Blog', canonicalPath: '/blog', feeds: [allFeed] },
-    html`<section class="sq-sec theme-white sq-blog"><div class="blog-grid"><h1>Blog</h1>${filter}</div>${grid(posts)}</section>`);
-}
-
-export function tagPage(siteUrl: string, tag: BlogTag, posts: PublicPost[]): Html {
-  const feeds = [{ title: feedTitle(tag), path: feedPath(tag.slug) }, allFeed];
-  return page({ siteUrl, title: `Posts tagged "${tag.name}"`, canonicalPath: tagHref(tag.slug), feeds },
-    html`<section class="sq-sec theme-white sq-blog"><div class="blog-grid"><h1>Posts tagged "${tag.name}"</h1><p><a href="/blog">All posts</a></p></div>${grid(posts)}</section>`);
-}
-
 export function postPage(siteUrl: string, post: PublicPost, related: PublicPost[]): Html {
   const more = related.length
     ? html`<section class="sq-sec theme-white sq-blog blog-related"><div class="blog-grid"><h2>More posts</h2></div><div class="blog-grid">${related.map(cardHtml)}</div></section>` : '';
@@ -116,9 +98,4 @@ export function postPage(siteUrl: string, post: PublicPost, related: PublicPost[
 <div class="blog-body">${post.blocks.map(blockHtml)}</div>
 ${post.tags.length ? html`<div class="blog-meta blog-tags">${tagLinks(post.tags)}</div>` : ''}
 </div></article>${more}`);
-}
-
-export function notFoundPage(siteUrl: string): Html {
-  return page({ siteUrl, title: 'Not found', canonicalPath: '/blog', noindex: true },
-    html`<section class="sq-sec theme-white"><div class="sq-text"><h1>Not found</h1><p><a href="/blog">Back to the blog</a></p></div></section>`);
 }

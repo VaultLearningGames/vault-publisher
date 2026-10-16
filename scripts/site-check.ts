@@ -92,8 +92,11 @@ for (const key of served.filter((k) => k.endsWith('.html'))) {
   const canonical = tag(/<link rel="canonical" href="([^"]*)">/);
   const isHome2 = path === '/home';
   expect(!!canonical && pathOf(canonical) === (isHome2 ? '/' : path) && !canonical.endsWith('/'), 'page: canonical is its address, no trailing slash', `${path}: ${canonical}`);
-  if (canonical && !isHome2) canonicals.add(canonical);
-  expect(!/<meta name="robots"/.test(head), 'page: no robots meta tag', `${path}: ${head.match(/<meta name="robots"[^>]*>/)?.[0]}`);
+  // A blog page may be noindex (a private post; every blog page while the blog is off on a build): then it is in no
+  // sitemap either (site/themes/vault-squarespace/layouts/partials/blog/noindex.html).
+  const noindexBlog = /^\/blog(\/|$)/.test(path) && /<meta name="robots" content="noindex">/.test(head);
+  if (canonical && !isHome2 && !noindexBlog) canonicals.add(canonical);
+  if (!noindexBlog) expect(!/<meta name="robots"/.test(head), 'page: no robots meta tag', `${path}: ${head.match(/<meta name="robots"[^>]*>/)?.[0]}`);
   expect((tag(/<title>([^<]*)<\/title>/) ?? '').trim().length > 0, 'page: has a title', path);
   const desc = tag(/<meta name="description" content="([^"]*)">/);
   expect(desc === undefined || desc.trim().length > 0, 'page: no empty description', path);
@@ -139,7 +142,7 @@ await each(lines, async ([from, to, status]) => {
 });
 
 // 5. Addresses that don't exist: status 404 and the site's own page, at any depth, never indexed.
-await each(['/nope', '/nope/', '/a/b/c/', '/a/b/c', '/game-cards/category/Nope/', '/game-cards/nope', '/sq/img/nope.jpg', '/_headers', '/_redirects', '/.assetsignore', '/card-redirects.json', '/cdn-redirects.json'], async (path) => {
+await each(['/nope', '/nope/', '/a/b/c/', '/a/b/c', '/game-cards/category/Nope/', '/game-cards/nope', '/sq/img/nope.jpg', '/_headers', '/_redirects', '/.assetsignore', '/card-redirects.json', '/cdn-redirects.json', '/blog-redirects.json'], async (path) => {
   const got = await get(base + path);
   expect(got.status === 404 && got.body.equals(notFound), 'missing address: 404 with the site\'s page', `${path} → ${got.status}, ${got.body.length} bytes`);
   expect(/noindex/.test(notFound.toString()) && (got.headers.get('x-robots-tag') === robots), 'missing address: robots', `${path}: ${got.headers.get('x-robots-tag')}`);

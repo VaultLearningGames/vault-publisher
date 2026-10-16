@@ -14,7 +14,9 @@ name: Deploy (portal and site)
 #
 # When listings change (a game published, edited or taken off the site) nothing here has changed, but the site must
 # be rebuilt: Run workflow → the system → "Rebuild the site only". It builds and publishes the site and leaves the
-# portal alone.
+# portal alone. The blog (site/content/blog, from the portal's /v1/blog) is rebuilt the same way, by the portal itself:
+# a change to a public post dispatches this workflow with site_only (src/blog/siteRebuild.ts), when the system has a
+# SITE_REBUILD_TOKEN (docs/setup.md).
 on:
   workflow_dispatch:
     inputs:
@@ -120,14 +122,15 @@ jobs:
       run: |
         set -eu
         export HUGO_BASEURL="${SITE_URL%/}/"
-        # The blog (static, on the CDN: src/blog/staticPublish.ts) is on staging only for now: the header's Blog link.
-        if [ "$TARGET" = staging ]; then export HUGOxPARAMSxBLOGxURL="${CDN_PUBLIC_URL%/}/blog"; else export HUGOxPARAMSxBLOGxURL=; fi
+        # The blog (site/content/blog, built from the portal's /v1/blog) is on staging only for now: the header's Blog
+        # link, and indexable blog pages. On production its pages are built but unlinked, noindex and not in the sitemap.
+        if [ "$TARGET" = staging ]; then export HUGOxPARAMSxBLOGxURL=/blog; else export HUGOxPARAMSxBLOGxURL=; fi
         export HUGOxPARAMSxANALYTICSxGOOGLE="${GOOGLE_ANALYTICS_ID:-}"
         export HUGOxPARAMSxFORMSxNEWSLETTER="${VAULT_PORTAL%/}/v1/forms/newsletter"
         export HUGOxPARAMSxFORMSxSUBMIT_GAME="${VAULT_PORTAL%/}/v1/forms/submit-game"
         site_host="${SITE_URL#*://}"; site_host="${site_host%%/*}"
         if [ "$TARGET" = production ]; then export SITE_INDEX_HOST="$site_host"; else export SITE_INDEX_HOST=; fi
-        rm -f site/data/catalog.json
+        rm -f site/data/catalog.json site/data/blog.json
         npm run site:build
         # ("! grep" never fails a step: bash exempts a negated command from -e. Hence the ifs.)
         if [ "$TARGET" = production ]; then grep -qxF "https://$site_host/*" site/public/_headers
@@ -146,6 +149,15 @@ jobs:
         grep -q "<link rel=\"canonical\" href=\"${SITE_URL%/}\">" site/public/index.html
         if [ "$TARGET" = staging ]; then grep -qF "href=\"$HUGOxPARAMSxBLOGxURL\"" site/public/index.html
         elif grep -q '>Blog</a>' site/public/index.html; then echo "::error::a Blog link in a $TARGET build"; exit 1; fi
+        # The blog: its catalog and feed, and a page and a feed for each post and tag the portal published.
+        test -f site/public/blog/index.html && grep -q '<rss version="2.0"' site/public/blog/rss.xml
+        node -e '
+          const b = require("./site/data/blog.json"), fs = require("fs"), miss = [];
+          for (const p of b.posts) if (p.slug !== "tag" && !fs.existsSync(`site/public/blog/${p.slug}/index.html`)) miss.push(`/blog/${p.slug}`);
+          for (const t of b.tags) for (const f of ["index.html", "rss.xml"]) if (!fs.existsSync(`site/public/blog/tag/${t.slug}/${f}`)) miss.push(`/blog/tag/${t.slug}/${f}`);
+          if (miss.length) { console.log(`::error::blog pages missing from the build: ${miss.join(" ")}`); process.exit(1); }
+          console.log(`blog: ${b.posts.length} posts, ${b.tags.length} tags, ${b.redirects.length} redirects`);'
+        if [ "$TARGET" != staging ] && grep -q '/blog' site/public/sitemap.xml; then echo "::error::blog pages in the $TARGET sitemap"; exit 1; fi
         # Analytics only where the environment has an id: then on the home page and on game pages. gtag.js is added by
         # a script once the page has loaded (partials/sq/head.html), so look for its config and its loader.
         if [ -n "${GOOGLE_ANALYTICS_ID:-}" ]; then
@@ -213,7 +225,7 @@ jobs:
           PREVIEW_SITES=${{ vars.PREVIEW_SITES }}
           SUPPORT_URL=${{ vars.SUPPORT_URL }}
           GA_PROPERTY_ID=${{ vars.GA_PROPERTY_ID }}
-          BLOG_STATIC_PUBLISH=${{ (inputs.environment || (github.ref_name == 'production' && 'production' || 'staging')) == 'staging' && '1' || '' }}
+          SITE_REBUILD_ENVIRONMENT=${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
         secrets: |-
           R2_BUILDS_ACCESS_KEY_ID=${{ vars.SERVICE }}-r2-builds-access-key-id:latest
           R2_BUILDS_SECRET_ACCESS_KEY=${{ vars.SERVICE }}-r2-builds-secret-access-key:latest

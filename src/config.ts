@@ -51,9 +51,12 @@ export interface Config {
   // zone (the property's days). No id: the pages say analytics isn't connected. See docs/analytics.md.
   gaPropertyId?: string;
   gaTimeZone: string;
-  // Write the public blog as static files to the CDN bucket under blog/ (blog/staticPublish.ts). Off unless
-  // BLOG_STATIC_PUBLISH is 1/true/yes/on; the deploy turns it on for staging only.
-  blogStaticPublish: boolean;
+  // Rebuilding the website when a public blog post changes (blog/siteRebuild.ts): a GitHub token that may run the
+  // repository's workflows (SITE_REBUILD_TOKEN) and the environment deploy.yml rebuilds (SITE_REBUILD_ENVIRONMENT, set
+  // by the deploy). Either missing: off. SITE_REBUILD_DEBOUNCE_SECONDS: the quiet time before a build (default 60).
+  siteRebuildToken?: string;
+  siteRebuildEnvironment?: string;
+  siteRebuildDebounceMs?: number;
 }
 
 // Where "Need support?" sends people, and the channel they're told to join there.
@@ -143,6 +146,8 @@ export function loadConfig(): Config {
     supportUrl: parseSupportUrl(process.env.SUPPORT_URL),
     gaPropertyId: parseGaPropertyId(process.env.GA_PROPERTY_ID),
     gaTimeZone: process.env.GA_TIMEZONE?.trim() || 'America/Chicago',
-    blogStaticPublish: parseFlag(process.env.BLOG_STATIC_PUBLISH),
+    siteRebuildToken: process.env.SITE_REBUILD_TOKEN?.trim() || undefined,
+    siteRebuildEnvironment: process.env.SITE_REBUILD_ENVIRONMENT?.trim() || undefined,
+    siteRebuildDebounceMs: Number(process.env.SITE_REBUILD_DEBOUNCE_SECONDS) > 0 ? Number(process.env.SITE_REBUILD_DEBOUNCE_SECONDS) * 1000 : undefined,
   };
 }

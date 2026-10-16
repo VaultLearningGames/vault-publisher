@@ -1,0 +1,39 @@
+{{- /* An RSS 2.0 feed of listed posts, as src/blog/rss.ts wrote it: .posts (newest first; at most 50 are used) and,
+       for a tag's feed, .tag. Addresses are absolute against the site's base URL, like the pages' canonical links.
+       Returns the XML as a string (the blogrss output format is plain text, so it is written as it is). */ -}}
+{{- $base := site.BaseURL | strings.TrimSuffix "/" -}}
+{{- $name := "Vault Learning Games" -}}
+{{- $x := "blog/xml.html" -}}
+{{- $title := printf "%s Blog" $name }}{{ $page := printf "%s/blog" $base }}{{ $self := printf "%s/blog/rss.xml" $base -}}
+{{- $desc := printf "Posts from the %s blog." $name -}}
+{{- with .tag -}}
+  {{- $title = printf "%s — %s" $title .name }}{{ $page = printf "%s/blog/tag/%s" $base .slug }}{{ $self = printf "%s/blog/tag/%s/rss.xml" $base .slug -}}
+  {{- $desc = printf "Posts tagged \"%s\" on the %s blog." .name $name -}}
+{{- end -}}
+{{- $posts := first 50 (.posts | default slice) -}}
+{{- $rfc := "Mon, 02 Jan 2006 15:04:05 GMT" -}}
+{{- $lines := slice
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+    "<rss version=\"2.0\" xmlns:atom=\"http://www.w3.org/2005/Atom\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+    "<channel>"
+    (printf "<title>%s</title>" (partial $x $title))
+    (printf "<link>%s</link>" (partial $x $page))
+    (printf "<description>%s</description>" (partial $x $desc)) -}}
+{{- /* The newest post's date; a feed with no posts has no lastBuildDate, so it is the same at every build. */ -}}
+{{- with $posts }}{{ with (index . 0).published_at }}{{ $lines = $lines | append (printf "<lastBuildDate>%s</lastBuildDate>" ((time .).UTC.Format $rfc)) }}{{ end }}{{ end -}}
+{{- $lines = $lines | append (printf "<atom:link href=\"%s\" rel=\"self\" type=\"application/rss+xml\"/>" (partial $x $self)) -}}
+{{- range $posts -}}
+  {{- $url := printf "%s/blog/%s" $base .slug -}}
+  {{- $lines = $lines | append "<item>" (printf "<title>%s</title>" (partial $x .title)) (printf "<link>%s</link>" (partial $x $url)) (printf "<guid isPermaLink=\"true\">%s</guid>" (partial $x $url)) -}}
+  {{- with .published_at }}{{ $lines = $lines | append (printf "<pubDate>%s</pubDate>" ((time .).UTC.Format $rfc)) }}{{ end -}}
+  {{- with .author.name }}{{ $lines = $lines | append (printf "<dc:creator>%s</dc:creator>" (partial $x .)) }}{{ end -}}
+  {{- $lines = $lines | append (printf "<description>%s</description>" (partial $x .description)) -}}
+  {{- range .tags }}{{ $lines = $lines | append (printf "<category>%s</category>" (partial $x .name)) }}{{ end -}}
+  {{- with .featured_image }}{{ if .type -}}
+    {{- $img := .url }}{{ if hasPrefix $img "/" }}{{ $img = printf "%s%s" $base $img }}{{ end -}}
+    {{- $lines = $lines | append (printf "<enclosure url=\"%s\" length=\"0\" type=\"%s\"/>" (partial $x $img) .type) -}}
+  {{- end }}{{ end -}}
+  {{- $lines = $lines | append "</item>" -}}
+{{- end -}}
+{{- $lines = $lines | append "</channel>" "</rss>" "" -}}
+{{- return delimit $lines "\n" -}}

@@ -1,0 +1,7 @@
+{{- /* One block of a post's body, as stored by the portal's editor (src/blog/blocks.ts). A paragraph's html is the
+       portal's sanitized rendering (src/blog/publicPayload.ts); everything else is escaped here. */ -}}
+{{- if eq .type "heading" }}{{ if eq .level 4 }}<h4>{{ .text }}</h4>{{ else if eq .level 3 }}<h3>{{ .text }}</h3>{{ else }}<h2>{{ .text }}</h2>{{ end }}
+{{- else if eq .type "paragraph" }}{{ .html | safeHTML }}
+{{- else if eq .type "image" }}<figure class="blog-figure{{ with .align }} align-{{ . }}{{ end }}"><img src="{{ .url }}" alt="{{ .alt }}" loading="lazy">{{ with .caption }}<figcaption>{{ . }}</figcaption>{{ end }}</figure>
+{{- else if eq .type "divider" }}<hr>
+{{- end -}}

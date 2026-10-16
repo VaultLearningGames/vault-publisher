@@ -1,0 +1,9 @@
+{{- /* One post in a grid of posts (the catalog, a tag page, "More posts"): the site's blog-item card. */ -}}
+{{- $href := printf "/blog/%s" .slug -}}
+<article class="blog-item">{{ with .featured_image }}<a class="blog-img" href="{{ $href }}"><img src="{{ .url }}" alt="{{ .alt }}" loading="lazy"></a>{{ end }}
+      <div class="blog-meta">{{ partial "blog/date.html" .published_at }}{{ with .author.name }}<span class="blog-delim" aria-hidden="true"></span><span class="blog-author">{{ . }}</span>{{ end }}</div>
+      <h1 class="blog-title"><a href="{{ $href }}">{{ .title }}</a></h1>
+      {{ with .excerpt }}<div class="blog-excerpt"><p>{{ . }}</p></div>{{ end }}
+      {{ with .tags }}<div class="blog-meta blog-tags">{{ partial "blog/tags.html" . }}</div>{{ end }}
+      <a class="blog-more" href="{{ $href }}">Read More</a>
+    </article>

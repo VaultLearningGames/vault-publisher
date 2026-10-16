@@ -24,9 +24,9 @@ disableKinds = ['taxonomy', 'term', 'rss']
     google = ""
 
   [params.blog]
-    # Where the header's Blog link goes: the static blog the portal writes to the CDN (src/blog/staticPublish.ts),
-    # <CDN>/blog. Empty here, which leaves the link out (production, local builds); the deploy workflow sets it on
-    # staging only, through HUGOxPARAMSxBLOGxURL.
+    # Where the header's Blog link goes: the site's own /blog (content/blog/, built from the portal's /v1/blog). Empty
+    # here, which leaves the link out and keeps every blog page noindex and out of the sitemap (production until the
+    # blog is promoted, local builds); the deploy workflow sets it to /blog on staging, through HUGOxPARAMSxBLOGxURL.
     url = ""
 
   [params.play]
@@ -77,5 +77,21 @@ disableKinds = ['taxonomy', 'term', 'rss']
   isPlainText = true
   notAlternative = true
 
+# The blog's feeds: /blog/rss.xml (content/blog/_index.md) and /blog/tag/<tag>/rss.xml (each tag page,
+# content/blog/_content.gotmpl), written by themes/vault-squarespace/layouts/blog/*.blogrss.xml. Not "rss": that kind
+# is disabled above.
+[outputFormats.blogrss]
+  mediaType = 'application/rss+xml'
+  baseName = 'rss'
+  isPlainText = true
+
+# Each renamed blog post's old address and its page (themes/vault-squarespace/layouts/index.blogredirects.json). For
+# the hosting's _redirects (a 301 each); not published.
+[outputFormats.blogredirects]
+  mediaType = 'application/json'
+  baseName = 'blog-redirects'
+  isPlainText = true
+  notAlternative = true
+
 [outputs]
-  home = ['html', 'cardredirects', 'cdnredirects']
+  home = ['html', 'cardredirects', 'cdnredirects', 'blogredirects']

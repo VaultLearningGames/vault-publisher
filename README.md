@@ -96,6 +96,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `GET /v1/admin/listings` · `POST /v1/admin/listings/{import,migrate-images,move,update}` · `GET`/`POST /v1/admin/image-variants` | [Admin tasks](#admin-tasks): the Vault-admin listing operations, for workflows |
 | | `GET /v1/releases/:studio/:game[/check]` | Read-only: a game's releases, or pre-flight check of a release run |
 | | `GET /v1/catalog` | Public: site listings, studios, featured games |
+| | `GET /v1/blog` | Public: the blog's public posts, tags and old-slug redirects, for the site build |
 | | `GET /v1/site-checks/badge/:name` | Public: the [dashboard](#site-checks-dashboard)'s badges (`all`, `when`, or a check's name) from the latest site checks run, as shields.io endpoint JSON; counts only |
 | Google ID token | `POST /v1/tasks/cleanup` | Nightly: expire stale previews, then check URL monitors for up to 100 s (Cloud Scheduler) |
 | | `POST /v1/tasks/monitors` | Check every URL monitor (up to 12 min) |
@@ -461,6 +462,11 @@ longer where the site is edited or deployed from. Details of the theme: [site/RE
 
 * **Game pages come from the portal**, not from files: `npm run site:catalog` saves this system's `GET /v1/catalog`
   to `site/data/catalog.json` (not in git), and `site/content/games/_content.gotmpl` turns each listing into a page.
+* **The blog comes from the portal** the same way: `GET /v1/blog` (every public post, its blocks, tags, related posts
+  and old-slug redirects: `src/blog/publicPayload.ts`) is saved to `site/data/blog.json`, and
+  `site/content/blog/_content.gotmpl` makes `/blog/<slug>` and `/blog/tag/<tag>` (with `rss.xml` feeds) from it. A
+  local build without a portal: `BLOG_DATA_FIXTURE=site/data-fixtures/blog.sample.json` (made by
+  `node scripts/blog-sample.ts`). A change to a public post rebuilds the site (`src/blog/siteRebuild.ts`, docs/setup.md).
 * **Build:** `VAULT_PORTAL=https://portal.vaultlearninggames-staging.org npm run site:build` → `site/public`
   (catalog, `hugo`, `site/scripts/squarespace-paths.mjs` for the `/game-cards/category|tag/…` addresses, then
   `scripts/site-hosting.ts` for the hosting's `_headers` and `_redirects`).

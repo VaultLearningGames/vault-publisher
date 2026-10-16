@@ -648,6 +648,25 @@ on this repository in Secret Manager; or (b) a scheduled workflow that compares 
 published site was built from (a hash published as a file of the site) and rebuilds only when they differ, which
 needs no new credential and is at most one schedule interval late.
 
+### Rebuilding the site when the blog changes
+
+The public blog (`/blog`) is built by Hugo from the portal's `/v1/blog` (`site/content/blog/_content.gotmpl`), like
+the games. The portal starts the rebuild itself, way (a) above: a change to a public post (publish, unpublish, edit,
+delete) dispatches `deploy.yml` for the system's environment with `site_only=true`, one minute after the last such
+change (`src/blog/siteRebuild.ts`; drafts never do). *Republish* (`POST /portal/api/blog/republish`) dispatches at
+once. The deploy sets `SITE_REBUILD_ENVIRONMENT`; the credential is one step per system:
+
+```sh
+# A fine-grained GitHub token for VaultLearningGames/vault-publisher with "Actions: Read and write" only.
+printf %s "$TOKEN" | gcloud secrets create "$SERVICE-site-rebuild-token" --data-file=- --project "$GCP_PROJECT_ID"
+gcloud secrets add-iam-policy-binding "$SERVICE-site-rebuild-token" --project "$GCP_PROJECT_ID" \
+  --member "serviceAccount:$PUBLISHER_SERVICE_ACCOUNT" --role roles/secretmanager.secretAccessor
+```
+
+then add `SITE_REBUILD_TOKEN=${{ vars.SERVICE }}-site-rebuild-token:latest` to the `secrets:` of *Deploy to Cloud Run*
+in `deploy.yml` (a secret that doesn't exist yet fails the deploy, so it isn't there until both systems have one).
+Without it the rebuild is off: Republish answers 409 and the blog changes with the next site build.
+
 ## 9. Pilot
 
 Add the caller workflow from the README to a branch of `fielddaylab/wake`, push, and open

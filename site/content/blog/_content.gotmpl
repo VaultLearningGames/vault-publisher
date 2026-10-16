@@ -1,0 +1,34 @@
+{{/*
+  Blog pages come from the Vault Studio Portal, not from Markdown files in this folder.
+
+  Vault admins write posts in the portal's blog editor. `npm run site:catalog` saves the public blog from the portal's
+  /v1/blog to data/blog.json (src/blog/publicPayload.ts decides what is public), and this content adapter turns it into:
+    /blog/<slug>/             each post (layouts/blog/single.html); a private post too, but it is noindex and in no list
+    /blog/tag/<tag>/          each tag on a listed post (layouts/blog/single.html too), and its feed rss.xml
+  The catalog, /blog/, and its feed are content/blog/_index.md (layouts/blog/list.html). Old slugs of renamed posts are
+  redirects: layouts/index.blogredirects.json lists them for the hosting's _redirects (src/site-hosting.ts).
+*/}}
+{{- with hugo.Data.blog -}}
+{{- range .posts -}}{{- if ne .slug "tag" -}}{{- /* (/blog/tag/ holds the tag pages) */ -}}
+  {{- $page := dict
+      "path" .slug
+      "title" .title
+      "kind" "page"
+      "type" "blog"
+      "params" (dict "post" . "seo_description" .excerpt)
+  -}}
+  {{- /* (a content adapter takes the date as dates.date; a top-level "date" is ignored and leaves the page undated) */ -}}
+  {{- with .published_at }}{{ $page = merge $page (dict "dates" (dict "date" (time .))) }}{{ end -}}
+  {{- $.AddPage $page -}}
+{{- end -}}
+{{- end -}}
+{{- range .tags -}}
+  {{- $.AddPage (dict
+      "path" (printf "tag/%s" .slug)
+      "title" (printf "Posts tagged \"%s\"" .name)
+      "kind" "page"
+      "outputs" (slice "html" "blogrss")
+      "params" (dict "tag" .)
+  ) -}}
+{{- end -}}
+{{- end -}}

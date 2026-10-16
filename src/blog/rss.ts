@@ -61,12 +61,17 @@ const IMAGE_TYPES: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml',
 };
 
+// The MIME type of an image by its address's extension, or undefined for an unknown one.
+export function imageMimeType(url: string): string | undefined {
+  const ext = /\.([a-z0-9]+)$/i.exec(new URL(url, 'https://x.invalid').pathname)?.[1]?.toLowerCase();
+  return ext ? IMAGE_TYPES[ext] : undefined;
+}
+
 // An absolute https URL and MIME type for a featured image, or undefined when it's unsafe or of an unknown type.
 function enclosureOf(src: string | null, site: string): { url: string; type: string } | undefined {
   if (!src || !isSafeImageSrc(src)) return undefined;
   const url = src.startsWith('/') ? `${site}${src}` : src;
-  const ext = /\.([a-z0-9]+)$/i.exec(new URL(url).pathname)?.[1]?.toLowerCase();
-  const type = ext ? IMAGE_TYPES[ext] : undefined;
+  const type = imageMimeType(url);
   return type ? { url, type } : undefined;
 }
 

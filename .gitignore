@@ -6,6 +6,7 @@ node_modules
 .env
 # The website's build: the catalog is pulled from the portal (npm run site:catalog), the rest is Hugo's output.
 site/data/catalog.json
+site/data/blog.json
 site/public/
 site/resources/
 site/.hugo_build.lock

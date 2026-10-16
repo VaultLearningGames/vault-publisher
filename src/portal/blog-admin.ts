@@ -8,7 +8,7 @@
 // A slug change moves the post's images to site/<new slug>/ (blog/slugMove.ts): 502 { error: 'image_move_failed' }
 // or 409 when they can't be moved, and then nothing changed. The response's "move" says what happened to them.
 //   GET    /portal/api/blog/slugify?title=...  -> { slug } (a free slug for the title)
-//   POST   /portal/api/blog/republish        rewrites the static blog on the CDN (blog/staticPublish.ts) -> { written, deleted, url }
+//   POST   /portal/api/blog/republish        rebuilds the website's blog now (blog/siteRebuild.ts) -> { dispatched, environment }
 //   POST   /portal/api/blog/:slug/images     an image upload (multipart "file") -> { key, url, ... } (blog-images.ts)
 // The editor (pages need a session; the JSON routes are API routes like the ones above):
 //   GET    /portal/blog/new                 creates an empty draft, 302 -> /portal/blog/edit/<id>
@@ -21,9 +21,10 @@
 //   GET    /assets/portal-blog-editor.js|.css  the editor's script (an ES module) and styles
 //   GET    /assets/portal-blog-image-editor.js  the image editor (crop, resize, compress, alt text) the editor imports
 // A draft is a 'published' post with no published_at: the public blog 404s it until it is published.
-// With static publishing on (BLOG_STATIC_PUBLISH: staging only), a change that commits and touches a public post
-// (publish, unpublish, edit or delete of a post that was or is viewable) then rewrites the static blog on the CDN;
-// a draft's changes don't. The response carries "static_site": what was written, or the error (the change stays saved).
+// The public blog is built by the website (Hugo, from GET /v1/blog). With site rebuilds on (blog/siteRebuild.ts), a
+// change that commits and touches a public post (publish, unpublish, edit or delete of a post that was or is viewable)
+// then asks for a site rebuild, debounced so a burst of saves is one build; a draft's changes don't. The response
+// carries "site_rebuild": { queued: true, environment }.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +37,6 @@ import { BlogRepo, SlugTakenError, type BlogPost, type BlogPostInput, type BlogS
 import { isBlogSlug, MAX_SLUG, slugify } from '../blog/slug.ts';
 import { postPage } from '../blog/publicRender.ts';
 import { isViewable } from '../blog/publicQueries.ts';
-import { BlogStaticPublisher } from '../blog/staticPublish.ts';
 import { retrySlugMoves, rewriteMovedRefs, SlugMoveError, updatePost, type SlugMoveDeps } from '../blog/slugMove.ts';
 import { registerBlogImages } from './blog-images.ts';
 import { head, pill } from './routes.ts';
@@ -172,20 +172,14 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
       throw err;
     }
   };
-  const publisher = new BlogStaticPublisher({ db: h.db.sqlite, storage: h.deps.production, enabled: !!h.deps.blogStaticPublish,
-    siteUrl: h.deps.siteUrl ?? 'https://vaultlearninggames.org', cdnUrl: h.deps.prodPublicUrl });
+  const rebuilder = h.deps.siteRebuild ?? null;
   type Visibility = Pick<BlogPost, 'status' | 'published_at'> | undefined;
-  // After a committed change: rewrites the static blog when the post was or is public. Never fails the request.
-  const republish = async (before: Visibility, after: Visibility): Promise<{ static_site?: Record<string, unknown> }> => {
+  // After a committed change: asks for a site rebuild when the post was or is public. Never fails the request; the
+  // build itself happens later (debounced), so nothing here waits for GitHub.
+  const republish = async (before: Visibility, after: Visibility): Promise<{ site_rebuild?: Record<string, unknown> }> => {
     const now = new Date().toISOString();
-    if (!publisher.enabled || !((before && isViewable(before, now)) || (after && isViewable(after, now)))) return {};
-    try {
-      const r = await publisher.publish();
-      return { static_site: { written: r.written, deleted: r.deleted, url: publisher.blogUrl } };
-    } catch (err) {
-      console.error(`blog static publish: ${(err as Error).message}`);
-      return { static_site: { error: 'The change is saved, but the static blog could not be updated. Republish to retry.' } };
-    }
+    if (!rebuilder?.enabled || !((before && isViewable(before, now)) || (after && isViewable(after, now)))) return {};
+    return rebuilder.request() ? { site_rebuild: { queued: true, environment: rebuilder.environment } } : {};
   };
   const moveDeps = (): SlugMoveDeps => ({ repo, storage: h.deps.production, publicBase: h.deps.prodPublicUrl });
   // An update that may change the slug, moving the post's images with it.
@@ -263,13 +257,15 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     return c.json({ ok: true, ...await republish(post, undefined) });
   });
 
-  // Rewrites the whole static blog: recovery after a failed write, or a scheduled post whose time has come.
+  // Rebuilds the website's blog now: recovery after a failed build, or a scheduled post whose time has come.
   app.post('/portal/api/blog/republish', async (c) => {
     const u = admin(c);
-    if (!publisher.enabled) fail(409, 'Static blog publishing is off on this system.');
-    const r = await publisher.publish();
-    h.db.audit(h.actor(u), 'blog.republish', 'blog', { written: r.written, deleted: r.deleted });
-    return c.json({ written: r.written, deleted: r.deleted, url: publisher.blogUrl });
+    if (!rebuilder?.enabled) fail(409, 'Site rebuilds are off on this system.');
+    try { await rebuilder.flush(); } catch (err) {
+      fail(503, `The site rebuild could not be started: ${(err as Error).message}`);
+    }
+    h.db.audit(h.actor(u), 'blog.republish', 'blog', { environment: rebuilder.environment });
+    return c.json({ dispatched: true, environment: rebuilder.environment });
   });
 
   // ---------- the editor ----------

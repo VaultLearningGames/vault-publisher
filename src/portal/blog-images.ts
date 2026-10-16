@@ -4,8 +4,8 @@
 // The browser crops, resizes and compresses the image first (portal-blog-image-editor.js); this checks what arrives
 // by its first bytes (JPEG, PNG, WebP or GIF; anything else 415), at most 10 MiB (413), and stores it in the Vault
 // CDN (release) bucket at site/<slug>/<sha-256>.<ext> (blog/imageKey.ts), cached for a year. The same bytes are the
-// same key: an object that is already there isn't written again (created: false). Nothing is ever deleted, and
-// renaming a post's slug leaves its images where they are (posts keep pointing at them by URL).
+// same key: an object that is already there isn't written again (created: false). Nothing is deleted here; renaming
+// a post's slug moves its images to the new slug's folder and repoints the post at them (blog/slugMove.ts).
 import type { Hono } from 'hono';
 import { fail } from '../app.ts';
 import { IMAGE_CACHE } from '../assets.ts';

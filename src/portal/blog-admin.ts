@@ -4,6 +4,9 @@
 //   POST   /portal/api/blog/posts            -> 201
 //   PUT|PATCH /portal/api/blog/posts/:id     (fields omitted keep their value)
 //   DELETE /portal/api/blog/posts/:id
+//   POST   /portal/api/blog/posts/:id/slug-move/retry  finishes deleting images an earlier rename left -> { pending }
+// A slug change moves the post's images to site/<new slug>/ (blog/slugMove.ts): 502 { error: 'image_move_failed' }
+// or 409 when they can't be moved, and then nothing changed. The response's "move" says what happened to them.
 //   GET    /portal/api/blog/slugify?title=...  -> { slug } (a free slug for the title)
 //   POST   /portal/api/blog/:slug/images     an image upload (multipart "file") -> { key, url, ... } (blog-images.ts)
 // The editor (pages need a session; the JSON routes are API routes like the ones above):
@@ -28,6 +31,7 @@ import { validateBlocks, isSafeImageSrc, type Block } from '../blog/blocks.ts';
 import { BlogRepo, SlugTakenError, type BlogPost, type BlogPostInput, type BlogStatus } from '../blog/repo.ts';
 import { isBlogSlug, MAX_SLUG, slugify } from '../blog/slug.ts';
 import { postPage } from '../blog/publicRender.ts';
+import { retrySlugMoves, rewriteMovedRefs, SlugMoveError, updatePost, type SlugMoveDeps } from '../blog/slugMove.ts';
 import { registerBlogImages } from './blog-images.ts';
 import { head } from './routes.ts';
 import { html, raw } from './html.ts';
@@ -152,11 +156,23 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     if (!/^[1-9]\d{0,15}$/.test(raw)) fail(404, 'No such blog post.');
     return Number(raw);
   };
+  const slugTaken = (err: SlugTakenError) => {
+    const error = `The slug "${err.message}" is already used by another post.`;
+    return new HTTPException(409, { res: Response.json({ error, field: 'slug', detail: { field: 'slug' } }, { status: 409 }) });
+  };
   const save = <T>(fn: () => T): T => {
     try { return fn(); } catch (err) {
-      if (err instanceof SlugTakenError) {
-        const error = `The slug "${err.message}" is already used by another post.`;
-        throw new HTTPException(409, { res: Response.json({ error, field: 'slug', detail: { field: 'slug' } }, { status: 409 }) });
+      if (err instanceof SlugTakenError) throw slugTaken(err);
+      throw err;
+    }
+  };
+  const moveDeps = (): SlugMoveDeps => ({ repo, storage: h.deps.production, publicBase: h.deps.prodPublicUrl });
+  // An update that may change the slug, moving the post's images with it.
+  const saveMoving = async (id: number, base: BlogPost, input: BlogPostInput) => {
+    try { return await updatePost(moveDeps(), id, base, input); } catch (err) {
+      if (err instanceof SlugTakenError) throw slugTaken(err);
+      if (err instanceof SlugMoveError) {
+        throw new HTTPException(err.status, { res: Response.json({ error: err.code, message: err.message, field: 'slug' }, { status: err.status }) });
       }
       throw err;
     }
@@ -195,13 +211,27 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const base = repo.get(id);
     if (!base) fail(404, 'No such blog post.');
     const input = parseInput(await jsonBody(c), base, repo);
-    const post = save(() => repo.update(id, input));
+    const { post, move } = await saveMoving(id, base, input);
     if (!post) fail(404, 'No such blog post.');
-    h.db.audit(h.actor(u), 'blog.update', post.slug, { id, ...(base.slug !== post.slug ? { from: base.slug } : {}), status: post.status });
-    return c.json({ post });
+    h.db.audit(h.actor(u), 'blog.update', post.slug, { id, ...(base.slug !== post.slug ? { from: base.slug } : {}), status: post.status, ...(move ? { move } : {}) });
+    return c.json({ post, ...(move ? { move } : {}) });
   };
   app.put('/portal/api/blog/posts/:id', update);
   app.patch('/portal/api/blog/posts/:id', update);
+
+  app.post('/portal/api/blog/posts/:id/slug-move/retry', async (c) => {
+    const u = admin(c);
+    const id = idOf(c);
+    const post = repo.get(id);
+    if (!post) fail(404, 'No such blog post.');
+    let pending;
+    try { pending = await retrySlugMoves(moveDeps(), id); } catch (err) {
+      if (err instanceof SlugMoveError) throw new HTTPException(err.status, { res: Response.json({ error: err.code, message: err.message }, { status: err.status }) });
+      throw err;
+    }
+    h.db.audit(h.actor(u), 'blog.slug-move.retry', post.slug, { id, pending: pending.length });
+    return c.json({ pending: pending.map((m) => ({ id: m.id, old_slug: m.old_slug, new_slug: m.new_slug, error: m.last_error })) });
+  });
 
   app.delete('/portal/api/blog/posts/:id', (c) => {
     const u = admin(c);
@@ -264,10 +294,10 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     if (typeof body.updated_at !== 'string' || !body.updated_at) fail(400, 'updated_at (as loaded) is required.', { field: 'updated_at' });
     if (body.updated_at !== base.updated_at) return conflict(c, base);
     const input = parseInput(editorBody(body), base, repo, false);
-    const post = save(() => repo.update(id, input));
+    const { post, move } = await saveMoving(id, base, input);
     if (!post) fail(404, 'No such blog post.');
-    h.db.audit(h.actor(u), 'blog.update', post.slug, { id, ...(base.slug !== post.slug ? { from: base.slug } : {}), status: post.status });
-    return c.json({ post });
+    h.db.audit(h.actor(u), 'blog.update', post.slug, { id, ...(base.slug !== post.slug ? { from: base.slug } : {}), status: post.status, ...(move ? { move } : {}) });
+    return c.json({ post, ...(move ? { move } : {}) });
   });
 
   app.post('/portal/blog/:id/preview', async (c) => {
@@ -276,7 +306,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const body = await jsonBody(c);
     const base = repo.get(id);
     if (!base) fail(404, 'No such blog post.');
-    const p = parseInput(editorBody(body), base, repo, false);
+    const p = rewriteMovedRefs(repo.sqlite, id, parseInput(editorBody(body), base, repo, false), h.deps.prodPublicUrl);
     const tags = p.tags.map((name) => ({ slug: slugify(name), name }));
     const page = postPage(h.deps.siteUrl ?? 'https://vaultlearninggames.org', { id, ...p, tags }, []);
     return c.html(String(page), 200, { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' });

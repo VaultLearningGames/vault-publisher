@@ -351,7 +351,7 @@ describe('the url_monitors migration is v15 (and site_checks v16 after it)', () 
 
   test('a new database ends at the latest version with both tables', () => {
     const db = new Db(':memory:');
-    assert.equal(version(db), 17);
+    assert.equal(version(db), 18);
     assert.ok(tables(db).includes('studio_repositories') && tables(db).includes('url_monitors'));
   });
 
@@ -368,7 +368,7 @@ describe('the url_monitors migration is v15 (and site_checks v16 after it)', () 
       main.sqlite.close();
       for (let boot = 0; boot < 2; boot++) { // the upgrade, then an ordinary restart
         const db = new Db(path);
-        assert.equal(version(db), 17);
+        assert.equal(version(db), 18);
         assert.equal(db.studioByRepositoryId('555')!.slug, 'ucalgary');
         const m = saveMonitor(db, { game_id: game.id, url: 'https://games.example.org/quest/', files_from: 'crawl', list_url: null, by: 'user:boss' });
         assert.equal(monitorsForStudio(db, studio.id)[0].id, m.id);

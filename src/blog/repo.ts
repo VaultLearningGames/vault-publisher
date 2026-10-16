@@ -107,11 +107,13 @@ export class BlogRepo {
     });
   }
 
-  // Returns undefined when the post doesn't exist. A slug change records old -> post.
-  update(id: number, p: BlogPostInput): BlogPost | undefined {
+  // Returns undefined when the post doesn't exist. A slug change records old -> post. `inTx` runs first inside the same
+  // transaction with the stored slug; throwing from it rolls everything back.
+  update(id: number, p: BlogPostInput, inTx?: (cur: { slug: string }) => void): BlogPost | undefined {
     return this.tx(() => {
       const cur = this.sqlite.prepare('SELECT slug, updated_at FROM blog_posts WHERE id = ?').get(id) as { slug: string; updated_at: string } | undefined;
       if (!cur) return undefined;
+      inTx?.(cur);
       if (p.slug !== cur.slug) {
         if (this.slugTaken(p.slug, id)) throw new SlugTakenError(p.slug);
         this.sqlite.prepare('DELETE FROM blog_slug_redirects WHERE old_slug = ?').run(p.slug);
@@ -130,6 +132,7 @@ export class BlogRepo {
     return this.tx(() => {
       this.sqlite.prepare('DELETE FROM blog_post_tags WHERE post_id = ?').run(id);
       this.sqlite.prepare('DELETE FROM blog_slug_redirects WHERE post_id = ?').run(id);
+      this.sqlite.prepare('DELETE FROM blog_slug_moves WHERE post_id = ?').run(id);
       return Number(this.sqlite.prepare('DELETE FROM blog_posts WHERE id = ?').run(id).changes) > 0;
     });
   }

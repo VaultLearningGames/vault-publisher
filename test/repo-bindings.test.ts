@@ -301,7 +301,7 @@ describe('studios.json repositories at startup', () => {
       for (let boot = 0; boot < 2; boot++) {       // the migration start, then an ordinary restart
         const started = new Db(path);
         syncStudiosFile(started, shipped, log);
-        assert.equal((started.sqlite.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 17); // v14 studio_repositories, v15 url_monitors, v16 site_checks
+        assert.equal((started.sqlite.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 18); // v14 studio_repositories, v15 url_monitors, v16 site_checks
         assert.equal(started.studioByOwnerId(ORG)!.slug, 'vault');
         assert.equal(started.studioBySlug('mit-education-arcade')!.github_owner_id, 'vault:mit-education-arcade');
         assert.equal(started.studioBySlug('ucalgary')!.github_owner_id, 'vault:ucalgary');

@@ -130,7 +130,9 @@ async function openInPlayer(env: GameEnv, c: Extract<GameCandidate, { embed: tru
     const clicked = Date.now();
     try { await button.click({ timeout: 5000 }); } catch { await button.evaluate((el) => (el as HTMLElement).click()).catch(() => {}); }
     const handle = await page.waitForSelector('.vault-player.is-open iframe.vault-player__frame', { state: 'attached', timeout: 5000 }).catch(() => null);
-    if (!handle) return game;
+    // A game that takes the whole tab away at once may do it before the player's frame is seen: it could only do so
+    // from inside that frame, so the player did open.
+    if (!handle) return { ...game, opened: escapes.some((e) => e.how === 'navigated') };
     game.opened = true;
     game.url = await handle.evaluate((el) => (el as HTMLIFrameElement).src).catch(() => '');
     const frame = await handle.contentFrame();

@@ -7,8 +7,13 @@
 // Published/Private, publish date, tags). Edits autosave about 2 s after the last change; Preview shows the unsaved
 // post as the public blog renders it; Publish saves, then sets the publish date.
 //
+// Image blocks and the featured image take an uploaded image (picker, drag and drop, or paste) through the image
+// editor in portal-blog-image-editor.js: crop, resize, compress, alt text, then stored on the CDN under the post's slug.
+//
 // This file is an ES module so its pure functions (serialize, deserialize, reorder, slugs, tags, autosave timing) can be tested with node:test;
 // the page itself is set up by the IIFE at the bottom, which only runs in a browser.
+
+import { imageDropTarget, openImageEditor } from './portal-blog-image-editor.js';
 
 export const BLOCK_TYPES = ['heading', 'paragraph', 'image', 'divider'];
 export const ALIGNS = ['left', 'center', 'right', 'wide', 'full'];
@@ -220,6 +225,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   const post = JSON.parse(dataEl.textContent || '{}');
   const id = root.dataset.id;
   let updatedAt = post.updated_at;
+  let savedSlug = post.slug; // where images upload: the slug the server has, not the one being typed
   let items = deserializeBlocks(post.blocks);
   const els = new Map(); // block key -> its element
   let saving = false;
@@ -268,6 +274,13 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     oninput: () => { settings.featured_image = imgInput.value; showImg(); changed(); } });
   const imgPrev = h('img', { class: 'be-img-prev', alt: '', hidden: true });
   const imgMsg = h('p', { class: 'err' });
+  const imgField = h('div', { class: 'be-img-drop' }, imgInput);
+  imgField.append(imageDropTarget(imgField, async (file) => {
+    const r = await editImage(file, { title: 'Featured image', withAlt: false });
+    if (!r) return;
+    imgInput.value = settings.featured_image = r.url;
+    showImg(); changed(); say('Featured image uploaded.');
+  }));
   function showImg() {
     const v = imgInput.value.trim();
     const ok = /^https:\/\/[^/?#\s]+\S*$/i.test(v) || (v.startsWith('/') && !v.startsWith('//') && !/\s/.test(v));
@@ -300,7 +313,8 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     h('h2', null, 'Settings'),
     stateLine,
     field('slug', 'URL slug', slugInput, slugUrl, slugMsg),
-    field('img', 'Featured image', imgInput, imgPrev, imgMsg),
+    field('img', 'Featured image', imgField, imgPrev, imgMsg,
+      h('p', { class: 'muted' }, 'Drop, paste or upload an image. The public blog uses the title as its alt text.')),
     field('excerpt', 'Excerpt', excerptInput, h('p', { class: 'muted' }, 'Shown in the catalog and in link previews.')),
     field('author', 'Author', authorInput),
     h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Visibility'),
@@ -565,17 +579,35 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       const showPreview = () => { const ok = isLinkHref(item.src) && !/^(http:|mailto:)/i.test(item.src); preview.hidden = !ok; if (ok) preview.src = item.src; };
       showPreview();
       const f = (label, input) => h('label', { class: 'field' }, h('span', { class: 'lab' }, label), input);
-      return h('div', { class: 'be-img' },
+      const srcInput = h('input', { type: 'url', value: item.src, placeholder: 'https://… or /path', oninput: (e) => { item.src = e.target.value; showPreview(); changed(); } });
+      const altInput = h('input', { type: 'text', value: item.alt, maxlength: '500', placeholder: 'What the image shows', oninput: set('alt') });
+      const wrap = h('div', { class: 'be-img' });
+      const upload = imageDropTarget(wrap, async (file) => {
+        const r = await editImage(file, { title: 'Image', alt: item.alt });
+        if (!r) return;
+        item.src = srcInput.value = r.url;
+        if (r.alt) item.alt = altInput.value = r.alt;
+        showPreview(); changed(); say('Image uploaded.');
+      });
+      wrap.append(
         h('div', { class: 'be-img-fields' },
-          f('Image URL', h('input', { type: 'url', value: item.src, placeholder: 'https://… or /path', oninput: (e) => { item.src = e.target.value; showPreview(); changed(); } })),
-          f('Alt text', h('input', { type: 'text', value: item.alt, maxlength: '500', placeholder: 'What the image shows', oninput: set('alt') })),
+          f('Image URL', srcInput),
+          f('Alt text', altInput),
           f('Caption', h('input', { type: 'text', value: item.caption, maxlength: '1000', oninput: set('caption') })),
           f('Alignment', h('select', { onchange: set('align') },
             h('option', { value: '', selected: !item.align }, 'Default'),
-            ...ALIGNS.map((a) => h('option', { value: a, selected: item.align === a }, a[0].toUpperCase() + a.slice(1)))))),
+            ...ALIGNS.map((a) => h('option', { value: a, selected: item.align === a }, a[0].toUpperCase() + a.slice(1))))),
+          h('div', { class: 'be-img-up' }, upload, h('span', { class: 'muted' }, ' or drop or paste an image here'))),
         preview);
+      return wrap;
     }
     return h('hr', { class: 'be-hr' });
+  }
+
+  // The image editor for a picked, dropped or pasted file; resolves to { url, alt } once uploaded, or null.
+  async function editImage(file, opts) {
+    if (!/^image\/(jpeg|png|webp|gif)$/i.test(file.type || '')) { status.textContent = 'Choose a JPEG, PNG, WebP or GIF image.'; return null; }
+    return openImageEditor(file, { ...opts, slug: savedSlug });
   }
 
   // A contenteditable paragraph with a toolbar: bold, italic, link, bulleted and numbered lists.
@@ -692,6 +724,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       showError('');
       updatedAt = data.post.updated_at;
       publishedAt = data.post.published_at;
+      savedSlug = data.post.slug;
       savedJson = sent;
       status.textContent = dirty() ? `${savedLabel(new Date())}; newer changes not saved yet` : savedLabel(new Date());
       showState();

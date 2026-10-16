@@ -5,6 +5,7 @@
 //   PUT|PATCH /portal/api/blog/posts/:id     (fields omitted keep their value)
 //   DELETE /portal/api/blog/posts/:id
 //   GET    /portal/api/blog/slugify?title=...  -> { slug } (a free slug for the title)
+//   POST   /portal/api/blog/:slug/images     an image upload (multipart "file") -> { key, url, ... } (blog-images.ts)
 // The editor (pages need a session; the JSON routes are API routes like the ones above):
 //   GET    /portal/blog/new                 creates an empty draft, 302 -> /portal/blog/edit/<id>
 //   GET    /portal/blog/edit/:id            the editor page, with the post as JSON in #blog-post-data
@@ -14,6 +15,7 @@
 //   GET    /portal/blog/slug-check?slug=&id= -> { slug, available } (slug normalized)
 //   GET    /portal/blog/tags?q=             -> { tags } up to 10 existing tags whose name starts with q
 //   GET    /assets/portal-blog-editor.js|.css  the editor's script (an ES module) and styles
+//   GET    /assets/portal-blog-image-editor.js  the image editor (crop, resize, compress, alt text) the editor imports
 // A draft is a 'published' post with no published_at: the public blog 404s it until it is published.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -26,6 +28,7 @@ import { validateBlocks, isSafeImageSrc, type Block } from '../blog/blocks.ts';
 import { BlogRepo, SlugTakenError, type BlogPost, type BlogPostInput, type BlogStatus } from '../blog/repo.ts';
 import { isBlogSlug, MAX_SLUG, slugify } from '../blog/slug.ts';
 import { postPage } from '../blog/publicRender.ts';
+import { registerBlogImages } from './blog-images.ts';
 import { head } from './routes.ts';
 import { html, raw } from './html.ts';
 import type { ListingHelpers } from './listings.ts';
@@ -131,11 +134,14 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   const repo = new BlogRepo(h.db.sqlite);
   // The editor's script and styles, read once at startup and versioned by content like the portal's own assets.
   const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
-  const editorJs = asset('portal-blog-editor.js'), editorCss = asset('portal-blog-editor.css');
-  const editorVersion = createHash('sha256').update(editorJs).update(editorCss).digest('hex').slice(0, 10);
+  const editorJs = asset('portal-blog-editor.js'), editorCss = asset('portal-blog-editor.css'), imageJs = asset('portal-blog-image-editor.js');
+  const editorVersion = createHash('sha256').update(editorJs).update(editorCss).update(imageJs).digest('hex').slice(0, 10);
   const immutable = 'public, max-age=31536000, immutable';
   app.get('/assets/portal-blog-editor.js', (c) => c.body(editorJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': immutable }));
+  // The editor imports it by this unversioned address, so browsers revalidate it rather than keep it for good.
+  app.get('/assets/portal-blog-image-editor.js', (c) => c.body(imageJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
   app.get('/assets/portal-blog-editor.css', (c) => c.body(editorCss, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
+  registerBlogImages(app, h);
   const admin = (c: Context): User => {
     const u = h.apiUser(c);
     if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can manage the blog.');

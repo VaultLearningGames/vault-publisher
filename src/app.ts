@@ -78,7 +78,7 @@ const MAX_RELEASE_BUDGET_SECONDS = 280;
 // so by then every request the old switch made has already been given up on.
 export const SWITCH_STALE_MS = 5 * 60_000;
 
-export function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 413 | 503, message: string, detail?: unknown): never {
+export function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 413 | 415 | 503, message: string, detail?: unknown): never {
   throw new HTTPException(status, { res: Response.json({ error: message, detail }, { status }) });
 }
 

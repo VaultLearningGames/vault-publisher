@@ -39,7 +39,7 @@ import { isViewable } from '../blog/publicQueries.ts';
 import { BlogStaticPublisher } from '../blog/staticPublish.ts';
 import { retrySlugMoves, rewriteMovedRefs, SlugMoveError, updatePost, type SlugMoveDeps } from '../blog/slugMove.ts';
 import { registerBlogImages } from './blog-images.ts';
-import { head } from './routes.ts';
+import { head, pill } from './routes.ts';
 import { html, raw } from './html.ts';
 import type { ListingHelpers } from './listings.ts';
 
@@ -290,6 +290,23 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   };
   const conflict = (c: Context, current: BlogPost) =>
     c.json({ error: 'This post was changed elsewhere since you loaded it. Reload to get the latest version.', current }, 409);
+
+  // Every post, newest first (the API's order), with a link to its editor.
+  app.get('/portal/blog', (c) => {
+    const u = h.signedIn(c); if (u instanceof Response) return u;
+    if (!h.isVaultAdmin(u)) return h.denied(c, NOT_ADMIN);
+    const posts = repo.list();
+    // A draft is a 'published' post with no published_at.
+    const status = (p: BlogPost) => (p.status === 'private' ? pill('off', 'private') : p.published_at ? pill('ok', 'published') : pill('wait', 'draft'));
+    const rows = posts.map((p) => html`<tr><td class="proj"><b>${p.title || '(untitled)'}</b><span class="mono">${p.slug}</span></td>
+      <td>${status(p)}</td><td>${p.published_at ? p.published_at.slice(0, 10) : '—'}</td><td>${p.author || '—'}</td>
+      <td class="r"><a class="btn sm" href="/portal/blog/edit/${p.id}">Edit</a></td></tr>`);
+    const body = html`${head('Blog', 'Every post on the Vault blog: drafts, published and private ones.', html`<a class="btn pri" href="/portal/blog/new">New post</a>`)}
+      ${posts.length
+        ? html`<div class="tbl-wrap"><table><thead><tr><th>Title</th><th>Status</th><th>Published</th><th>Author</th><th class="r"></th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : html`<p class="muted">No posts yet.</p>`}`;
+    return h.page(c, 'Blog', body, { active: 'blog' });
+  });
 
   app.get('/portal/blog/new', (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;

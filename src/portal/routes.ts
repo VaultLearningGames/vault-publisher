@@ -156,7 +156,8 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
           <a href="/vault/analytics" class="${active === 'analytics' ? 'on' : ''}">Analytics</a>
           <a href="/vault/studios" class="${active === 'vault-studios' ? 'on' : ''}">Studios</a>
           <a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>
-          <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>` : ''}
+          <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>
+          ${u!.vault_role === 'admin' ? html`<a href="/portal/blog" class="${active === 'blog' ? 'on' : ''}">Blog</a>` : ''}` : ''}
       </nav>
       <div class="side-foot">
         ${supportUrl ? html`<p class="support">${supportLink('Need support?')} <span>Join our Slack, then the <b>${SUPPORT_CHANNEL}</b> channel.</span></p>` : ''}

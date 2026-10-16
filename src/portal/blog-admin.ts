@@ -5,16 +5,33 @@
 //   PUT|PATCH /portal/api/blog/posts/:id     (fields omitted keep their value)
 //   DELETE /portal/api/blog/posts/:id
 //   GET    /portal/api/blog/slugify?title=...  -> { slug } (a free slug for the title)
+// The editor (pages need a session; the JSON routes are API routes like the ones above):
+//   GET    /portal/blog/new                 creates an empty draft, 302 -> /portal/blog/edit/<id>
+//   GET    /portal/blog/edit/:id            the editor page, with the post as JSON in #blog-post-data
+//   PUT    /portal/blog/:id                 save; body has the post's updated_at as loaded -> { post }, or 409 { error, current }
+//   POST   /portal/blog/:id/preview         the unsaved body rendered as the public post page; saves nothing
+//   POST   /portal/blog/:id/publish         sets published_at (now, unless already set) -> { post }
+//   GET    /portal/blog/slug-check?slug=&id= -> { slug, available } (slug normalized)
+//   GET    /portal/blog/tags?q=             -> { tags } up to 10 existing tags whose name starts with q
+// A draft is a 'published' post with no published_at: the public blog 404s it until it is published.
 import type { Context, Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import { fail, jsonBody } from '../app.ts';
 import type { User } from '../db.ts';
 import { validateBlocks, isSafeImageSrc, type Block } from '../blog/blocks.ts';
 import { BlogRepo, SlugTakenError, type BlogPost, type BlogPostInput, type BlogStatus } from '../blog/repo.ts';
 import { isBlogSlug, MAX_SLUG, slugify } from '../blog/slug.ts';
+import { postPage } from '../blog/publicRender.ts';
+import { head } from './routes.ts';
+import { html, raw } from './html.ts';
 import type { ListingHelpers } from './listings.ts';
 
 const FIELDS = ['slug', 'title', 'blocks', 'excerpt', 'featured_image', 'author', 'status', 'published_at', 'tags'];
 const MAX_TAGS = 20;
+// Slugs set from the editor are normalized ("My  Post!" -> "my-post") and at most this long.
+export const EDITOR_MAX_SLUG = 80;
+// Keys of a loaded post the editor may send back unchanged; they are not editable.
+const READ_ONLY = ['id', 'created_at', 'updated_at', 'redirects'];
 
 const hasCtl = (s: string) => /[\u0000-\u001f\u007f]/.test(s);
 
@@ -34,7 +51,8 @@ function isoDate(v: string): boolean {
 }
 
 // Validates a create/update body over `base` (the current post on update). Collects every error into one 400.
-function parseInput(b: Record<string, unknown>, base: BlogPost | undefined, repo: BlogRepo): BlogPostInput {
+// A published post without published_at gets now, unless `publishNow` is false (the editor saves drafts that way).
+function parseInput(b: Record<string, unknown>, base: BlogPost | undefined, repo: BlogRepo, publishNow = true): BlogPostInput {
   const errors: string[] = [];
   for (const k of Object.keys(b)) if (!FIELDS.includes(k)) errors.push(`unknown field "${k}"`);
 
@@ -94,7 +112,7 @@ function parseInput(b: Record<string, unknown>, base: BlogPost | undefined, repo
 
   const finalStatus = status ?? base?.status ?? 'private';
   let finalPublishedAt = publishedAt !== undefined ? publishedAt : base?.published_at ?? null;
-  if (finalStatus === 'published' && !finalPublishedAt) finalPublishedAt = new Date().toISOString();
+  if (publishNow && finalStatus === 'published' && !finalPublishedAt) finalPublishedAt = new Date().toISOString();
   const finalTitle = title ?? base!.title;
   if (slug === undefined) slug = base ? base.slug : repo.freeSlug(slugify(finalTitle));
 
@@ -119,7 +137,10 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   };
   const save = <T>(fn: () => T): T => {
     try { return fn(); } catch (err) {
-      if (err instanceof SlugTakenError) fail(409, `The slug "${err.message}" is already used by another post.`, { field: 'slug' });
+      if (err instanceof SlugTakenError) {
+        const error = `The slug "${err.message}" is already used by another post.`;
+        throw new HTTPException(409, { res: Response.json({ error, field: 'slug', detail: { field: 'slug' } }, { status: 409 }) });
+      }
       throw err;
     }
   };
@@ -173,4 +194,109 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     h.db.audit(h.actor(u), 'blog.delete', post.slug, { id });
     return c.json({ ok: true });
   });
+
+  // ---------- the editor ----------
+  // Pages: signed out -> sign-in, non-admins -> the portal's "No access" page, like the other Vault pages.
+  const NOT_ADMIN = 'Only Vault admins can manage the blog.';
+  const notFoundPage = (c: Context) =>
+    h.page(c, 'Not found', html`${head('Not found', 'No such blog post.')}<p><a href="/">Back to the portal</a></p>`, { status: 404 });
+  // An editor body: drops the read-only keys and normalizes the slug.
+  const editorBody = (b: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(b)) if (!READ_ONLY.includes(k)) out[k] = v;
+    if (typeof out.slug === 'string' && out.slug !== '') {
+      const slug = editorSlug(out.slug);
+      if (!slug) fail(400, 'Invalid blog post.', { errors: ['slug must contain letters or digits'], field: 'slug' });
+      out.slug = slug;
+    }
+    return out;
+  };
+  const conflict = (c: Context, current: BlogPost) =>
+    c.json({ error: 'This post was changed elsewhere since you loaded it. Reload to get the latest version.', current }, 409);
+
+  app.get('/portal/blog/new', (c) => {
+    const u = h.signedIn(c); if (u instanceof Response) return u;
+    if (!h.isVaultAdmin(u)) return h.denied(c, NOT_ADMIN);
+    const post = repo.create({ slug: repo.freeSlug('untitled'), title: 'Untitled', blocks: [], excerpt: '', featured_image: null,
+      author: u.name || u.login, status: 'published', published_at: null, tags: [] });
+    h.db.audit(h.actor(u), 'blog.create', post.slug, { id: post.id, status: post.status, draft: true });
+    return c.redirect(`/portal/blog/edit/${post.id}`, 302);
+  });
+
+  app.get('/portal/blog/edit/:id', (c) => {
+    const u = h.signedIn(c); if (u instanceof Response) return u;
+    if (!h.isVaultAdmin(u)) return h.denied(c, NOT_ADMIN);
+    const raw_ = c.req.param('id') ?? '';
+    const post = /^[1-9]\d{0,15}$/.test(raw_) ? repo.get(Number(raw_)) : undefined;
+    if (!post) return notFoundPage(c);
+    // '<' as \u003c, so nothing in the post can close the script element.
+    const data = JSON.stringify(post).replace(/</g, '\\u003c');
+    return h.page(c, `Edit: ${post.title || 'Untitled'}`, html`${head('Edit post', post.published_at ? 'Published' : 'Draft: not on the blog yet')}
+      <link rel="stylesheet" href="/portal-blog-editor.css">
+      <div id="blog-editor" data-id="${post.id}"></div>
+      <script type="application/json" id="blog-post-data">${raw(data)}</script>
+      <script src="/portal-blog-editor.js" defer></script>`);
+  });
+
+  app.put('/portal/blog/:id', async (c) => {
+    const u = admin(c);
+    const id = idOf(c);
+    const body = await jsonBody(c);
+    const base = repo.get(id);
+    if (!base) fail(404, 'No such blog post.');
+    if (typeof body.updated_at !== 'string' || !body.updated_at) fail(400, 'updated_at (as loaded) is required.', { field: 'updated_at' });
+    if (body.updated_at !== base.updated_at) return conflict(c, base);
+    const input = parseInput(editorBody(body), base, repo, false);
+    const post = save(() => repo.update(id, input));
+    if (!post) fail(404, 'No such blog post.');
+    h.db.audit(h.actor(u), 'blog.update', post.slug, { id, ...(base.slug !== post.slug ? { from: base.slug } : {}), status: post.status });
+    return c.json({ post });
+  });
+
+  app.post('/portal/blog/:id/preview', async (c) => {
+    admin(c);
+    const id = idOf(c);
+    const body = await jsonBody(c);
+    const base = repo.get(id);
+    if (!base) fail(404, 'No such blog post.');
+    const p = parseInput(editorBody(body), base, repo, false);
+    const tags = p.tags.map((name) => ({ slug: slugify(name), name }));
+    const page = postPage(h.deps.siteUrl ?? 'https://vaultlearninggames.org', { id, ...p, tags }, []);
+    return c.html(String(page), 200, { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' });
+  });
+
+  app.post('/portal/blog/:id/publish', async (c) => {
+    const u = admin(c);
+    const id = idOf(c);
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown> | null;
+    const base = repo.get(id);
+    if (!base) fail(404, 'No such blog post.');
+    const loaded = body && typeof body === 'object' ? body.updated_at : undefined;
+    if (loaded !== undefined && loaded !== base.updated_at) return conflict(c, base);
+    // Scheduled posts keep their date; status (published or private) is the editor's choice and stays.
+    const input: BlogPostInput = { slug: base.slug, title: base.title, blocks: base.blocks, excerpt: base.excerpt, featured_image: base.featured_image,
+      author: base.author, status: base.status, published_at: base.published_at ?? new Date().toISOString(), tags: base.tags.map((t) => t.name) };
+    const post = save(() => repo.update(id, input));
+    if (!post) fail(404, 'No such blog post.');
+    h.db.audit(h.actor(u), 'blog.publish', post.slug, { id, status: post.status, published_at: post.published_at });
+    return c.json({ post });
+  });
+
+  app.get('/portal/blog/slug-check', (c) => {
+    admin(c);
+    const slug = editorSlug(c.req.query('slug') ?? '');
+    const rawId = c.req.query('id') ?? '';
+    const id = /^[1-9]\d{0,15}$/.test(rawId) ? Number(rawId) : undefined;
+    return c.json({ slug, available: !!slug && isBlogSlug(slug) && !repo.slugTaken(slug, id) });
+  });
+
+  app.get('/portal/blog/tags', (c) => {
+    admin(c);
+    return c.json({ tags: repo.searchTags((c.req.query('q') ?? '').trim().slice(0, 50), 10) });
+  });
+}
+
+// "  My  Post!! " -> "my-post": lowercase a-z, 0-9 and single hyphens, at most EDITOR_MAX_SLUG characters.
+export function editorSlug(input: string): string {
+  return slugify(input).slice(0, EDITOR_MAX_SLUG).replace(/-+$/, '');
 }

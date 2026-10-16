@@ -1,8 +1,8 @@
 // HTML for the public blog pages. The pages use the public site's stylesheet (sq/css/vault-sq.css from the Hugo theme)
 // and its blog-grid / blog-item card markup, so they look like the site. There are no blog-specific styles.
 // Every interpolated value is escaped by html``.
-import { html, type Html } from '../portal/html.ts';
-import { isSafeHref, isSafeImageSrc, type Block, type Span } from './blocks.ts';
+import { html, raw, type Html } from '../portal/html.ts';
+import { isSafeHref, isSafeImageSrc, sanitizeParagraphHtml, type Block, type Span } from './blocks.ts';
 import type { BlogTag } from './repo.ts';
 import type { PublicPost } from './publicQueries.ts';
 
@@ -36,8 +36,13 @@ function spanHtml(s: Span): Html {
 
 export function blockHtml(b: Block): Html {
   switch (b.type) {
-    case 'heading': return b.level === 3 ? html`<h3>${b.text}</h3>` : html`<h2>${b.text}</h2>`;
-    case 'paragraph': return html`<p>${(b.children ?? []).map(spanHtml)}</p>`;
+    case 'heading': return b.level === 4 ? html`<h4>${b.text}</h4>` : b.level === 3 ? html`<h3>${b.text}</h3>` : html`<h2>${b.text}</h2>`;
+    case 'paragraph': {
+      if (typeof b.html !== 'string') return html`<p>${(b.children ?? []).map(spanHtml)}</p>`;
+      // Sanitized on save; sanitized again here so stored HTML is never trusted. Lists and <p> stand on their own.
+      const clean = sanitizeParagraphHtml(b.html, 'paragraph', []) ?? '';
+      return /^\s*<(p|ul|ol)>/.test(clean) ? raw(clean) : html`<p>${raw(clean)}</p>`;
+    }
     case 'image':
       if (!isSafeImageSrc(b.src)) return html``;
       return html`<figure class="${`blog-figure${b.align ? ` align-${b.align}` : ''}`}"><img src="${b.src}" alt="${b.alt ?? ''}" loading="lazy">${

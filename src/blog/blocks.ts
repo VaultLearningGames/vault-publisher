@@ -6,9 +6,11 @@ export type Mark = (typeof MARKS)[number];
 export type Align = (typeof ALIGNS)[number];
 
 export interface Span { text: string; marks?: Mark[]; href?: string }
+// A paragraph holds either spans or (from the editor) whitelist-sanitized HTML; see sanitizeParagraphHtml.
 export type Block =
-  | { type: 'heading'; level: 2 | 3; text: string }
-  | { type: 'paragraph'; children: Span[] }
+  | { type: 'heading'; level: 2 | 3 | 4; text: string }
+  | { type: 'paragraph'; children: Span[]; html?: undefined }
+  | { type: 'paragraph'; html: string; children?: undefined }
   | { type: 'image'; src: string; alt: string; caption?: string; align?: Align }
   | { type: 'divider' };
 
@@ -40,15 +42,82 @@ export function isSafeImageSrc(src: string): boolean {
 
 function heading(b: Record<string, unknown>, at: string, errors: string[]): Block | null {
   unknownKeys(b, ['type', 'level', 'text'], at, errors);
-  if (b.level !== 2 && b.level !== 3) errors.push(`${at}.level must be 2 or 3`);
+  if (b.level !== 2 && b.level !== 3 && b.level !== 4) errors.push(`${at}.level must be 2, 3 or 4`);
   const text = typeof b.text === 'string' ? b.text.trim() : null;
   if (text === null) errors.push(`${at}.text must be a string`);
   else if (text.length < 1 || text.length > 300) errors.push(`${at}.text must be 1-300 characters`);
   else if (hasCtl(text) || /[\r\n]/.test(text)) errors.push(`${at}.text must be a single line of plain text`);
-  return text === null ? null : { type: 'heading', level: b.level as 2 | 3, text };
+  return text === null ? null : { type: 'heading', level: b.level as 2 | 3 | 4, text };
+}
+
+export const MAX_PARAGRAPH_HTML = 20000;
+const ALLOWED_TAGS = new Set(['p', 'strong', 'b', 'em', 'i', 'a', 'ul', 'ol', 'li', 'br']);
+// Elements dropped together with everything inside them; any other element not allowed keeps only its text.
+const DROP_WITH_CONTENT = new Set(['script', 'style', 'iframe', 'object', 'embed', 'template', 'textarea', 'title', 'noscript', 'svg', 'math', 'select', 'xmp', 'noembed', 'noframes', 'plaintext']);
+const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0', colon: ':', tab: '\t', newline: '\n' };
+
+function decodeEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);?/gi, (m, e: string) => {
+    if (e[0] === '#') {
+      const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
+    }
+    return NAMED[e.toLowerCase()] ?? m;
+  });
+}
+const escText = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escAttr = (s: string) => escText(s).replace(/"/g, '&quot;');
+
+// Whitelist sanitizer for paragraph HTML: keeps p, strong, b, em, i, a[href], ul, ol, li and br, with no other attributes.
+// Other tags are removed (script-like ones with their content), comments dropped, text re-escaped, and tags balanced.
+// An <a> whose href is not an http(s) URL, a mailto: link or a root-relative path (javascript:, data:, ...) is an error,
+// not silently dropped. Returns the clean HTML, or null with errors pushed.
+export function sanitizeParagraphHtml(input: string, at: string, errors: string[]): string | null {
+  if (input.length > MAX_PARAGRAPH_HTML) { errors.push(`${at}.html must be at most ${MAX_PARAGRAPH_HTML} characters`); return null; }
+  let out = '';
+  const open: string[] = [];
+  let skip: string | null = null;
+  let bad = false;
+  const re = /<!--[\s\S]*?(?:-->|$)|<![^>]*>?|<\?[^>]*>?|<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>|([^<]+|<)/g;
+  for (let m; (m = re.exec(input));) {
+    const [, close, rawName, attrs, text] = m;
+    if (text !== undefined) { if (!skip) out += escText(decodeEntities(text)); continue; }
+    if (rawName === undefined) continue; // comment, doctype, processing instruction
+    const name = rawName.toLowerCase();
+    if (skip) { if (close && name === skip) skip = null; continue; }
+    if (DROP_WITH_CONTENT.has(name)) { if (!close && !/\/\s*$/.test(attrs)) skip = name; continue; }
+    if (!ALLOWED_TAGS.has(name)) continue;
+    if (name === 'br') { if (!close) out += '<br>'; continue; }
+    if (close) {
+      const i = open.lastIndexOf(name);
+      if (i < 0) continue;
+      while (open.length > i) out += `</${open.pop()}>`;
+      continue;
+    }
+    // As in a browser, a block element ends an open paragraph instead of nesting in it.
+    if ((name === 'p' || name === 'ul' || name === 'ol') && open.includes('p')) { const i = open.lastIndexOf('p'); while (open.length > i) out += `</${open.pop()}>`; }
+    if (name === 'a') {
+      const hm = /(?:^|\s)href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i.exec(attrs);
+      if (hm) {
+        const href = decodeEntities(hm[1] ?? hm[2] ?? hm[3] ?? '').trim();
+        if (!isSafeHref(href)) { errors.push(`${at}.html: link "${href.slice(0, 80)}" must be an http(s) URL, a mailto: link, or a path starting with /`); bad = true; continue; }
+        out += `<a href="${escAttr(href)}">`;
+      } else out += '<a>';
+    } else out += `<${name}>`;
+    open.push(name);
+  }
+  while (open.length) out += `</${open.pop()}>`;
+  if (hasCtl(out)) { errors.push(`${at}.html contains control characters`); return null; }
+  return bad ? null : out;
 }
 
 function paragraph(b: Record<string, unknown>, at: string, errors: string[]): Block | null {
+  if (b.html !== undefined) {
+    unknownKeys(b, ['type', 'html'], at, errors);
+    if (typeof b.html !== 'string') { errors.push(`${at}.html must be a string`); return null; }
+    const clean = sanitizeParagraphHtml(b.html, at, errors);
+    return clean === null ? null : { type: 'paragraph', html: clean };
+  }
   unknownKeys(b, ['type', 'children'], at, errors);
   if (!Array.isArray(b.children)) { errors.push(`${at}.children must be an array`); return null; }
   const n = b.children.length;

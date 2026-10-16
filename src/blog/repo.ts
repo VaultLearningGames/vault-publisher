@@ -18,6 +18,11 @@ export interface BlogPostInput {
 export class SlugTakenError extends Error {}
 
 const now = () => new Date().toISOString();
+// Now, but always after `prev`, so updated_at changes on every save (the editor's optimistic concurrency token).
+const laterThan = (prev: string) => {
+  const t = Date.now(), p = Date.parse(prev);
+  return new Date(Number.isNaN(p) || t > p ? t : p + 1).toISOString();
+};
 
 export class BlogRepo {
   readonly sqlite: DatabaseSync;
@@ -69,6 +74,13 @@ export class BlogRepo {
     return r ? this.get(Number(r.post_id)) : undefined;
   }
 
+  // Up to `limit` existing tags whose name starts with `prefix`, case-insensitively, alphabetically.
+  searchTags(prefix: string, limit = 10): BlogTag[] {
+    const like = `${prefix.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    return this.sqlite.prepare(`SELECT slug, name FROM blog_tags WHERE name LIKE ? ESCAPE '\\'
+      ORDER BY name COLLATE NOCASE, slug LIMIT ?`).all(like, limit) as unknown as BlogTag[];
+  }
+
   private setTags(postId: number, names: string[]) {
     this.sqlite.prepare('DELETE FROM blog_post_tags WHERE post_id = ?').run(postId);
     for (const name of names) {
@@ -98,7 +110,7 @@ export class BlogRepo {
   // Returns undefined when the post doesn't exist. A slug change records old -> post.
   update(id: number, p: BlogPostInput): BlogPost | undefined {
     return this.tx(() => {
-      const cur = this.sqlite.prepare('SELECT slug FROM blog_posts WHERE id = ?').get(id) as { slug: string } | undefined;
+      const cur = this.sqlite.prepare('SELECT slug, updated_at FROM blog_posts WHERE id = ?').get(id) as { slug: string; updated_at: string } | undefined;
       if (!cur) return undefined;
       if (p.slug !== cur.slug) {
         if (this.slugTaken(p.slug, id)) throw new SlugTakenError(p.slug);
@@ -108,7 +120,7 @@ export class BlogRepo {
       }
       this.sqlite.prepare(`UPDATE blog_posts SET slug = ?, title = ?, blocks = ?, excerpt = ?, featured_image = ?, author = ?, status = ?,
         published_at = ?, updated_at = ? WHERE id = ?`)
-        .run(p.slug, p.title, JSON.stringify(p.blocks), p.excerpt, p.featured_image, p.author, p.status, p.published_at, now(), id);
+        .run(p.slug, p.title, JSON.stringify(p.blocks), p.excerpt, p.featured_image, p.author, p.status, p.published_at, laterThan(cur.updated_at), id);
       this.setTags(id, p.tags);
       return this.get(id)!;
     });

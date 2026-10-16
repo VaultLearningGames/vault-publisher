@@ -244,7 +244,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const data = JSON.stringify(post).replace(/</g, '\\u003c');
     return h.page(c, `Edit: ${post.title || 'Untitled'}`, html`${head('Edit post', post.published_at ? 'Published' : 'Draft: not on the blog yet')}
       <link rel="stylesheet" href="/assets/portal-blog-editor.css?v=${editorVersion}">
-      <div id="blog-editor" data-id="${post.id}"></div>
+      <div id="blog-editor" data-id="${post.id}" data-site-url="${h.deps.siteUrl ?? 'https://vaultlearninggames.org'}"></div>
       <script type="application/json" id="blog-post-data">${raw(data)}</script>
       <script type="module" src="/assets/portal-blog-editor.js?v=${editorVersion}"></script>`);
   });

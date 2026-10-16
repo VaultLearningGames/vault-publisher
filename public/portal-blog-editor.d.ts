@@ -20,3 +20,29 @@ export function insertBlock<T>(items: T[], index: number, item: T): T[];
 export function removeBlock<T extends { key: string }>(items: T[], key: string): T[];
 export function saveBody(title: string, items: EditorBlock[], updatedAt: string | null): { title: string; blocks: Block[]; updated_at: string | null };
 export function isLinkHref(href: string): boolean;
+
+export interface EditorSettings {
+  slug: string; slugTaken?: boolean; excerpt: string; featured_image: string; author: string;
+  status: 'published' | 'private'; published_at: string | null; tags: string[];
+}
+export interface AutosaveState { dueAt: number | null; saving: boolean; stopped: boolean }
+export type AutosaveAction = { type: 'change'; at: number } | { type: 'start' } | { type: 'done'; ok?: boolean } | { type: 'stop' };
+
+export const MAX_SLUG: number;
+export const MAX_TAGS: number;
+export const MAX_TAG_LENGTH: number;
+export const AUTOSAVE_DELAY: number;
+export function slugify(input: string): string;
+export function isAutoSlug(slug: string, title: string, publishedAt: string | null): boolean;
+export function normalizeTag(name: string): string;
+export function addTag(tags: string[], name: string): { tags: string[]; error: string };
+export function toLocalInput(iso: string | null): string;
+export function fromLocalInput(value: string): string | null;
+export function savedLabel(date: Date): string;
+export function settingsBody(s: EditorSettings): {
+  slug?: string; excerpt: string; featured_image: string | null; author: string;
+  status: 'published' | 'private'; published_at: string | null; tags: string[];
+};
+export function autosaveInit(): AutosaveState;
+export function autosaveStep(state: AutosaveState, action: AutosaveAction, delay?: number): AutosaveState;
+export function autosaveDue(state: AutosaveState, now: number): boolean;

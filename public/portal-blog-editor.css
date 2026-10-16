@@ -49,3 +49,30 @@
 .be-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 @media (max-width: 640px) { .be-img-fields { grid-template-columns: 1fr; } }
+
+/* Settings panel beside the blocks; below them on narrow screens. */
+#blog-editor:has(.be-layout) { max-width: 1240px; }
+.be-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+.be-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.be-settings { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+.be-settings h2 { margin: 0; font-size: 15px; }
+.be-settings .field input, .be-settings .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); color: var(--ink); font: inherit; width: 100%; box-sizing: border-box; }
+.be-settings .field p { margin: 2px 0 0; font-size: 12px; }
+.be-settings .be-img-prev { max-width: 100%; margin-top: 6px; }
+.be-settings .be-img-prev[hidden] { display: none; }
+.be-url { word-break: break-all; font-family: var(--mono, monospace); }
+.be-state { margin: 0; font-size: 12.5px; }
+.be-state .pill { margin-right: 4px; }
+.be-switch { display: inline-flex; align-items: center; gap: 8px; font-weight: 500 !important; cursor: pointer; }
+.be-switch input { width: auto !important; accent-color: var(--slate); }
+.be-chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 6px 0 0; padding: 0; }
+.be-chips:empty { display: none; }
+.be-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 12.5px; background: var(--paper); }
+.be-chip-x { border: 0; background: none; color: var(--ink-3); cursor: pointer; font-size: 11px; padding: 2px 5px; border-radius: 50%; }
+.be-chip-x:hover, .be-chip-x:focus-visible { background: var(--hover); color: var(--ink); }
+.be-preview { width: min(1100px, calc(100vw - 32px)); height: calc(100vh - 48px); }
+.be-preview[open] { display: flex; flex-direction: column; }
+.be-preview-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.be-preview-frame { flex: 1; border: 0; width: 100%; background: #fff; }
+
+@media (max-width: 960px) { .be-layout { grid-template-columns: 1fr; } .be-settings { position: static; max-height: none; } }

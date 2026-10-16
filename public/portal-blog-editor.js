@@ -3,7 +3,11 @@
 // title and the blocks in the format of src/blog/blocks.ts to /portal/blog/:id with the updated_at the page was
 // loaded with; if someone else saved in between, the server answers 409 and that is shown, nothing is overwritten.
 //
-// This file is an ES module so its pure functions (serialize, deserialize, reorder) can be tested with node:test;
+// Beside the blocks, a settings panel (slug with a live URL and availability check, featured image, excerpt, author,
+// Published/Private, publish date, tags). Edits autosave about 2 s after the last change; Preview shows the unsaved
+// post as the public blog renders it; Publish saves, then sets the publish date.
+//
+// This file is an ES module so its pure functions (serialize, deserialize, reorder, slugs, tags, autosave timing) can be tested with node:test;
 // the page itself is set up by the IIFE at the bottom, which only runs in a browser.
 
 export const BLOCK_TYPES = ['heading', 'paragraph', 'image', 'divider'];
@@ -113,6 +117,100 @@ export function isLinkHref(href) {
   return /^(https?:\/\/[^/?#]+|mailto:.+)/i.test(h);
 }
 
+// ---------- settings ----------
+export const MAX_SLUG = 80; // EDITOR_MAX_SLUG in src/portal/blog-admin.ts
+export const MAX_TAGS = 20;
+export const MAX_TAG_LENGTH = 50;
+
+// "Héllo, World! 2026" -> "hello-world-2026", as the server normalizes editor slugs (src/blog/slug.ts + editorSlug).
+export function slugify(input) {
+  const s = String(input || '')
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return s.slice(0, MAX_SLUG).replace(/-+$/, '');
+}
+
+// Whether a loaded post's slug still follows its title, so typing a new title may change it: only for drafts (a
+// published post's URL is out there), and only when the slug is the title's or the "untitled" a new draft gets.
+export function isAutoSlug(slug, title, publishedAt) {
+  if (publishedAt) return false;
+  const s = String(slug || '');
+  return !s || s === slugify(title) || /^untitled(-\d+)?$/.test(s);
+}
+
+// A tag name as the server stores it: trimmed, inner whitespace collapsed; '' when it isn't a usable name.
+export function normalizeTag(name) {
+  const t = String(name || '').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > MAX_TAG_LENGTH || /[\u0000-\u001f\u007f]/.test(t) || !slugify(t)) return '';
+  return t;
+}
+
+// The tag list with `name` added: { tags, error }. Duplicates (same slug, so "Math" = "math") are not added again.
+export function addTag(tags, name) {
+  const list = (tags || []).slice();
+  const t = normalizeTag(name);
+  if (!t) return { tags: list, error: String(name || '').trim() ? `A tag is 1-${MAX_TAG_LENGTH} characters with letters or digits.` : '' };
+  if (list.some((x) => slugify(x) === slugify(t))) return { tags: list, error: '' };
+  if (list.length >= MAX_TAGS) return { tags: list, error: `A post may have at most ${MAX_TAGS} tags.` };
+  list.push(t);
+  return { tags: list, error: '' };
+}
+
+// An ISO date-time <-> the value of a datetime-local input, in the browser's time zone.
+const pad = (n) => String(n).padStart(2, '0');
+export function toLocalInput(iso) {
+  const d = new Date(iso || '');
+  if (!iso || Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+export function fromLocalInput(value) {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(String(value || ''))) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// "Saved 12:04" (local time, 24-hour).
+export const savedLabel = (date) => `Saved ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+
+// The settings part of the save body. The slug is left out while it is empty or known to be taken, so the rest of the
+// post still saves (the server keeps the old slug).
+export function settingsBody(s) {
+  const out = {
+    excerpt: String(s.excerpt || '').trim(),
+    featured_image: String(s.featured_image || '').trim() || null,
+    author: String(s.author || '').trim(),
+    status: s.status === 'private' ? 'private' : 'published',
+    published_at: s.published_at || null,
+    tags: (s.tags || []).slice(),
+  };
+  const slug = slugify(s.slug);
+  if (slug && !s.slugTaken) out.slug = slug;
+  return out;
+}
+
+// Autosave as a pure state machine, so the timing rules can be tested without timers:
+//   change(at)  an edit at time `at`: a save is due `delay` ms after the last edit
+//   start()     a save began (only when autosaveDue() says so); edits during it make the next one due
+//   done()      the save ended; a failed save is not retried until the next edit
+//   stop()      no more autosaves (a conflict: the page must be reloaded first)
+export const AUTOSAVE_DELAY = 2000;
+export const autosaveInit = () => ({ dueAt: null, saving: false, stopped: false });
+export function autosaveStep(state, action, delay = AUTOSAVE_DELAY) {
+  switch (action.type) {
+    case 'change': return state.stopped ? state : { ...state, dueAt: action.at + delay };
+    case 'start': return { ...state, saving: true, dueAt: null };
+    case 'done': return { ...state, saving: false };
+    case 'stop': return { ...state, dueAt: null, stopped: true };
+    default: return state;
+  }
+}
+// Whether a save should start at time `now`.
+export const autosaveDue = (state, now) => !state.stopped && !state.saving && state.dueAt !== null && now >= state.dueAt;
+
 // ---------- the page ----------
 (function () {
   if (typeof document === 'undefined') return;
@@ -140,24 +238,197 @@ export function isLinkHref(href) {
   };
 
   // ----- layout -----
-  const titleInput = h('input', { type: 'text', id: 'be-title', class: 'be-title', maxlength: '200', value: post.title || '', 'aria-label': 'Title', placeholder: 'Post title', oninput: changed });
+  const titleInput = h('input', { type: 'text', id: 'be-title', class: 'be-title', maxlength: '200', value: post.title || '', 'aria-label': 'Title', placeholder: 'Post title', oninput: onTitle });
   const list = h('div', { class: 'be-blocks', role: 'list', 'aria-label': 'Post body' });
   const status = h('p', { class: 'err status be-status', role: 'status', 'aria-live': 'polite' });
   const err = h('div', { class: 'be-err', role: 'alert' });
-  const saveBtn = h('button', { type: 'button', class: 'btn pri', onclick: save }, 'Save');
+  const saveBtn = h('button', { type: 'button', class: 'btn pri', onclick: () => save() }, 'Save');
+  const previewBtn = h('button', { type: 'button', class: 'btn', onclick: preview }, 'Preview');
+  const publishBtn = h('button', { type: 'button', class: 'btn brass', onclick: publish }, 'Publish');
   const announce = h('p', { class: 'be-sr', 'aria-live': 'polite' });
+  const siteUrl = String(root.dataset.siteUrl || '').replace(/\/+$/, '');
+
+  // ----- settings -----
+  const settings = {
+    slug: post.slug || '', slugTaken: false, excerpt: post.excerpt || '', featured_image: post.featured_image || '', author: post.author || '',
+    status: post.status === 'private' ? 'private' : 'published', published_at: post.published_at || null,
+    tags: (post.tags || []).map((t) => (typeof t === 'string' ? t : t.name)),
+  };
+  let publishedAt = post.published_at || null; // as saved on the server
+  let slugAuto = isAutoSlug(post.slug, post.title, post.published_at);
+  const fieldId = (n) => `be-s-${n}`;
+  const field = (name, label, input, ...extra) => h('div', { class: 'field' }, h('label', { for: fieldId(name) }, label), input, ...extra);
+
+  const slugInput = h('input', { type: 'text', id: fieldId('slug'), maxlength: String(MAX_SLUG + 20), value: settings.slug, spellcheck: 'false', autocomplete: 'off',
+    oninput: () => { slugAuto = false; setSlug(slugInput.value); } });
+  const slugUrl = h('p', { class: 'muted be-url' });
+  const slugMsg = h('p', { class: 'err be-slug-msg', 'aria-live': 'polite' });
+
+  const imgInput = h('input', { type: 'url', id: fieldId('img'), value: settings.featured_image, placeholder: 'https://… or /path',
+    oninput: () => { settings.featured_image = imgInput.value; showImg(); changed(); } });
+  const imgPrev = h('img', { class: 'be-img-prev', alt: '', hidden: true });
+  const imgMsg = h('p', { class: 'err' });
+  function showImg() {
+    const v = imgInput.value.trim();
+    const ok = /^https:\/\/[^/?#\s]+\S*$/i.test(v) || (v.startsWith('/') && !v.startsWith('//') && !/\s/.test(v));
+    imgPrev.hidden = !ok;
+    if (ok) imgPrev.src = v;
+    imgMsg.textContent = v && !ok ? 'Use an https address or a path starting with /.' : '';
+  }
+
+  const excerptInput = h('textarea', { id: fieldId('excerpt'), rows: '3', maxlength: '1000', oninput: () => { settings.excerpt = excerptInput.value; changed(); } });
+  excerptInput.value = settings.excerpt;
+  const authorInput = h('input', { type: 'text', id: fieldId('author'), maxlength: '200', value: settings.author, oninput: () => { settings.author = authorInput.value; changed(); } });
+
+  const statusSwitch = h('input', { type: 'checkbox', role: 'switch', id: fieldId('status'), checked: settings.status === 'published',
+    onchange: () => { settings.status = statusSwitch.checked ? 'published' : 'private'; statusText.textContent = statusLabel(); changed(); } });
+  const statusLabel = () => (settings.status === 'published' ? 'Published: listed in the catalog' : 'Private: not listed in the catalog');
+  const statusText = h('span', null, statusLabel());
+
+  const dateInput = h('input', { type: 'datetime-local', id: fieldId('date'), value: toLocalInput(settings.published_at),
+    onchange: () => { settings.published_at = fromLocalInput(dateInput.value); changed(); } });
+
+  const tagInput = h('input', { type: 'text', id: fieldId('tags'), maxlength: String(MAX_TAG_LENGTH), list: fieldId('tag-options'), autocomplete: 'off', placeholder: 'Type a tag, Enter to add' });
+  const tagOptions = h('datalist', { id: fieldId('tag-options') });
+  const tagChips = h('ul', { class: 'be-chips', 'aria-label': 'Tags' });
+  const tagMsg = h('p', { class: 'err', 'aria-live': 'polite' });
+  const tagCount = h('span', { class: 'muted' });
+
+  const stateLine = h('p', { class: 'be-state', role: 'status' });
+
+  const panel = h('aside', { class: 'card be-settings', 'aria-label': 'Post settings' },
+    h('h2', null, 'Settings'),
+    stateLine,
+    field('slug', 'URL slug', slugInput, slugUrl, slugMsg),
+    field('img', 'Featured image', imgInput, imgPrev, imgMsg),
+    field('excerpt', 'Excerpt', excerptInput, h('p', { class: 'muted' }, 'Shown in the catalog and in link previews.')),
+    field('author', 'Author', authorInput),
+    h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Visibility'),
+      h('label', { class: 'be-switch', for: fieldId('status') }, statusSwitch, statusText),
+      h('p', { class: 'muted' }, 'Private hides the post from the catalog only; it is not secure.')),
+    field('date', 'Published date', dateInput, h('p', { class: 'muted' }, 'Empty until the post is published. A date in the future schedules it.')),
+    field('tags', h('span', null, 'Tags ', tagCount), tagInput, tagOptions, tagChips, tagMsg),
+  );
+
+  const previewFrame = h('iframe', { class: 'be-preview-frame', title: 'Preview of the post', sandbox: 'allow-popups allow-popups-to-escape-sandbox' });
+  const previewDlg = h('dialog', { class: 'be-preview', 'aria-label': 'Preview' },
+    h('div', { class: 'be-preview-bar' }, h('strong', null, 'Preview (unsaved changes included)'),
+      h('button', { type: 'button', class: 'btn sm', onclick: () => previewDlg.close() }, 'Close')),
+    previewFrame);
+
   root.append(
-    h('div', { class: 'card be-head' }, h('div', { class: 'field' }, h('label', { for: 'be-title' }, 'Title'), titleInput)),
-    h('div', { class: 'card be-body' }, inserter(0), list),
-    h('div', { class: 'be-bar' }, saveBtn, status),
-    err, announce,
+    h('div', { class: 'be-layout' },
+      h('div', { class: 'be-col' },
+        h('div', { class: 'card be-head' }, h('div', { class: 'field' }, h('label', { for: 'be-title' }, 'Title'), titleInput)),
+        h('div', { class: 'card be-body' }, inserter(0), list)),
+      panel),
+    h('div', { class: 'be-bar' }, saveBtn, previewBtn, publishBtn, status),
+    err, announce, previewDlg,
   );
 
   // ----- state -----
-  let savedJson = JSON.stringify(saveBody(titleInput.value, items, null));
-  const dirty = () => JSON.stringify(saveBody(titleInput.value, items, null)) !== savedJson;
+  const fullBody = (updated) => ({ ...saveBody(titleInput.value, items, updated), ...settingsBody(settings) });
+  const snapshot = () => JSON.stringify(fullBody(null));
+  let savedJson = snapshot();
+  const dirty = () => snapshot() !== savedJson;
+  let auto = autosaveInit();
+  let autoTimer = null;
   function changed() {
     if (!saving) status.textContent = dirty() ? 'Unsaved changes' : '';
+    if (dirty()) { auto = autosaveStep(auto, { type: 'change', at: Date.now() }); schedule(); }
+  }
+  // Runs the autosave when it is due; called after each edit and after each save.
+  function schedule() {
+    clearTimeout(autoTimer);
+    if (auto.dueAt === null || auto.stopped) return;
+    autoTimer = setTimeout(() => {
+      if (!autosaveDue(auto, Date.now())) return schedule();
+      if (dirty() && titleInput.value.trim()) save(true);
+    }, Math.max(0, auto.dueAt - Date.now()));
+  }
+
+  function onTitle() {
+    if (slugAuto) { slugInput.value = slugify(titleInput.value); setSlug(slugInput.value); }
+    changed();
+  }
+
+  // ----- slug: the live URL and the availability check -----
+  let slugTimer = null, slugSeq = 0;
+  function setSlug(value) {
+    settings.slug = value;
+    settings.slugTaken = false;
+    const s = slugify(value);
+    slugUrl.textContent = `${siteUrl}/blog/${s || '…'}`;
+    slugMsg.textContent = value.trim() && !s ? 'The slug needs letters or digits.' : '';
+    clearTimeout(slugTimer);
+    const seq = ++slugSeq;
+    if (s) slugTimer = setTimeout(() => checkSlug(s, seq), 300);
+    changed();
+  }
+  async function checkSlug(s, seq) {
+    try {
+      const res = await fetch(`/portal/blog/slug-check?slug=${encodeURIComponent(s)}&id=${encodeURIComponent(id)}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'vault-portal' } });
+      const data = await res.json();
+      if (seq !== slugSeq || !res.ok) return;
+      settings.slugTaken = !data.available;
+      slugMsg.textContent = data.available ? '' : `Another post already uses /blog/${data.slug}. Choose a different slug; until then the post keeps its current URL.`;
+      changed();
+    } catch (_) { /* offline: the save will say so */ }
+  }
+  slugUrl.textContent = `${siteUrl}/blog/${slugify(settings.slug) || '…'}`;
+
+  // ----- tags: type-ahead from existing tags, chips, at most MAX_TAGS -----
+  function renderTags() {
+    tagChips.replaceChildren(...settings.tags.map((t) => h('li', { class: 'be-chip' }, t,
+      h('button', { type: 'button', class: 'be-chip-x', 'aria-label': `Remove tag ${t}`, title: 'Remove',
+        onclick: () => { settings.tags = settings.tags.filter((x) => x !== t); tagMsg.textContent = ''; renderTags(); changed(); tagInput.focus(); } }, '✕'))));
+    tagCount.textContent = `(${settings.tags.length}/${MAX_TAGS})`;
+    tagInput.disabled = settings.tags.length >= MAX_TAGS;
+  }
+  function commitTag() {
+    const r = addTag(settings.tags, tagInput.value);
+    tagMsg.textContent = r.error;
+    if (r.error) return;
+    if (r.tags.length !== settings.tags.length) { settings.tags = r.tags; say(`Tag ${tagInput.value.trim()} added.`); }
+    tagInput.value = '';
+    renderTags();
+    changed();
+  }
+  let tagTimer = null, tagSeq = 0;
+  tagInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitTag(); }
+    else if (e.key === 'Backspace' && !tagInput.value && settings.tags.length) { settings.tags = settings.tags.slice(0, -1); renderTags(); changed(); }
+  });
+  tagInput.addEventListener('input', (e) => {
+    // Picking a suggestion from the datalist arrives as an input without a key press.
+    if (!e.inputType || e.inputType === 'insertReplacementText') { const v = tagInput.value; if ([...tagOptions.options].some((o) => o.value === v)) { commitTag(); return; } }
+    clearTimeout(tagTimer);
+    const q = tagInput.value.trim(), seq = ++tagSeq;
+    if (!q) { tagOptions.replaceChildren(); return; }
+    tagTimer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/portal/blog/tags?q=${encodeURIComponent(q)}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'vault-portal' } });
+        const data = await res.json();
+        if (seq !== tagSeq || !res.ok) return;
+        const have = new Set(settings.tags.map(slugify));
+        tagOptions.replaceChildren(...(data.tags || []).filter((t) => !have.has(t.slug)).map((t) => h('option', { value: t.name })));
+      } catch (_) { /* suggestions are optional */ }
+    }, 200);
+  });
+  tagInput.addEventListener('blur', () => { if (tagInput.value.trim()) commitTag(); });
+
+  // ----- where the post stands on the public blog -----
+  function showState() {
+    const url = `${siteUrl}/blog/${slugify(settings.slug) || post.slug}`;
+    stateLine.replaceChildren();
+    if (!publishedAt) { stateLine.append(h('span', { class: 'pill p-off' }, 'Draft'), ' Not on the blog yet.'); publishBtn.textContent = 'Publish'; return; }
+    const when = new Date(publishedAt);
+    const future = when.getTime() > Date.now();
+    stateLine.append(h('span', { class: `pill ${future ? 'p-wait' : 'p-ok'}` }, future ? 'Scheduled' : 'Published'),
+      ` ${future ? 'Goes live' : 'Since'} ${when.toLocaleString()}. `,
+      settings.status === 'private' ? 'Private: only people with the link see it. ' : '',
+      future ? '' : h('a', { href: url, target: '_blank', rel: 'noopener' }, 'View on the blog'));
+    publishBtn.textContent = 'Publish changes';
   }
   window.addEventListener('beforeunload', (e) => { if (dirty() || saving) e.preventDefault(); });
   document.addEventListener('keydown', (e) => {
@@ -374,14 +645,27 @@ export function isLinkHref(href) {
   }
 
   // ----- save -----
-  async function save() {
-    if (saving) return;
-    const body = saveBody(titleInput.value, items, updatedAt);
-    if (!body.title) { showError('The title must not be empty.'); titleInput.focus(); return; }
+  // Saves the post (autosave passes isAuto: no spinner, and an empty title just waits). Resolves to whether it saved.
+  let current = null; // the save in flight
+  function save(isAuto) {
+    if (current) return current;
+    const body = fullBody(updatedAt);
+    if (!body.title) {
+      if (isAuto) { status.textContent = 'Not saved: the title is empty'; return Promise.resolve(false); }
+      showError('The title must not be empty.'); titleInput.focus(); return Promise.resolve(false);
+    }
+    current = doSave(body, isAuto).finally(() => { current = null; });
+    return current;
+  }
+  async function doSave(body, isAuto) {
+    const sent = JSON.stringify({ ...body, updated_at: null });
     saving = true;
+    auto = autosaveStep(auto, { type: 'start' });
+    clearTimeout(autoTimer);
     saveBtn.disabled = true;
-    saveBtn.innerHTML = '<span class="spin" aria-hidden="true"></span> Saving…';
-    showError('');
+    if (!isAuto) saveBtn.innerHTML = '<span class="spin" aria-hidden="true"></span> Saving…';
+    status.textContent = 'Saving…';
+    let ok = false;
     try {
       const res = await fetch(`/portal/blog/${id}`, {
         method: 'PUT',
@@ -391,25 +675,99 @@ export function isLinkHref(href) {
       });
       const data = await res.json().catch(() => ({}));
       if (res.status === 409 && data.current) {
+        auto = autosaveStep(auto, { type: 'stop' });
         showError(data.error || 'This post was changed elsewhere since you loaded it.', true);
         status.textContent = 'Not saved';
-        return;
+        return false;
+      }
+      if (res.status === 409 && data.field === 'slug') {
+        settings.slugTaken = true;
+        slugMsg.textContent = 'Another post already uses this slug. Choose a different one; until then the post keeps its current URL.';
       }
       if (!res.ok) {
         showError(data.error || `Something went wrong (HTTP ${res.status}).`, false, data.errors);
         status.textContent = 'Not saved';
-        return;
+        return false;
       }
+      showError('');
       updatedAt = data.post.updated_at;
-      savedJson = JSON.stringify(saveBody(body.title, items, null));
-      status.textContent = dirty() ? 'Saved; newer changes not saved yet' : 'Saved';
+      publishedAt = data.post.published_at;
+      savedJson = sent;
+      status.textContent = dirty() ? `${savedLabel(new Date())}; newer changes not saved yet` : savedLabel(new Date());
+      showState();
+      ok = true;
+      return true;
     } catch (e) {
       showError('Could not reach the portal. Check your connection and try again.');
       status.textContent = 'Not saved';
+      return false;
     } finally {
       saving = false;
+      auto = autosaveStep(auto, { type: 'done', ok });
+      schedule();
       saveBtn.disabled = false;
       saveBtn.textContent = 'Save';
+    }
+  }
+
+  // ----- preview: the unsaved post rendered by the public blog, in a panel -----
+  async function preview() {
+    previewBtn.disabled = true;
+    try {
+      const res = await fetch(`/portal/blog/${id}/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
+        body: JSON.stringify(fullBody(undefined)),
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showError(data.error || `Could not render the preview (HTTP ${res.status}).`, false, data.errors);
+        return;
+      }
+      showError('');
+      // A sandboxed frame without scripts or the portal's origin: the post's HTML can't reach the session.
+      previewFrame.srcdoc = await res.text();
+      previewDlg.showModal();
+    } catch (e) {
+      showError('Could not reach the portal. Check your connection and try again.');
+    } finally {
+      previewBtn.disabled = false;
+    }
+  }
+
+  // ----- publish: saves what's unsaved, then sets the publish date (now, unless one is set) -----
+  async function publish() {
+    if (current) await current;
+    if (dirty() && !(await save())) return;
+    publishBtn.disabled = true;
+    try {
+      const res = await fetch(`/portal/blog/${id}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
+        body: JSON.stringify({ updated_at: updatedAt }),
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.current) {
+        auto = autosaveStep(auto, { type: 'stop' });
+        showError(data.error || 'This post was changed elsewhere since you loaded it.', true);
+        return;
+      }
+      if (!res.ok) { showError(data.error || `Could not publish (HTTP ${res.status}).`, false, data.errors); return; }
+      showError('');
+      updatedAt = data.post.updated_at;
+      publishedAt = data.post.published_at;
+      settings.published_at = publishedAt;
+      dateInput.value = toLocalInput(publishedAt);
+      slugAuto = false;
+      savedJson = snapshot();
+      showState();
+      say(stateLine.textContent);
+    } catch (e) {
+      showError('Could not reach the portal. Check your connection and try again.');
+    } finally {
+      publishBtn.disabled = false;
     }
   }
 
@@ -421,11 +779,14 @@ export function isLinkHref(href) {
       h('p', null, h('strong', null, conflict ? 'Not saved: someone else changed this post. ' : 'Not saved. '), msg));
     if (Array.isArray(list_) && list_.length) box.append(h('ul', null, ...list_.map((x) => h('li', null, String(x)))));
     if (conflict) box.append(h('p', { class: 'muted' }, 'Your edits are still here: copy anything you need before reloading.'),
-      h('button', { type: 'button', class: 'btn', onclick: () => { savedJson = JSON.stringify(saveBody(titleInput.value, items, null)); location.reload(); } }, 'Reload the latest version'));
+      h('button', { type: 'button', class: 'btn', onclick: () => { savedJson = snapshot(); location.reload(); } }, 'Reload the latest version'));
     err.append(box);
   }
 
   try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (_) { /* older browsers: <div>s, which the server reduces to text */ }
   items.forEach((e) => els.set(e.key, render(e)));
   sync();
+  renderTags();
+  showImg();
+  showState();
 })();

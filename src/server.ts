@@ -72,6 +72,7 @@ const app = createApp({
   },
   previewRetentionDays: config.previewRetentionDays,
   siteUrl: config.siteUrl,
+  blogStaticPublish: config.blogStaticPublish,
   previewSites: config.previewSites,
   sitePreview,
   taskInvokerEmail: config.taskInvokerEmail,

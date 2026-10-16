@@ -8,6 +8,7 @@
 // A slug change moves the post's images to site/<new slug>/ (blog/slugMove.ts): 502 { error: 'image_move_failed' }
 // or 409 when they can't be moved, and then nothing changed. The response's "move" says what happened to them.
 //   GET    /portal/api/blog/slugify?title=...  -> { slug } (a free slug for the title)
+//   POST   /portal/api/blog/republish        rewrites the static blog on the CDN (blog/staticPublish.ts) -> { written, deleted, url }
 //   POST   /portal/api/blog/:slug/images     an image upload (multipart "file") -> { key, url, ... } (blog-images.ts)
 // The editor (pages need a session; the JSON routes are API routes like the ones above):
 //   GET    /portal/blog/new                 creates an empty draft, 302 -> /portal/blog/edit/<id>
@@ -20,6 +21,9 @@
 //   GET    /assets/portal-blog-editor.js|.css  the editor's script (an ES module) and styles
 //   GET    /assets/portal-blog-image-editor.js  the image editor (crop, resize, compress, alt text) the editor imports
 // A draft is a 'published' post with no published_at: the public blog 404s it until it is published.
+// With static publishing on (BLOG_STATIC_PUBLISH: staging only), a change that commits and touches a public post
+// (publish, unpublish, edit or delete of a post that was or is viewable) then rewrites the static blog on the CDN;
+// a draft's changes don't. The response carries "static_site": what was written, or the error (the change stays saved).
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +35,8 @@ import { validateBlocks, isSafeImageSrc, type Block } from '../blog/blocks.ts';
 import { BlogRepo, SlugTakenError, type BlogPost, type BlogPostInput, type BlogStatus } from '../blog/repo.ts';
 import { isBlogSlug, MAX_SLUG, slugify } from '../blog/slug.ts';
 import { postPage } from '../blog/publicRender.ts';
+import { isViewable } from '../blog/publicQueries.ts';
+import { BlogStaticPublisher } from '../blog/staticPublish.ts';
 import { retrySlugMoves, rewriteMovedRefs, SlugMoveError, updatePost, type SlugMoveDeps } from '../blog/slugMove.ts';
 import { registerBlogImages } from './blog-images.ts';
 import { head } from './routes.ts';
@@ -166,6 +172,21 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
       throw err;
     }
   };
+  const publisher = new BlogStaticPublisher({ db: h.db.sqlite, storage: h.deps.production, enabled: !!h.deps.blogStaticPublish,
+    siteUrl: h.deps.siteUrl ?? 'https://vaultlearninggames.org', cdnUrl: h.deps.prodPublicUrl });
+  type Visibility = Pick<BlogPost, 'status' | 'published_at'> | undefined;
+  // After a committed change: rewrites the static blog when the post was or is public. Never fails the request.
+  const republish = async (before: Visibility, after: Visibility): Promise<{ static_site?: Record<string, unknown> }> => {
+    const now = new Date().toISOString();
+    if (!publisher.enabled || !((before && isViewable(before, now)) || (after && isViewable(after, now)))) return {};
+    try {
+      const r = await publisher.publish();
+      return { static_site: { written: r.written, deleted: r.deleted, url: publisher.blogUrl } };
+    } catch (err) {
+      console.error(`blog static publish: ${(err as Error).message}`);
+      return { static_site: { error: 'The change is saved, but the static blog could not be updated. Republish to retry.' } };
+    }
+  };
   const moveDeps = (): SlugMoveDeps => ({ repo, storage: h.deps.production, publicBase: h.deps.prodPublicUrl });
   // An update that may change the slug, moving the post's images with it.
   const saveMoving = async (id: number, base: BlogPost, input: BlogPostInput) => {
@@ -202,7 +223,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const input = parseInput(await jsonBody(c), undefined, repo);
     const post = save(() => repo.create(input));
     h.db.audit(h.actor(u), 'blog.create', post.slug, { id: post.id, status: post.status });
-    return c.json({ post }, 201);
+    return c.json({ post, ...await republish(undefined, post) }, 201);
   });
 
   const update = async (c: Context) => {
@@ -214,7 +235,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const { post, move } = await saveMoving(id, base, input);
     if (!post) fail(404, 'No such blog post.');
     h.db.audit(h.actor(u), 'blog.update', post.slug, { id, ...(base.slug !== post.slug ? { from: base.slug } : {}), status: post.status, ...(move ? { move } : {}) });
-    return c.json({ post, ...(move ? { move } : {}) });
+    return c.json({ post, ...(move ? { move } : {}), ...await republish(base, post) });
   };
   app.put('/portal/api/blog/posts/:id', update);
   app.patch('/portal/api/blog/posts/:id', update);
@@ -233,13 +254,22 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     return c.json({ pending: pending.map((m) => ({ id: m.id, old_slug: m.old_slug, new_slug: m.new_slug, error: m.last_error })) });
   });
 
-  app.delete('/portal/api/blog/posts/:id', (c) => {
+  app.delete('/portal/api/blog/posts/:id', async (c) => {
     const u = admin(c);
     const id = idOf(c);
     const post = repo.get(id);
     if (!post || !repo.delete(id)) fail(404, 'No such blog post.');
     h.db.audit(h.actor(u), 'blog.delete', post.slug, { id });
-    return c.json({ ok: true });
+    return c.json({ ok: true, ...await republish(post, undefined) });
+  });
+
+  // Rewrites the whole static blog: recovery after a failed write, or a scheduled post whose time has come.
+  app.post('/portal/api/blog/republish', async (c) => {
+    const u = admin(c);
+    if (!publisher.enabled) fail(409, 'Static blog publishing is off on this system.');
+    const r = await publisher.publish();
+    h.db.audit(h.actor(u), 'blog.republish', 'blog', { written: r.written, deleted: r.deleted });
+    return c.json({ written: r.written, deleted: r.deleted, url: publisher.blogUrl });
   });
 
   // ---------- the editor ----------
@@ -297,7 +327,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const { post, move } = await saveMoving(id, base, input);
     if (!post) fail(404, 'No such blog post.');
     h.db.audit(h.actor(u), 'blog.update', post.slug, { id, ...(base.slug !== post.slug ? { from: base.slug } : {}), status: post.status, ...(move ? { move } : {}) });
-    return c.json({ post, ...(move ? { move } : {}) });
+    return c.json({ post, ...(move ? { move } : {}), ...await republish(base, post) });
   });
 
   app.post('/portal/blog/:id/preview', async (c) => {
@@ -326,7 +356,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const post = save(() => repo.update(id, input));
     if (!post) fail(404, 'No such blog post.');
     h.db.audit(h.actor(u), 'blog.publish', post.slug, { id, status: post.status, published_at: post.published_at });
-    return c.json({ post });
+    return c.json({ post, ...await republish(base, post) });
   });
 
   app.get('/portal/blog/slug-check', (c) => {

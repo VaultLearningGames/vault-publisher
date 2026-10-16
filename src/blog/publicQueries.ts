@@ -57,6 +57,24 @@ export function viewablePost(db: DatabaseSync, slug: string, now: string): Publi
   return r ? toPost(db, r) : undefined;
 }
 
+// Every post viewable by direct URL (listable and private), newest first: the pages the static blog holds.
+export function viewablePosts(db: DatabaseSync, now: string): PublicPost[] {
+  const rows = db.prepare(`SELECT p.* FROM blog_posts p WHERE ${VIEWABLE} ${ORDER}`).all(now, now) as Record<string, unknown>[];
+  return rows.map((r) => toPost(db, r));
+}
+
+// Every old slug whose post is viewable, with the slug it redirects to.
+export function viewableRedirects(db: DatabaseSync, now: string): { from: string; to: string }[] {
+  return (db.prepare(`SELECT r.old_slug AS "from", p.slug AS "to" FROM blog_slug_redirects r JOIN blog_posts p ON p.id = r.post_id
+    WHERE r.old_slug != p.slug AND ${VIEWABLE} ORDER BY r.old_slug`).all(now, now) as { from: string; to: string }[]);
+}
+
+// Whether a post with this status and published_at is public (listed, or viewable by direct URL) at `now`.
+export function isViewable(p: { status: BlogStatus; published_at: string | null }, now: string): boolean {
+  if (p.status === 'published') return p.published_at !== null && p.published_at <= now;
+  return p.status === 'private' && (p.published_at === null || p.published_at <= now);
+}
+
 // The current slug that an old slug redirects to, if that post is viewable.
 export function redirectSlug(db: DatabaseSync, oldSlug: string, now: string): string | undefined {
   const r = db.prepare(`SELECT p.slug FROM blog_slug_redirects r JOIN blog_posts p ON p.id = r.post_id

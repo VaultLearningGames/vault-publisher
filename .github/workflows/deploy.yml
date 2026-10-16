@@ -115,10 +115,13 @@ jobs:
         TARGET: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
         VAULT_PORTAL: ${{ vars.PORTAL_URL }}
         SITE_URL: ${{ vars.SITE_URL }}
+        CDN_PUBLIC_URL: ${{ vars.CDN_PUBLIC_URL }}
         GOOGLE_ANALYTICS_ID: ${{ vars.GOOGLE_ANALYTICS_ID }}
       run: |
         set -eu
         export HUGO_BASEURL="${SITE_URL%/}/"
+        # The blog (static, on the CDN: src/blog/staticPublish.ts) is on staging only for now: the header's Blog link.
+        if [ "$TARGET" = staging ]; then export HUGOxPARAMSxBLOGxURL="${CDN_PUBLIC_URL%/}/blog"; else export HUGOxPARAMSxBLOGxURL=; fi
         export HUGOxPARAMSxANALYTICSxGOOGLE="${GOOGLE_ANALYTICS_ID:-}"
         export HUGOxPARAMSxFORMSxNEWSLETTER="${VAULT_PORTAL%/}/v1/forms/newsletter"
         export HUGOxPARAMSxFORMSxSUBMIT_GAME="${VAULT_PORTAL%/}/v1/forms/submit-game"
@@ -141,6 +144,8 @@ jobs:
         grep -q "action=\"$HUGOxPARAMSxFORMSxSUBMIT_GAME\"" site/public/submit-a-game/index.html
         grep -q "action=\"$HUGOxPARAMSxFORMSxNEWSLETTER\"" site/public/index.html
         grep -q "<link rel=\"canonical\" href=\"${SITE_URL%/}\">" site/public/index.html
+        if [ "$TARGET" = staging ]; then grep -qF "href=\"$HUGOxPARAMSxBLOGxURL\"" site/public/index.html
+        elif grep -q '>Blog</a>' site/public/index.html; then echo "::error::a Blog link in a $TARGET build"; exit 1; fi
         # Analytics only where the environment has an id: then on the home page and on game pages. gtag.js is added by
         # a script once the page has loaded (partials/sq/head.html), so look for its config and its loader.
         if [ -n "${GOOGLE_ANALYTICS_ID:-}" ]; then
@@ -208,6 +213,7 @@ jobs:
           PREVIEW_SITES=${{ vars.PREVIEW_SITES }}
           SUPPORT_URL=${{ vars.SUPPORT_URL }}
           GA_PROPERTY_ID=${{ vars.GA_PROPERTY_ID }}
+          BLOG_STATIC_PUBLISH=${{ (inputs.environment || (github.ref_name == 'production' && 'production' || 'staging')) == 'staging' && '1' || '' }}
         secrets: |-
           R2_BUILDS_ACCESS_KEY_ID=${{ vars.SERVICE }}-r2-builds-access-key-id:latest
           R2_BUILDS_SECRET_ACCESS_KEY=${{ vars.SERVICE }}-r2-builds-secret-access-key:latest

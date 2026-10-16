@@ -51,6 +51,9 @@ export interface Config {
   // zone (the property's days). No id: the pages say analytics isn't connected. See docs/analytics.md.
   gaPropertyId?: string;
   gaTimeZone: string;
+  // Write the public blog as static files to the CDN bucket under blog/ (blog/staticPublish.ts). Off unless
+  // BLOG_STATIC_PUBLISH is 1/true/yes/on; the deploy turns it on for staging only.
+  blogStaticPublish: boolean;
 }
 
 // Where "Need support?" sends people, and the channel they're told to join there.
@@ -87,6 +90,11 @@ export function parsePreviewSites(v: string | undefined): PreviewSite[] {
 export function parseGaPropertyId(v: string | undefined): string | undefined {
   const m = (v ?? '').trim().match(/^(?:properties\/)?(\d{4,})$/);
   return m ? m[1] : undefined;
+}
+
+// An on/off variable: 1, true, yes or on (any case) is on; anything else, or unset, is off.
+export function parseFlag(v: string | undefined): boolean {
+  return /^(1|true|yes|on)$/i.test((v ?? '').trim());
 }
 
 function required(name: string): string {
@@ -135,5 +143,6 @@ export function loadConfig(): Config {
     supportUrl: parseSupportUrl(process.env.SUPPORT_URL),
     gaPropertyId: parseGaPropertyId(process.env.GA_PROPERTY_ID),
     gaTimeZone: process.env.GA_TIMEZONE?.trim() || 'America/Chicago',
+    blogStaticPublish: parseFlag(process.env.BLOG_STATIC_PUBLISH),
   };
 }

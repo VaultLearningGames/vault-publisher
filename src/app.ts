@@ -54,6 +54,9 @@ export interface AppDeps {
   sitePreview?: Pick<SitePreviewer, 'page'> | null;
   // Google Analytics for the analytics pages (analytics/ga.ts). Left out: not connected.
   analytics?: Analytics;
+  // Write the public blog as static files to the CDN bucket (`production`) when a public post changes
+  // (blog/staticPublish.ts). Off when left out.
+  blogStaticPublish?: boolean;
   // Injected in tests (image migration downloads).
   fetch?: typeof fetch;
   // How URL monitors fetch a studio's hosted game (net-guard.ts: public addresses only). Injected in tests.

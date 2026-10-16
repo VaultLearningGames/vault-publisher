@@ -5,6 +5,7 @@ import { html, raw, type Html } from '../portal/html.ts';
 import { isSafeHref, isSafeImageSrc, sanitizeParagraphHtml, type Block, type Span } from './blocks.ts';
 import type { BlogTag } from './repo.ts';
 import type { PublicPost } from './publicQueries.ts';
+import { feedPath, feedTitle } from './rss.ts';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -65,7 +66,10 @@ export function cardHtml(p: PublicPost): Html {
     </article>`;
 }
 
-export interface PageOptions { siteUrl: string; title: string; canonicalPath: string; noindex?: boolean; description?: string }
+// `feeds`: RSS autodiscovery links, each a title and a site-relative feed path.
+export interface PageOptions {
+  siteUrl: string; title: string; canonicalPath: string; noindex?: boolean; description?: string; feeds?: { title: string; path: string }[];
+}
 
 export function page(o: PageOptions, body: Html): Html {
   const site = o.siteUrl.replace(/\/+$/, '');
@@ -73,7 +77,8 @@ export function page(o: PageOptions, body: Html): Html {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${o.title}</title>${o.noindex ? html`<meta name="robots" content="noindex">` : ''}${
   o.description ? html`<meta name="description" content="${o.description}">` : ''}
-<link rel="canonical" href="${`${site}${o.canonicalPath}`}">
+<link rel="canonical" href="${`${site}${o.canonicalPath}`}">${(o.feeds ?? []).map((f) =>
+  html`<link rel="alternate" type="application/rss+xml" title="${f.title}" href="${`${site}${f.path}`}">`)}
 <link rel="stylesheet" href="${`${site}/sq/css/fonts.css`}">
 <link rel="stylesheet" href="${`${site}/sq/css/vault-sq.css`}">
 </head><body>
@@ -86,15 +91,18 @@ const grid = (posts: PublicPost[]) => posts.length
   ? html`<div class="blog-grid">${posts.map(cardHtml)}</div>`
   : html`<div class="blog-grid"><p class="blog-empty">No posts yet.</p></div>`;
 
+const allFeed = { title: feedTitle(), path: feedPath() };
+
 export function catalogPage(siteUrl: string, posts: PublicPost[], tags: BlogTag[]): Html {
   const filter = tags.length
     ? html`<nav class="blog-filter" aria-label="Tags"><ul>${tags.map((t) => html`<li><a href="${tagHref(t.slug)}">${t.name}</a></li>`)}</ul></nav>` : '';
-  return page({ siteUrl, title: 'Blog', canonicalPath: '/blog' },
+  return page({ siteUrl, title: 'Blog', canonicalPath: '/blog', feeds: [allFeed] },
     html`<section class="sq-sec theme-white sq-blog"><div class="blog-grid"><h1>Blog</h1>${filter}</div>${grid(posts)}</section>`);
 }
 
 export function tagPage(siteUrl: string, tag: BlogTag, posts: PublicPost[]): Html {
-  return page({ siteUrl, title: `Posts tagged "${tag.name}"`, canonicalPath: tagHref(tag.slug) },
+  const feeds = [{ title: feedTitle(tag), path: feedPath(tag.slug) }, allFeed];
+  return page({ siteUrl, title: `Posts tagged "${tag.name}"`, canonicalPath: tagHref(tag.slug), feeds },
     html`<section class="sq-sec theme-white sq-blog"><div class="blog-grid"><h1>Posts tagged "${tag.name}"</h1><p><a href="/blog">All posts</a></p></div>${grid(posts)}</section>`);
 }
 

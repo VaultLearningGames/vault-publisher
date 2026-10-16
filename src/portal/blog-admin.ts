@@ -13,7 +13,11 @@
 //   POST   /portal/blog/:id/publish         sets published_at (now, unless already set) -> { post }
 //   GET    /portal/blog/slug-check?slug=&id= -> { slug, available } (slug normalized)
 //   GET    /portal/blog/tags?q=             -> { tags } up to 10 existing tags whose name starts with q
+//   GET    /assets/portal-blog-editor.js|.css  the editor's script (an ES module) and styles
 // A draft is a 'published' post with no published_at: the public blog 404s it until it is published.
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { Context, Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { fail, jsonBody } from '../app.ts';
@@ -125,6 +129,13 @@ function parseInput(b: Record<string, unknown>, base: BlogPost | undefined, repo
 
 export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   const repo = new BlogRepo(h.db.sqlite);
+  // The editor's script and styles, read once at startup and versioned by content like the portal's own assets.
+  const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
+  const editorJs = asset('portal-blog-editor.js'), editorCss = asset('portal-blog-editor.css');
+  const editorVersion = createHash('sha256').update(editorJs).update(editorCss).digest('hex').slice(0, 10);
+  const immutable = 'public, max-age=31536000, immutable';
+  app.get('/assets/portal-blog-editor.js', (c) => c.body(editorJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': immutable }));
+  app.get('/assets/portal-blog-editor.css', (c) => c.body(editorCss, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
   const admin = (c: Context): User => {
     const u = h.apiUser(c);
     if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can manage the blog.');
@@ -232,10 +243,10 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     // '<' as \u003c, so nothing in the post can close the script element.
     const data = JSON.stringify(post).replace(/</g, '\\u003c');
     return h.page(c, `Edit: ${post.title || 'Untitled'}`, html`${head('Edit post', post.published_at ? 'Published' : 'Draft: not on the blog yet')}
-      <link rel="stylesheet" href="/portal-blog-editor.css">
+      <link rel="stylesheet" href="/assets/portal-blog-editor.css?v=${editorVersion}">
       <div id="blog-editor" data-id="${post.id}"></div>
       <script type="application/json" id="blog-post-data">${raw(data)}</script>
-      <script src="/portal-blog-editor.js" defer></script>`);
+      <script type="module" src="/assets/portal-blog-editor.js?v=${editorVersion}"></script>`);
   });
 
   app.put('/portal/blog/:id', async (c) => {

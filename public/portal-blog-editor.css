@@ -1,0 +1,51 @@
+/* The blog post editor (portal-blog-editor.js). Uses the portal's .card, .field, .btn and .err; these are the extras. */
+#blog-editor { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+.be-title { font: 600 22px/1.3 var(--display, inherit) !important; }
+.be-body { display: flex; flex-direction: column; gap: 4px; }
+.be-blocks { display: flex; flex-direction: column; gap: 4px; }
+
+.be-block { display: grid; grid-template-columns: 22px 1fr; grid-template-rows: auto auto; gap: 0 8px; padding: 8px 8px 0 4px; border: 1px solid transparent; border-radius: 10px; }
+.be-block:hover, .be-block:focus-within { border-color: var(--line-2); background: var(--hover); }
+.be-block > .be-ins { grid-column: 2; }
+.be-dragging { opacity: .45; }
+.be-drop-before { box-shadow: 0 -3px 0 var(--slate); }
+.be-drop-after { box-shadow: 0 3px 0 var(--slate); }
+.be-handle { cursor: grab; color: var(--ink-3); font-size: 18px; line-height: 1; padding-top: 4px; user-select: none; text-align: center; }
+.be-handle:active { cursor: grabbing; }
+.be-main { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.be-tools { display: flex; align-items: center; gap: 4px; }
+.be-type { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3); margin-right: auto; }
+.be-tools .btn:disabled { opacity: .4; cursor: default; }
+
+.be-row { display: flex; gap: 8px; }
+.be-row select, .be-h-text, .be-img input, .be-img select, .be-link input { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); color: var(--ink); font: inherit; }
+.be-h-text { flex: 1; min-width: 0; font-weight: 600; font-size: 17px; }
+
+.be-tb { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.be-link { display: inline-flex; gap: 4px; align-items: center; }
+.be-link[hidden] { display: none; }
+.be-link input { padding: 4px 8px; width: 240px; }
+.be-p { min-height: 2.6em; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); line-height: 1.6; }
+.be-p:empty::before { content: "Write a paragraph…"; color: var(--ink-3); }
+.be-p p { margin: 0 0 .6em; }
+.be-p p:last-child { margin-bottom: 0; }
+.be-p ul, .be-p ol { margin: .3em 0; padding-left: 1.5em; }
+
+.be-img { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.be-img-fields { flex: 1 1 320px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.be-img-prev { max-width: 160px; max-height: 120px; border-radius: 6px; border: 1px solid var(--line); object-fit: cover; }
+.be-hr { border: 0; border-top: 2px solid var(--line); margin: 14px 0; }
+
+.be-ins { display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 2px 0; }
+.be-ins-btn { width: 22px; height: 22px; border-radius: 50%; border: 1px dashed var(--line); background: var(--surface); color: var(--ink-3); cursor: pointer; font-size: 15px; line-height: 1; padding: 0; opacity: .55; }
+.be-ins:hover .be-ins-btn, .be-ins-btn:focus-visible, .be-ins-btn[aria-expanded="true"], .be-blocks:empty + .be-ins .be-ins-btn, .be-body > .be-ins:only-child .be-ins-btn { opacity: 1; border-style: solid; color: var(--ink); }
+.be-ins-menu { display: flex; flex-wrap: wrap; gap: 4px; }
+.be-ins-menu[hidden] { display: none; }
+
+.be-bar { display: flex; align-items: center; gap: 12px; position: sticky; bottom: 0; padding: 10px 0; background: var(--paper); }
+.be-alert { border-color: var(--bad); background: var(--bad-soft); }
+.be-alert p { margin: 0 0 8px; }
+.be-alert ul { margin: 0 0 8px; padding-left: 1.2em; font-size: 12.5px; }
+.be-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 640px) { .be-img-fields { grid-template-columns: 1fr; } }

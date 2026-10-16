@@ -13,6 +13,7 @@ import { registerPortal, type PortalConfig } from './portal/routes.ts';
 import type { SitePreviewer } from './portal/site-preview.ts';
 import { registerForms, type FormsConfig } from './forms.ts';
 import { registerAdminTasks } from './admin-tasks.ts';
+import { registerBlogPublic } from './blog/publicRoutes.ts';
 import {
   headersFor,
   isSafeFilePath,
@@ -711,6 +712,7 @@ export function createApp(deps: AppDeps) {
 
   registerAdminTasks(app, deps, admin);
   registerForms(app, db, deps.forms);
+  registerBlogPublic(app, { sqlite: db.sqlite, siteUrl: deps.siteUrl ?? 'https://vaultlearninggames.org' });
   registerPortal(app, { ...deps, approveRelease, promoteRelease, startUpload, finishUpload, linkSameNamedListing, monitorEnv, previewUrl: (studio: Studio, game: Game, ref: string) => `${deps.stagingPublicUrl}/${previewPrefix(studio, game, ref)}` });
   return app;
 }

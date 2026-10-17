@@ -155,6 +155,9 @@ tbody tr:hover td { background: var(--hover); }
 td.r, th.r { text-align: right; }
 .proj b { display: block; font-weight: 600; }
 .proj span { font-size: 12px; color: var(--ink-3); }
+td.thumb, th.thumb { width: 48px; padding-right: 0; }
+.blog-thumb { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; background: var(--line); display: block; }
+.blog-thumb-ph { display: grid; place-items: center; font-weight: 600; font-size: 18px; color: var(--ink-3); border: 1px solid var(--line); background: var(--paper); box-sizing: border-box; }
 .stack { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
 .ref { font: 12px var(--mono); color: var(--ink-2); display: inline-flex; gap: 7px; align-items: center; }
 .rel { font: 500 12.5px var(--mono); color: var(--brass); }

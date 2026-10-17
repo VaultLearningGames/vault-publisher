@@ -12,9 +12,8 @@
 // Image blocks and the featured image take an uploaded image (picker, drag and drop, or paste) through the image
 // editor in portal-blog-image-editor.js: crop, resize, compress, alt text, then stored on the CDN under the post's slug.
 //
-// Three panes: the post list (rendered by the server, beside #blog-editor), the body in the middle, settings on the
-// right. Each block is a section with a thin outline and a '+' before and after it to add a block there; clicking a
-// section selects it and shows its trash button, which asks before deleting. Clicking into a paragraph shows its format
+// Two panes: the body, settings on the right. Each block is a section with a thin outline and a '+' before and after
+// it to add a block there; clicking a section selects it and shows its trash button, which asks before deleting. Clicking into a paragraph shows its format
 // bar (style, bold, italic, underline, strikethrough, link, lists, quote, indent); the commands are in
 // portal-blog-editor-commands.js, and the server sanitizes the HTML they make.
 //
@@ -297,7 +296,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
   const slugMsg = h('p', { class: 'err be-slug-msg', 'aria-live': 'polite' });
 
   const imgInput = h('input', { type: 'url', id: fieldId('img'), value: settings.featured_image, placeholder: 'https://… or /path',
-    oninput: () => { settings.featured_image = imgInput.value; showImg(); paneThumb(); changed(); } });
+    oninput: () => { settings.featured_image = imgInput.value; showImg(); changed(); } });
   const imgPrev = h('img', { class: 'be-img-prev', alt: '', hidden: true });
   const imgMsg = h('p', { class: 'err' });
   const imgField = h('div', { class: 'be-img-drop' }, imgInput);
@@ -305,7 +304,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
     const r = await editImage(file, { title: 'Featured image', withAlt: false });
     if (!r) return;
     imgInput.value = settings.featured_image = r.url;
-    showImg(); paneThumb(); changed(); say('Featured image uploaded.');
+    showImg(); changed(); say('Featured image uploaded.');
   }));
   function showImg() {
     const v = imgInput.value.trim();
@@ -405,17 +404,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
     }, Math.max(0, auto.dueAt - Date.now()));
   }
 
-  // The post list's entry for this post follows the title and the featured image as they're edited.
-  const paneEntry = () => document.querySelector('.be-posts .be-post[aria-current="page"]');
-  function paneTitle() { const a = paneEntry(); const t = a && a.querySelector('.be-post-title'); if (t) t.textContent = titleInput.value.trim() || 'Untitled'; }
-  function paneThumb() {
-    const a = paneEntry(); if (!a) return;
-    const old = a.querySelector('.be-thumb'); const v = imgInput.value.trim();
-    const ok = /^https:\/\/[^/?#\s]+\S*$/i.test(v) || (v.startsWith('/') && !v.startsWith('//') && !/\s/.test(v));
-    if (ok) { if (old.tagName === 'IMG') old.src = v; else old.replaceWith(h('img', { class: 'be-thumb', src: v, alt: '' })); }
-  }
   function onTitle() {
-    paneTitle();
     if (slugAuto) { slugInput.value = slugify(titleInput.value); setSlug(slugInput.value); }
     changed();
   }

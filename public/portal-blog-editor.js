@@ -65,6 +65,14 @@ export function deserializeBlocks(blocks) {
   if (!Array.isArray(blocks)) return [];
   const out = [];
   for (const b of blocks) {
+    if (b && b.type === 'list' && Array.isArray(b.items)) {
+      // The editor edits a list as paragraph HTML; the server writes it back as a Markdown list.
+      const e = newBlock('paragraph');
+      const tag = b.ordered ? 'ol' : 'ul';
+      e.html = `<${tag}>${b.items.map((it) => `<li>${spansToHtml(it)}</li>`).join('')}</${tag}>`;
+      out.push(e);
+      continue;
+    }
     if (!b || typeof b !== 'object' || !BLOCK_TYPES.includes(b.type)) continue;
     const e = newBlock(b.type);
     if (b.type === 'heading') { e.level = [2, 3, 4].includes(b.level) ? b.level : 2; e.text = String(b.text || ''); }

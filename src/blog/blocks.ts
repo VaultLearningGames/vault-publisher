@@ -13,6 +13,7 @@ export type Block =
   | { type: 'paragraph'; children: Span[]; html?: undefined }
   | { type: 'paragraph'; html: string; children?: undefined }
   | { type: 'image'; src: string; alt: string; caption?: string; align?: Align }
+  | { type: 'list'; ordered: boolean; items: Span[][] }
   | { type: 'divider' };
 
 export type BlocksResult = { ok: true; blocks: Block[] } | { ok: false; errors: string[] };
@@ -179,6 +180,18 @@ function paragraph(b: Record<string, unknown>, at: string, errors: string[]): Bl
   return { type: 'paragraph', children };
 }
 
+function list(b: Record<string, unknown>, at: string, errors: string[]): Block | null {
+  unknownKeys(b, ['type', 'ordered', 'items'], at, errors);
+  if (typeof b.ordered !== 'boolean') errors.push(`${at}.ordered must be true or false`);
+  if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > 100) { errors.push(`${at}.items must have 1-100 items`); return null; }
+  const items: Span[][] = [];
+  b.items.forEach((it, j) => {
+    const r = paragraph({ type: 'paragraph', children: it }, `${at}.items[${j}]`, errors);
+    if (r && r.type === 'paragraph' && r.children) items.push(r.children);
+  });
+  return typeof b.ordered === 'boolean' && items.length === b.items.length ? { type: 'list', ordered: b.ordered, items } : null;
+}
+
 function image(b: Record<string, unknown>, at: string, errors: string[]): Block | null {
   unknownKeys(b, ['type', 'src', 'alt', 'caption', 'align'], at, errors);
   if (typeof b.src !== 'string' || !isSafeImageSrc(b.src)) errors.push(`${at}.src must be an https URL or a path starting with /`);
@@ -207,8 +220,9 @@ export function validateBlocks(value: unknown): BlocksResult {
       case 'heading': out = heading(b, at, errors); break;
       case 'paragraph': out = paragraph(b, at, errors); break;
       case 'image': out = image(b, at, errors); break;
+      case 'list': out = list(b, at, errors); break;
       case 'divider': unknownKeys(b, ['type'], at, errors); out = { type: 'divider' }; break;
-      default: errors.push(`${at}.type "${String(b.type)}" is not one of heading, paragraph, image, divider`);
+      default: errors.push(`${at}.type "${String(b.type)}" is not one of heading, paragraph, list, image, divider`);
     }
     if (out) blocks.push(out);
   });

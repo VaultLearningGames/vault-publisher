@@ -30,6 +30,11 @@ export interface FrontMatter {
 
 export const FRONT_MATTER_KEYS = ['title', 'date', 'draft', 'private', 'author', 'description', 'featured_image', 'tags', 'aliases'] as const;
 type Known = (typeof FRONT_MATTER_KEYS)[number];
+// The site's names for two fields (docs/portal-contract.json): the file says `excerpt` and `unlisted`.
+const FILE_KEY: Partial<Record<Known, string>> = { description: 'excerpt', private: 'unlisted' };
+const FIELD_OF: Record<string, Known> = { excerpt: 'description', unlisted: 'private' };
+const fieldOf = (k: string): string => FIELD_OF[k] ?? k;
+const fileKey = (k: Known): string => FILE_KEY[k] ?? k;
 const isKnown = (k: string): k is Known => (FRONT_MATTER_KEYS as readonly string[]).includes(k);
 
 export function emptyFrontMatter(): FrontMatter {
@@ -81,7 +86,8 @@ export function splitFrontMatter(raw: string): SplitFile {
     if (e.key === null) continue;
     if (seen.has(e.key)) throw new FrontMatterError(`Front matter key "${e.key}" appears twice.`);
     seen.add(e.key);
-    if (isKnown(e.key)) setKnown(fm, e.key, valueText(e.raw));
+    const f = fieldOf(e.key);
+    if (isKnown(f) && !(f !== e.key ? false : fileKey(f) !== f)) setKnown(fm, f, valueText(e.raw));
     else fm.extra[e.key] = e.raw;
   }
   // An opening or closing line other than a bare --- (a closing ..., trailing spaces) and a closing line that ends the
@@ -310,8 +316,8 @@ function str(s: string): string {
 function canonical(fm: FrontMatter, key: Known): string | null {
   switch (key) {
         case 'date': return fm.date === null ? null : `date: ${ISO_DATE.test(fm.date) ? fm.date : str(fm.date)}`;
-    case 'draft': case 'private': return fm[key] ? `${key}: true` : null;
-    case 'title': case 'author': case 'description': return fm[key] ? `${key}: ${str(fm[key])}` : null;
+    case 'draft': case 'private': return fm[key] ? `${fileKey(key)}: true` : null;
+    case 'title': case 'author': case 'description': return fm[key] ? `${fileKey(key)}: ${str(fm[key])}` : null;
     case 'featured_image': return fm.featured_image === null ? null : `featured_image: ${str(fm.featured_image)}`;
     case 'tags': case 'aliases': return fm[key].length ? `${key}: [${fm[key].map(str).join(', ')}]` : null;
   }
@@ -343,7 +349,8 @@ export function serializeFrontMatter(fm: FrontMatter, body: string, layout?: Fro
       else lines.push(e.raw);
       continue;
     }
-    if (isKnown(e.key)) emit(e.key, sameValue(entryValue(e.key, e.raw), fm[e.key]) ? e.raw : canonical(fm, e.key));
+    const f = fieldOf(e.key);
+    if (isKnown(f) && !(f === e.key && fileKey(f) !== f)) emit(f, sameValue(entryValue(f, e.raw), fm[f]) ? e.raw : canonical(fm, f));
     else if (Object.hasOwn(fm.extra, e.key)) emit(e.key, fm.extra[e.key]);
   }
   for (const key of FRONT_MATTER_KEYS) if (!done.has(key)) emit(key, canonical(fm, key));

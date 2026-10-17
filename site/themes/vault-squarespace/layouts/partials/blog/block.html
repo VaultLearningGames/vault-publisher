@@ -3,5 +3,6 @@
 {{- if eq .type "heading" }}{{ if eq .level 4 }}<h4>{{ .text }}</h4>{{ else if eq .level 3 }}<h3>{{ .text }}</h3>{{ else }}<h2>{{ .text }}</h2>{{ end }}
 {{- else if eq .type "paragraph" }}{{ .html | safeHTML }}
 {{- else if eq .type "image" }}<figure class="blog-figure{{ with .align }} align-{{ . }}{{ end }}"><img src="{{ .url }}" alt="{{ .alt }}" loading="lazy">{{ with .caption }}<figcaption>{{ . }}</figcaption>{{ end }}</figure>
+{{- else if eq .type "list" }}{{ $tag := "ul" }}{{ if .ordered }}{{ $tag = "ol" }}{{ end }}<{{ $tag }}>{{ range .items }}<li>{{ range . }}{{ if .href }}<a href="{{ .href }}">{{ end }}{{ if in .marks "code" }}<code>{{ end }}{{ if in .marks "bold" }}<strong>{{ end }}{{ if in .marks "italic" }}<em>{{ end }}{{ .text }}{{ if in .marks "italic" }}</em>{{ end }}{{ if in .marks "bold" }}</strong>{{ end }}{{ if in .marks "code" }}</code>{{ end }}{{ if .href }}</a>{{ end }}{{ end }}</li>{{ end }}</{{ $tag }}>
 {{- else if eq .type "divider" }}<hr>
 {{- end -}}

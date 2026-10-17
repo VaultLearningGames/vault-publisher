@@ -32,19 +32,23 @@ on:
   push:
     branches: [ main, production ]
 
+# Never run two deploys of one system at once: only one instance may write its SQLite database. (For the whole run,
+# not one job: its jobs share the group, and a job-level group would have them cancel each other.)
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
+  cancel-in-progress: false
+
+# Three jobs, so the website is built and checked while the portal is tested and deployed: "site" builds and checks it
+# and keeps the build as an artifact, "portal" tests and deploys the portal (not for a site-only run), and "publish"
+# publishes the build once both are done. The site still goes out after the portal, as it did when this was one job.
 jobs:
-  deploy:
-    name: Deploy (${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }})
+  site:
+    name: Site (${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }})
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
-    # Never run two deploys of one system at once: only one instance may write its SQLite database.
-    concurrency:
-      group: ${{ github.workflow }}-${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
-      cancel-in-progress: false
 
     permissions:
       contents: read
-      id-token: write
 
     steps:
     # An environment falls back to repository variables for anything it doesn't set, so a missing staging
@@ -76,23 +80,6 @@ jobs:
 
     - uses: actions/checkout@v7
 
-    # The portal image carries vault-site (private) at the commit pinned in vault-site.ref, for previews.
-    - name: Fetch vault-site at the pinned ref
-      if: ${{ !inputs.site_only }}
-      env:
-        VAULT_SITE_READ_TOKEN: ${{ secrets.VAULT_SITE_READ_TOKEN }}
-      run: |
-        ref="$(grep -v '^[[:space:]]*#' vault-site.ref | tr -d '[:space:]' | head -c 200)"
-        [ -n "$ref" ] || { echo "::error::vault-site.ref is empty"; exit 1; }
-        [ -n "$VAULT_SITE_READ_TOKEN" ] || { echo "::error::VAULT_SITE_READ_TOKEN is not set"; exit 1; }
-        git init -q vault-site-src
-        git -C vault-site-src remote add origin https://github.com/VaultLearningGames/vault-site.git
-        b64="$(printf 'x-access-token:%s' "$VAULT_SITE_READ_TOKEN" | base64 | tr -d '\n')"
-        echo "::add-mask::$b64"
-        git -C vault-site-src -c http.extraheader="AUTHORIZATION: basic $b64" fetch -q origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
-        git -C vault-site-src checkout -q "$ref^{commit}"
-        echo "vault-site $(git -C vault-site-src rev-parse HEAD) (ref $ref)"
-
     - uses: actions/setup-node@v7
       with:
         node-version: 24
@@ -110,8 +97,8 @@ jobs:
         hugo-version: ${{ steps.hugo.outputs.version }}
         extended: true
 
-    # With Hugo installed the tests also render a real preview from site/.
-    - run: npm ci && npm run typecheck && npm test
+    # site:build runs the repository's scripts, which need its packages.
+    - run: npm ci
 
     # Smaller copies of listing images that have none yet (a new upload): made here, stored by the portal on the CDN
     # and listed in its catalog, which the build below then pulls (src/image-variants.ts). Nothing to do is one request.
@@ -203,6 +190,112 @@ jobs:
         npm ci --prefix cloudflare/site
         cloudflare/site/check.sh | tail -40
 
+    # The build, for the publish job: exactly what was checked above.
+    - uses: actions/upload-artifact@v7
+      with:
+        name: site-${{ github.run_id }}
+        path: site/public
+        include-hidden-files: true
+        if-no-files-found: error
+        retention-days: 1
+
+  portal:
+    name: Portal (${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }})
+    if: ${{ !inputs.site_only }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
+
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+
+    steps:
+    # An environment falls back to repository variables for anything it doesn't set, so a missing staging
+    # variable would quietly pick up production's. Refuse to deploy unless every value belongs to this system.
+    - name: Check the variables belong to this system
+      env:
+        TARGET: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
+        SERVICE: ${{ vars.SERVICE }}
+        PUBLISHER_SERVICE_ACCOUNT: ${{ vars.PUBLISHER_SERVICE_ACCOUNT }}
+        SITE_WORKER: ${{ vars.SITE_WORKER }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        SITE_ONLY: ${{ inputs.site_only }}
+        VALUES: ${{ vars.BUILDS_BUCKET }} ${{ vars.BUILDS_PUBLIC_URL }} ${{ vars.CDN_BUCKET }} ${{ vars.CDN_PUBLIC_URL }} ${{ vars.PORTAL_URL }} ${{ vars.LITESTREAM_BUCKET }} ${{ vars.SITE_URL }}
+      run: |
+        set -eu
+        case "$TARGET:$SERVICE" in production:vault-publisher|staging:vault-publisher-staging) ;; *) echo "::error::SERVICE is '$SERVICE' in the $TARGET environment"; exit 1 ;; esac
+        case "$PUBLISHER_SERVICE_ACCOUNT" in "$SERVICE"@*) ;; *) echo "::error::PUBLISHER_SERVICE_ACCOUNT '$PUBLISHER_SERVICE_ACCOUNT' isn't $SERVICE's"; exit 1 ;; esac
+        [ "$(echo $VALUES | wc -w)" -eq 7 ] || { echo "::error::a bucket, URL, LITESTREAM_BUCKET or SITE_URL variable is missing"; exit 1; }
+        # SITE_WORKER is the Worker the site is published to (cloudflare/site/wrangler.jsonc names one per system).
+        # A system without it isn't set up for publishing yet: the site is built and checked, and not published.
+        case "$TARGET:$SITE_WORKER" in staging:vault-site-staging|production:vault-site|*:) ;; *) echo "::error::SITE_WORKER is '$SITE_WORKER' in the $TARGET environment"; exit 1 ;; esac
+        [ -n "$SITE_WORKER" ] || echo "::warning::SITE_WORKER is not set in the $TARGET environment: the site will be built but not published"
+        if [ -n "$SITE_WORKER" ] && [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; exit 1; fi
+        if [ "$SITE_ONLY" = true ] && [ -z "$SITE_WORKER" ]; then echo "::error::nothing to do: site only, and no SITE_WORKER"; exit 1; fi
+        for v in $VALUES; do
+          case "$TARGET:$v" in staging:*staging*|production:*) ;; *) echo "::error::$v isn't a staging value"; exit 1 ;; esac
+          case "$TARGET:$v" in production:*staging*) echo "::error::$v is a staging value"; exit 1 ;; esac
+        done
+
+    - uses: actions/checkout@v7
+
+    # The portal image carries vault-site (private) at the commit pinned in vault-site.ref, for previews.
+    - name: Fetch vault-site at the pinned ref
+      if: ${{ !inputs.site_only }}
+      env:
+        VAULT_SITE_READ_TOKEN: ${{ secrets.VAULT_SITE_READ_TOKEN }}
+      run: |
+        ref="$(grep -v '^[[:space:]]*#' vault-site.ref | tr -d '[:space:]' | head -c 200)"
+        [ -n "$ref" ] || { echo "::error::vault-site.ref is empty"; exit 1; }
+        [ -n "$VAULT_SITE_READ_TOKEN" ] || { echo "::error::VAULT_SITE_READ_TOKEN is not set"; exit 1; }
+        git init -q vault-site-src
+        git -C vault-site-src remote add origin https://github.com/VaultLearningGames/vault-site.git
+        b64="$(printf 'x-access-token:%s' "$VAULT_SITE_READ_TOKEN" | base64 | tr -d '\n')"
+        echo "::add-mask::$b64"
+        git -C vault-site-src -c http.extraheader="AUTHORIZATION: basic $b64" fetch -q origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+        git -C vault-site-src checkout -q "$ref^{commit}"
+        echo "vault-site $(git -C vault-site-src rev-parse HEAD) (ref $ref)"
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+        cache: npm
+
+    # The Hugo that builds the site is the one the image renders previews with: the version in the Dockerfile.
+    - name: Read the Hugo version from the Dockerfile
+      id: hugo
+      run: |
+        v=$(sed -n 's/^ARG HUGO_VERSION=//p' Dockerfile)
+        [ -n "$v" ] || { echo "::error::no ARG HUGO_VERSION in the Dockerfile"; exit 1; }
+        echo "version=$v" >> "$GITHUB_OUTPUT"
+    - uses: peaceiris/actions-hugo@v3
+      with:
+        hugo-version: ${{ steps.hugo.outputs.version }}
+        extended: true
+
+    # With Hugo installed the tests also render a real preview from site/.
+    - run: npm ci && npm run typecheck && npm test
+
+    # "Make the smaller copies of new listing images" (in the site job) has the portal store what it makes, so it
+    # must be done before this run's rollout starts: no write may land on an instance being replaced. It usually is,
+    # long before (it is one request when there is nothing to do); this waits for it when it isn't. A site job that
+    # ended without getting to it has nothing to wait for.
+    - name: Wait for the smaller copies of new listing images
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SITE_JOB: Site (${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }})
+        STEP: Make the smaller copies of new listing images
+      run: |
+        set -euo pipefail
+        for _ in $(seq 240); do
+          state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
+            --jq '.jobs[] | select(.name == env.SITE_JOB) | if .status == "completed" then "completed" else ((.steps // [])[] | select(.name == env.STEP) | .status) end') || state=
+          if [ "$state" = completed ]; then echo "The site job is past \"$STEP\""; exit 0; fi
+          sleep 5
+        done
+        echo "::error::\"$STEP\" (job \"$SITE_JOB\") did not finish within 20 minutes; not deploying"; exit 1
+
     - name: Authenticate to Google Cloud
       if: ${{ !inputs.site_only }}
       uses: google-github-actions/auth@v3
@@ -266,6 +359,61 @@ jobs:
     - name: Show URL
       if: ${{ !inputs.site_only }}
       run: echo "Deployed to ${{ steps.deploy.outputs.url }}"
+
+  publish:
+    name: Publish the site (${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }})
+    needs: [ site, portal ]
+    # A site-only run skips the portal, and publishes after the site job alone. Any other run publishes only when
+    # both jobs succeeded: a failed test or deploy publishes nothing, as before.
+    if: ${{ !cancelled() && needs.site.result == 'success' && (needs.portal.result == 'success' || (needs.portal.result == 'skipped' && inputs.site_only)) }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
+
+    permissions:
+      contents: read
+
+    steps:
+    # An environment falls back to repository variables for anything it doesn't set, so a missing staging
+    # variable would quietly pick up production's. Refuse to deploy unless every value belongs to this system.
+    - name: Check the variables belong to this system
+      env:
+        TARGET: ${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
+        SERVICE: ${{ vars.SERVICE }}
+        PUBLISHER_SERVICE_ACCOUNT: ${{ vars.PUBLISHER_SERVICE_ACCOUNT }}
+        SITE_WORKER: ${{ vars.SITE_WORKER }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        SITE_ONLY: ${{ inputs.site_only }}
+        VALUES: ${{ vars.BUILDS_BUCKET }} ${{ vars.BUILDS_PUBLIC_URL }} ${{ vars.CDN_BUCKET }} ${{ vars.CDN_PUBLIC_URL }} ${{ vars.PORTAL_URL }} ${{ vars.LITESTREAM_BUCKET }} ${{ vars.SITE_URL }}
+      run: |
+        set -eu
+        case "$TARGET:$SERVICE" in production:vault-publisher|staging:vault-publisher-staging) ;; *) echo "::error::SERVICE is '$SERVICE' in the $TARGET environment"; exit 1 ;; esac
+        case "$PUBLISHER_SERVICE_ACCOUNT" in "$SERVICE"@*) ;; *) echo "::error::PUBLISHER_SERVICE_ACCOUNT '$PUBLISHER_SERVICE_ACCOUNT' isn't $SERVICE's"; exit 1 ;; esac
+        [ "$(echo $VALUES | wc -w)" -eq 7 ] || { echo "::error::a bucket, URL, LITESTREAM_BUCKET or SITE_URL variable is missing"; exit 1; }
+        # SITE_WORKER is the Worker the site is published to (cloudflare/site/wrangler.jsonc names one per system).
+        # A system without it isn't set up for publishing yet: the site is built and checked, and not published.
+        case "$TARGET:$SITE_WORKER" in staging:vault-site-staging|production:vault-site|*:) ;; *) echo "::error::SITE_WORKER is '$SITE_WORKER' in the $TARGET environment"; exit 1 ;; esac
+        [ -n "$SITE_WORKER" ] || echo "::warning::SITE_WORKER is not set in the $TARGET environment: the site will be built but not published"
+        if [ -n "$SITE_WORKER" ] && [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; exit 1; fi
+        if [ "$SITE_ONLY" = true ] && [ -z "$SITE_WORKER" ]; then echo "::error::nothing to do: site only, and no SITE_WORKER"; exit 1; fi
+        for v in $VALUES; do
+          case "$TARGET:$v" in staging:*staging*|production:*) ;; *) echo "::error::$v isn't a staging value"; exit 1 ;; esac
+          case "$TARGET:$v" in production:*staging*) echo "::error::$v is a staging value"; exit 1 ;; esac
+        done
+
+    - uses: actions/checkout@v7
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+        cache: npm
+        cache-dependency-path: cloudflare/site/package-lock.json
+
+    # The build the site job made and checked, where wrangler.jsonc looks for it; and wrangler, at its pinned version.
+    - uses: actions/download-artifact@v8
+      with:
+        name: site-${{ github.run_id }}
+        path: site/public
+    - run: npm ci --prefix cloudflare/site
 
     # The site goes out after the portal, so the two change within the same minute. A deploy replaces the Worker's
     # files in one step (a visitor gets the old site or the new one, never a mix) and leaves its hostnames alone:

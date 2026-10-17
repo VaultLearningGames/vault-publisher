@@ -47,6 +47,7 @@ import type { User } from '../db.ts';
 import { validateBlocks, isSafeImageSrc, type Block } from '../blog/blocks.ts';
 import type { BlogPostInput, BlogStatus } from '../blog/repo.ts';
 import { BlogScratch } from '../blog/scratch.ts';
+import { markDeployPending } from '../deploy-status.ts';
 import { PostSlugTakenError, SiteBlogRepo, type RepoPost } from '../blog/siteRepo.ts';
 import { isBlogSlug, MAX_SLUG, slugify, uniqueSlug } from '../blog/slug.ts';
 import { copyImages, deleteOld, discardCopies, ImageMoveError, rewriteImageRefs, withImageLock } from '../blog/imageMove.ts';
@@ -276,12 +277,14 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
       const r = await repo.savePost(input.slug, fields(input), null, commitMessage(verb ?? 'create', input.slug, u));
       scratch.delete(slug);
       h.db.audit(h.actor(u), 'blog.create', input.slug, { commit: r.commit });
+      markDeployPending(h.db, 'blog.create');
       return { post: { ...input, sha: r.sha, aliases: [], committed: true } };
     }
     if (input.slug === slug) {
       const r = await repo.savePost(slug, fields(input), sha, commitMessage(verb ?? 'update', slug, u));
       scratch.delete(slug);
       h.db.audit(h.actor(u), `blog.${verb ?? 'update'}`, slug, { commit: r.commit });
+      markDeployPending(h.db, `blog.${verb ?? 'update'}`);
       const after = await repo.getPost(slug).catch(() => null);
       return { post: { ...input, sha: r.sha, aliases: after?.aliases ?? [], committed: true } };
     }
@@ -301,6 +304,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
       scratch.delete(slug);
       scratch.delete(input.slug);
       h.db.audit(h.actor(u), 'blog.rename', input.slug, { from: slug, commit: r.commit, ...(move ? { move } : {}) });
+      markDeployPending(h.db, 'blog.rename');
       const after = await repo.getPost(input.slug).catch(() => null);
       return { post: { ...moved, sha: r.sha, aliases: after?.aliases ?? [], committed: true }, ...(move ? { move } : {}) };
     });
@@ -363,6 +367,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const r = await guarded(() => repo.deletePost(slug, sha, commitMessage('delete', slug, u)));
     scratch.delete(slug);
     h.db.audit(h.actor(u), 'blog.delete', slug, { commit: r.commit });
+    markDeployPending(h.db, 'blog.delete');
     return c.json({ ok: true, commit: r.commit });
   };
   app.delete('/portal/api/blog/posts/:slug', (c) => remove(c, shaOf(c.req.query('sha'), true)));

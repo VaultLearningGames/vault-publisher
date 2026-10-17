@@ -24,7 +24,7 @@ import { githubAccount, githubRepository, registerPeople, type GitHubAccountLook
 import { buildOrigin, registerUploads } from './uploads.ts';
 import { registerBlogAdmin } from './blog-admin.ts';
 import type { MonitorEnv } from '../url-monitor.ts';
-import { DeployStatusCache, deployBranch, githubRunsFetcher, type RunsFetcher } from '../deploy-status.ts';
+import { DeployStatusCache, deployBranch, getScheduledDeploy, githubRunsFetcher, settleScheduled, type DeployStatus, type RunsFetcher, type SettingsStore } from '../deploy-status.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -47,7 +47,7 @@ export interface PortalConfig {
   oauth?: OAuthClient; // injected in tests
   githubAccount?: GitHubAccountLookup; // injected in tests
   githubRepository?: GitHubRepositoryLookup; // injected in tests
-  // The deploy bar (src/deploy-status.ts). No token (and no fetchRuns): no bar, no endpoint.
+  // The deploy bar (src/deploy-status.ts). No token (and no fetchRuns): no running deploys, only scheduled ones.
   deployStatus?: { token?: string; environment?: string; stagingBranch?: string; productionBranch?: string; fetchRuns?: RunsFetcher; now?: () => number };
 }
 
@@ -130,14 +130,21 @@ function stagingBannerFor(baseUrl: string): Html | '' {
     <span>Settings, game data and anything else saved here apply only to staging, and are overwritten whenever the Vault code changes.
     Make real changes, and preview them, on the production portal${prod ? html`: <a href="${prod}/">${new URL(prod).host}</a>` : ''}.</span></div>`;
 }
-// The deploy bar, under the staging banner on every page while a deploy of this system runs (public/portal.js fills it
-// in and polls DEPLOY_STATUS_PATH). Set by registerPortal; null when the system has no deploy status.
+// The deploy bar, under the staging banner on every page while a deploy of this system runs or one is scheduled by a
+// portal action (public/portal.js fills it in and polls DEPLOY_STATUS_PATH). Set by registerPortal: deployStatus is
+// null when the system can't see its deploys, scheduledStore when there is no database.
 export const DEPLOY_STATUS_PATH = '/portal/deploy-status';
 let deployStatus: DeployStatusCache | null = null;
+let scheduledStore: SettingsStore | null = null;
+let deployNow: (() => number) | undefined;
+const nowDate = () => new Date(deployNow ? deployNow() : Date.now());
 function deployBar(): Html | '' {
-  if (!deployStatus) return '';
-  const known = deployStatus.peek();
-  return html`<div class="deploy-bar" id="deploy-bar" role="status" aria-live="polite" data-src="${DEPLOY_STATUS_PATH}"${known?.deploys.length ? html` data-state="${JSON.stringify(known)}"` : ''} hidden></div>`;
+  if (!deployStatus && !scheduledStore) return '';
+  const deploys = deployStatus?.peek()?.deploys ?? [];
+  const scheduled = scheduledStore ? getScheduledDeploy(scheduledStore, nowDate()) : null;
+  const known: DeployStatus = { deploys, scheduled };
+  const shown = deploys.length || scheduled;
+  return html`<div class="deploy-bar" id="deploy-bar" role="status" aria-live="polite" data-src="${DEPLOY_STATUS_PATH}"${shown ? html` data-state="${JSON.stringify(known)}"` : ''}${shown ? '' : ' hidden'}>${scheduled ? html`<div class="deploy-row scheduled"><b>A deploy is scheduled — some recent changes may not be live yet.</b></div>` : ''}</div>`;
 }
 // blog: whether the Blog link shows (Vault admins and Blog maintainers).
 interface Nav { user: User; studio?: Studio; memberships: (Membership & { studio_slug: string; studio_name: string })[]; allStudios: Studio[]; blog?: boolean }
@@ -208,11 +215,16 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const deployFrom = deployBranch({ isStaging: stagingProductionUrl(cfg.baseUrl) !== null, environment: ds?.environment, stagingBranch: ds?.stagingBranch, productionBranch: ds?.productionBranch });
   const fetchRuns = ds?.fetchRuns ?? (ds?.token ? githubRunsFetcher(ds.token) : null);
   deployStatus = fetchRuns && deployFrom ? new DeployStatusCache(fetchRuns, deployFrom, { now: ds?.now }) : null;
-  if (deployStatus) {
-    const cache = deployStatus;
-    // Public, like the bar (it shows on the sign-in page too): which deploys run, and links to their runs.
-    app.get(DEPLOY_STATUS_PATH, async (c) => c.json(await cache.get(), 200, { 'Cache-Control': 'no-store' }));
-  }
+  scheduledStore = db;
+  deployNow = ds?.now;
+  const deployCache = deployStatus;
+  // Public, like the bar (it shows on the sign-in page too): which deploys run, links to their runs, and whether one is
+  // scheduled.
+  app.get(DEPLOY_STATUS_PATH, async (c) => {
+    const deploys = deployCache ? (await deployCache.get()).deploys : [];
+    const body: DeployStatus = { deploys, scheduled: settleScheduled(db, deploys, nowDate()) };
+    return c.json(body, 200, { 'Cache-Control': 'no-store' });
+  });
 
   // Browsers that reach the portal on the service's default *.run.app address are sent to the portal's
   // real address (GitHub sign-in only returns there). The API and health check keep answering on both.

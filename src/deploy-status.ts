@@ -40,7 +40,8 @@ export interface Deploy {
   expectedSeconds: number;
   url: string;
 }
-export interface DeployStatus { deploys: Deploy[] }
+// scheduled: a deploy a portal action asked for that hasn't started yet (markDeployPending, below).
+export interface DeployStatus { deploys: Deploy[]; scheduled?: { since: string; reason: string | null } | null }
 
 const ACTIVE = new Set(['queued', 'in_progress', 'waiting', 'pending', 'requested']);
 export const isActive = (run: Pick<WorkflowRun, 'status'>) => ACTIVE.has(run.status ?? '');
@@ -180,4 +181,93 @@ export class DeployStatusCache {
       return this.peek() ?? { deploys: [] };
     }
   }
+}
+
+// ---------- a deploy scheduled by a portal action ----------
+// A portal action whose change only reaches the site with a build (a blog commit, which vault-site's workflow deploys;
+// a listing published or taken off, or the featured games changed, which the next "Rebuild the site only" run takes)
+// marks a deploy as scheduled, and the bar says so on every page, for everyone, until it is over: a deploy of this
+// system seen running since then takes over (it shows its own row), markDeployComplete clears it, or it expires after
+// DEPLOY_PENDING_TTL_MINUTES (default 30). Kept in the settings table (key 'deploy_status'), so a restart or a second
+// instance agrees. Nothing here throws: a failing bar never breaks the action that set it.
+export const SCHEDULED_KEY = 'deploy_status';
+export const DEFAULT_PENDING_TTL_MINUTES = 30;
+export interface SettingsStore { setting(key: string): string | undefined; setSetting(key: string, value: string): void }
+export interface ScheduledDeployRecord { pending: boolean; since: string | null; reason: string | null; updatedAt: string }
+export interface ScheduledDeploy { since: string; reason: string | null }
+
+export function pendingTtlMinutes(raw: string | undefined = process.env.DEPLOY_PENDING_TTL_MINUTES): number {
+  const n = Number(raw?.trim());
+  return raw?.trim() && Number.isFinite(n) && n > 0 ? n : DEFAULT_PENDING_TTL_MINUTES;
+}
+
+function readRecord(store: SettingsStore): ScheduledDeployRecord | null {
+  const raw = store.setting(SCHEDULED_KEY);
+  if (!raw) return null;
+  const r = JSON.parse(raw) as Partial<ScheduledDeployRecord>;
+  return { pending: r.pending === true, since: typeof r.since === 'string' ? r.since : null, reason: typeof r.reason === 'string' ? r.reason : null, updatedAt: String(r.updatedAt ?? '') };
+}
+const writeRecord = (store: SettingsStore, r: ScheduledDeployRecord) => store.setSetting(SCHEDULED_KEY, JSON.stringify(r));
+const cleared = (now: Date): ScheduledDeployRecord => ({ pending: false, since: null, reason: null, updatedAt: now.toISOString() });
+
+// A deploy is scheduled. `since` stays from the first action while one is pending (a pending one past its TTL counts as
+// over); the reason is the latest action's.
+export function markDeployPending(store: SettingsStore, reason: string, now = new Date()): void {
+  try {
+    const cur = readRecord(store);
+    const live = cur?.pending && cur.since && !expired(cur.since, now) ? cur.since : null;
+    writeRecord(store, { pending: true, since: live ?? now.toISOString(), reason, updatedAt: now.toISOString() });
+  } catch (err) {
+    console.error(`deploy status: could not mark a deploy as scheduled: ${(err as Error).message}`);
+  }
+}
+
+export function markDeployComplete(store: SettingsStore, now = new Date()): void {
+  try {
+    writeRecord(store, cleared(now));
+  } catch (err) {
+    console.error(`deploy status: could not clear the scheduled deploy: ${(err as Error).message}`);
+  }
+}
+
+function expired(since: string, now: Date, ttlMinutes = pendingTtlMinutes()): boolean {
+  const t = Date.parse(since);
+  return !Number.isFinite(t) || now.getTime() - t > ttlMinutes * 60_000;
+}
+
+// The scheduled deploy, or null. One past its TTL is cleared (and saved cleared); null when the store can't be read.
+export function getScheduledDeploy(store: SettingsStore, now = new Date(), ttlMinutes = pendingTtlMinutes()): ScheduledDeploy | null {
+  try {
+    const r = readRecord(store);
+    if (!r?.pending || !r.since) return null;
+    if (expired(r.since, now, ttlMinutes)) {
+      writeRecord(store, cleared(now));
+      return null;
+    }
+    return { since: r.since, reason: r.reason };
+  } catch (err) {
+    console.error(`deploy status: could not read the scheduled deploy: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+// { pending, since } as the plan's callers want it.
+export function getDeployStatus(store: SettingsStore, now = new Date()): { pending: boolean; since: string | null } {
+  const s = getScheduledDeploy(store, now);
+  return { pending: !!s, since: s?.since ?? null };
+}
+
+// The scheduled deploy once the running deploys are known: a deploy of this system running that started at or after
+// it was scheduled (give or take SCHEDULE_SLACK_MS: the action marks it once its commit is in) is that deploy, so the
+// schedule is over (and cleared).
+export const SCHEDULE_SLACK_MS = 60_000;
+export function settleScheduled(store: SettingsStore, deploys: readonly Deploy[], now = new Date()): ScheduledDeploy | null {
+  const s = getScheduledDeploy(store, now);
+  if (!s) return null;
+  const since = Date.parse(s.since);
+  if (deploys.some((d) => d.state === 'running' && Date.parse(d.startedAt) >= since - SCHEDULE_SLACK_MS)) {
+    markDeployComplete(store, now);
+    return null;
+  }
+  return s;
 }

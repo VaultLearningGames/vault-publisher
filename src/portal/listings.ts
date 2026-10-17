@@ -6,6 +6,7 @@
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
 import type { Db, Game, Listing, Studio, StudioRole, User } from '../db.ts';
+import { markDeployPending } from '../deploy-status.ts';
 import { draftProblems, importFromExport, moveListingToStudio, publishListing, saveListing } from '../listing-ops.ts';
 import { changedFields, FIELD_LABEL, GRADES, isListingSlug, MIN_SIZE_RANGE, normalize, VAULT_ONLY, type ListingFields } from '../listings.ts';
 import { getHosting, hostingCell } from './hosting.ts';
@@ -386,6 +387,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const { s, l } = apiListing(c, u);
     db.unpublishListing(l.id);
     db.audit(h.actor(u), 'listing.unpublish', `${s.slug}:${l.slug}`);
+    markDeployPending(db, 'listing.unpublish');
     return c.json({ ok: true });
   });
 

@@ -422,13 +422,14 @@
 })();
 
 // The deploy bar (src/deploy-status.ts): while a deploy of this system runs, "Deploying: about N min left" and a
-// progress bar from the time it has run over the time a run usually takes. It asks once when the page loads, then
-// every 15 s only while it shows something. The portal is what's being deployed, so a request may fail while it
+// progress bar from the time it has run over the time a run usually takes; while a portal action's deploy is
+// scheduled, a line saying so. It asks once when the page loads, then every 15 s while it shows something, else every
+// 60 s (another user's action schedules a deploy too). The portal is what's being deployed, so a request may fail while it
 // restarts: then the bar keeps the last answer (also kept for the next page in sessionStorage) and asks again.
 (function () {
   const bar = document.getElementById('deploy-bar');
   if (!bar) return;
-  const POLL_MS = 15000, KEEP_MS = 10 * 60000, KEY = 'vault-deploy-status', DISMISSED = 'vault-deploy-dismissed';
+  const POLL_MS = 15000, IDLE_POLL_MS = 60000, KEEP_MS = 10 * 60000, KEY = 'vault-deploy-status', DISMISSED = 'vault-deploy-dismissed';
   const LABEL = { portal: 'the portal and site', site: 'the site' };
   let state = null, timer = 0, clock = 0;
   const valid = (s) => s && Array.isArray(s.deploys);
@@ -438,6 +439,7 @@
   }
   const dismissed = () => { try { return JSON.parse(sessionStorage.getItem(DISMISSED) || '[]'); } catch (e) { return []; } };
   const shown = () => (state ? state.deploys.filter((d) => d.state === 'running' || !dismissed().includes(d.url)) : []);
+  const scheduled = () => (state && state.scheduled && state.scheduled.since ? state.scheduled : null);
   const runLink = (d, text) => {
     const a = document.createElement('a');
     if (/^https:\/\/github\.com\//.test(d.url || '')) a.href = d.url;
@@ -448,7 +450,15 @@
   function render() {
     const list = shown();
     bar.replaceChildren();
-    bar.hidden = !list.length;
+    bar.hidden = !list.length && !scheduled();
+    if (scheduled()) {
+      const row = document.createElement('div');
+      row.className = 'deploy-row scheduled';
+      const b = document.createElement('b');
+      b.textContent = 'A deploy is scheduled — some recent changes may not be live yet.';
+      row.append(b);
+      bar.append(row);
+    }
     for (const d of list) {
       const row = document.createElement('div');
       row.className = 'deploy-row';
@@ -486,7 +496,7 @@
     }
     clearInterval(clock);
     if (list.some((d) => d.state === 'running')) clock = setInterval(render, 5000);
-    return list.length > 0;
+    return list.length > 0 || !!scheduled();
   }
 
   async function poll() {
@@ -499,7 +509,7 @@
       }
     } catch (e) { /* restarting: keep the last answer */ }
     clearTimeout(timer);
-    if (render()) timer = setTimeout(poll, POLL_MS);
+    timer = setTimeout(poll, render() ? POLL_MS : IDLE_POLL_MS);
   }
   render();
   poll();

@@ -1,11 +1,13 @@
-// The blog post editor (/portal/blog/edit/:id): the title, and the post's body as a list of blocks (heading,
-// paragraph, image, divider) that can be added, moved (drag, or the Move up/down buttons) and deleted. Save PUTs the
-// title and the blocks in the format of src/blog/blocks.ts to /portal/blog/:id with the updated_at the page was
-// loaded with; if someone else saved in between, the server answers 409 and that is shown, nothing is overwritten.
+// The blog post editor (/portal/blog/edit/:slug): the title, and the post's body as a list of blocks (heading,
+// paragraph, image, divider) that can be added, moved (drag, or the Move up/down buttons) and deleted. The post is a
+// Markdown file in the vault-site repository. Save PUTs the title and the blocks in the format of src/blog/blocks.ts
+// to /portal/blog/:slug with the file's SHA the page was loaded with, and the server commits it; if the file changed
+// in between, the server answers 409 and that is shown, nothing is overwritten.
 //
 // Beside the blocks, a settings panel (slug with a live URL and availability check, featured image, excerpt, author,
-// Published/Private, publish date, tags). Edits autosave about 2 s after the last change; Preview shows the unsaved
-// post as the public blog renders it; Publish saves, then sets the publish date.
+// Published/Private, publish date, tags). Edits autosave about 2 s after the last change to the portal's scratch
+// storage (not a commit: only Save, Publish, Unpublish and Delete change the site); Preview shows the unsaved post as
+// the site builds it; Publish commits with the publish date set. A new slug renames the post on Save.
 //
 // Image blocks and the featured image take an uploaded image (picker, drag and drop, or paste) through the image
 // editor in portal-blog-image-editor.js: crop, resize, compress, alt text, then stored on the CDN under the post's slug.
@@ -109,9 +111,9 @@ export function insertBlock(items, index, item) {
 }
 export const removeBlock = (items, key) => items.filter((e) => e.key !== key);
 
-// The body of the save request: only the title and blocks change here; other fields keep their value on the server.
-export function saveBody(title, items, updatedAt) {
-  return { title: String(title || '').trim(), blocks: serializeBlocks(items), updated_at: updatedAt };
+// The body of the save request: the title and blocks, and the file's SHA as loaded (null for a post not committed yet).
+export function saveBody(title, items, sha) {
+  return { title: String(title || '').trim(), blocks: serializeBlocks(items), sha: sha ?? null };
 }
 
 // Links in paragraphs, as the server accepts them: http(s), mailto:, or a path starting with one "/".
@@ -223,9 +225,10 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   const dataEl = document.getElementById('blog-post-data');
   if (!root || !dataEl) return;
   const post = JSON.parse(dataEl.textContent || '{}');
-  const id = root.dataset.id;
-  let updatedAt = post.updated_at;
-  let savedSlug = post.slug; // where images upload: the slug the server has, not the one being typed
+  // The post's slug in the repository (its address here), and the file's SHA as loaded; both change on Save.
+  let postSlug = root.dataset.slug;
+  let sha = post.sha ?? null;
+  let savedSlug = postSlug; // where images upload: the slug the server has, not the one being typed
   let items = deserializeBlocks(post.blocks);
   const els = new Map(); // block key -> its element
   let saving = false;
@@ -251,6 +254,8 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   const saveBtn = h('button', { type: 'button', class: 'btn pri', onclick: () => save() }, 'Save');
   const previewBtn = h('button', { type: 'button', class: 'btn', onclick: preview }, 'Preview');
   const publishBtn = h('button', { type: 'button', class: 'btn brass', onclick: publish }, 'Publish');
+  const unpublishBtn = h('button', { type: 'button', class: 'btn', onclick: unpublish, hidden: true }, 'Unpublish');
+  const deleteBtn = h('button', { type: 'button', class: 'btn danger', onclick: removePost }, 'Delete');
   const announce = h('p', { class: 'be-sr', 'aria-live': 'polite' });
   const siteUrl = String(root.dataset.siteUrl || '').replace(/\/+$/, '');
 
@@ -336,13 +341,14 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
         h('div', { class: 'card be-head' }, h('div', { class: 'field' }, h('label', { for: 'be-title' }, 'Title'), titleInput)),
         h('div', { class: 'card be-body' }, inserter(0), list)),
       panel),
-    h('div', { class: 'be-bar' }, saveBtn, previewBtn, publishBtn, status),
+    h('div', { class: 'be-bar' }, saveBtn, previewBtn, publishBtn, unpublishBtn, deleteBtn, status),
     err, announce, previewDlg,
   );
 
   // ----- state -----
-  const fullBody = (updated) => ({ ...saveBody(titleInput.value, items, updated), ...settingsBody(settings) });
+  const fullBody = (loadedSha) => ({ ...saveBody(titleInput.value, items, loadedSha), ...settingsBody(settings) });
   const snapshot = () => JSON.stringify(fullBody(null));
+  // What the server has, autosaved or committed.
   let savedJson = snapshot();
   const dirty = () => snapshot() !== savedJson;
   let auto = autosaveInit();
@@ -357,7 +363,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     if (auto.dueAt === null || auto.stopped) return;
     autoTimer = setTimeout(() => {
       if (!autosaveDue(auto, Date.now())) return schedule();
-      if (dirty() && titleInput.value.trim()) save(true);
+      if (dirty() && titleInput.value.trim()) autosave();
     }, Math.max(0, auto.dueAt - Date.now()));
   }
 
@@ -381,7 +387,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   }
   async function checkSlug(s, seq) {
     try {
-      const res = await fetch(`/portal/blog/slug-check?slug=${encodeURIComponent(s)}&id=${encodeURIComponent(id)}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'vault-portal' } });
+      const res = await fetch(`/portal/blog/slug-check?slug=${encodeURIComponent(s)}&current=${encodeURIComponent(postSlug)}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'vault-portal' } });
       const data = await res.json();
       if (seq !== slugSeq || !res.ok) return;
       settings.slugTaken = !data.available;
@@ -433,8 +439,10 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
 
   // ----- where the post stands on the public blog -----
   function showState() {
-    const url = `${siteUrl}/blog/${slugify(settings.slug) || post.slug}`;
+    const url = `${siteUrl}/blog/${postSlug}/`;
     stateLine.replaceChildren();
+    unpublishBtn.hidden = !publishedAt || !sha;
+    if (!sha) { stateLine.append(h('span', { class: 'pill p-off' }, 'New'), ' Not in the website repository until you save it.'); publishBtn.textContent = 'Publish'; return; }
     if (!publishedAt) { stateLine.append(h('span', { class: 'pill p-off' }, 'Draft'), ' Not on the blog yet.'); publishBtn.textContent = 'Publish'; return; }
     const when = new Date(publishedAt);
     const future = when.getTime() > Date.now();
@@ -444,6 +452,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       future ? '' : h('a', { href: url, target: '_blank', rel: 'noopener' }, 'View on the blog'));
     publishBtn.textContent = 'Publish changes';
   }
+  // Autosaved edits are kept by the portal, so only edits not even autosaved yet warn.
   window.addEventListener('beforeunload', (e) => { if (dirty() || saving) e.preventDefault(); });
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
@@ -677,57 +686,76 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   }
 
   // ----- save -----
-  // Saves the post (autosave passes isAuto: no spinner, and an empty title just waits). Resolves to whether it saved.
-  let current = null; // the save in flight
-  function save(isAuto) {
-    if (current) return current;
-    const body = fullBody(updatedAt);
-    if (!body.title) {
-      if (isAuto) { status.textContent = 'Not saved: the title is empty'; return Promise.resolve(false); }
-      showError('The title must not be empty.'); titleInput.focus(); return Promise.resolve(false);
+  const send = (method, url, body) => fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: 'same-origin',
+  });
+  const errorText = (data, res, what) => data.message || data.error || `${what} (HTTP ${res.status}).`;
+  // A 409 conflict: the file changed in the repository since it was loaded. No more autosaves until a reload.
+  function conflicted(data) {
+    auto = autosaveStep(auto, { type: 'stop' });
+    showError(data.message || 'This post was changed elsewhere since you loaded it.', true);
+  }
+  // After a commit: the post as the repository has it now (a rename moves the page to the new address).
+  function committed(p) {
+    sha = p.sha;
+    publishedAt = p.published_at;
+    savedSlug = p.slug;
+    if (p.slug !== postSlug) {
+      postSlug = p.slug;
+      root.dataset.slug = p.slug;
+      history.replaceState(null, '', `/portal/blog/edit/${encodeURIComponent(p.slug)}`);
     }
-    current = doSave(body, isAuto).finally(() => { current = null; });
+  }
+
+  // Saves the post: a commit to the website repository. Resolves to whether it saved.
+  let current = null; // the save in flight
+  function save(publishing) {
+    if (current) return current;
+    const body = fullBody(sha);
+    if (!body.title) { showError('The title must not be empty.'); titleInput.focus(); return Promise.resolve(false); }
+    current = doSave(body, publishing).finally(() => { current = null; });
     return current;
   }
-  async function doSave(body, isAuto) {
-    const sent = JSON.stringify({ ...body, updated_at: null });
+  async function doSave(body, publishing) {
+    const sent = JSON.stringify({ ...body, sha: null });
     saving = true;
     auto = autosaveStep(auto, { type: 'start' });
     clearTimeout(autoTimer);
-    saveBtn.disabled = true;
-    if (!isAuto) saveBtn.innerHTML = '<span class="spin" aria-hidden="true"></span> Saving…';
-    status.textContent = 'Saving…';
+    const btn = publishing ? publishBtn : saveBtn;
+    saveBtn.disabled = publishBtn.disabled = true;
+    btn.innerHTML = `<span class="spin" aria-hidden="true"></span> ${publishing ? 'Publishing' : 'Saving'}…`;
+    status.textContent = publishing ? 'Publishing…' : 'Saving…';
     let ok = false;
     try {
-      const res = await fetch(`/portal/blog/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
-        body: JSON.stringify(body),
-        credentials: 'same-origin',
-      });
+      const res = await send(publishing ? 'POST' : 'PUT', `/portal/blog/${encodeURIComponent(postSlug)}${publishing ? '/publish' : ''}`, body);
       const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.current) {
-        auto = autosaveStep(auto, { type: 'stop' });
-        showError(data.error || 'This post was changed elsewhere since you loaded it.', true);
-        status.textContent = 'Not saved';
-        return false;
-      }
-      if (res.status === 409 && data.field === 'slug') {
+      if (res.status === 409 && data.error === 'conflict') { conflicted(data); status.textContent = 'Not saved'; return false; }
+      if (res.status === 409 && data.error === 'slug_taken') {
         settings.slugTaken = true;
         slugMsg.textContent = 'Another post already uses this slug. Choose a different one; until then the post keeps its current URL.';
       }
       if (!res.ok) {
-        showError(data.error || `Something went wrong (HTTP ${res.status}).`, false, data.errors);
+        showError(errorText(data, res, 'Something went wrong'), false, data.errors);
         status.textContent = 'Not saved';
         return false;
       }
       showError('');
-      updatedAt = data.post.updated_at;
-      publishedAt = data.post.published_at;
-      savedSlug = data.post.slug;
-      savedJson = sent;
+      committed(data.post);
+      if (data.move && data.move.status !== 'done') showError(`The post was renamed, but its old images couldn’t be removed from the CDN: ${data.move.error || 'unknown error'}.`);
+      if (publishing) {
+        settings.published_at = publishedAt;
+        dateInput.value = toLocalInput(publishedAt);
+        slugAuto = false;
+        savedJson = snapshot();
+      } else {
+        savedJson = sent;
+      }
       status.textContent = dirty() ? `${savedLabel(new Date())}; newer changes not saved yet` : savedLabel(new Date());
       showState();
+      if (publishing) say(stateLine.textContent);
       ok = true;
       return true;
     } catch (e) {
@@ -738,24 +766,44 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       saving = false;
       auto = autosaveStep(auto, { type: 'done', ok });
       schedule();
-      saveBtn.disabled = false;
+      saveBtn.disabled = publishBtn.disabled = false;
       saveBtn.textContent = 'Save';
+      showState();
     }
   }
 
-  // ----- preview: the unsaved post rendered by the public blog, in a panel -----
+  // Autosave: to the portal's scratch storage, not the repository. Nothing on the site changes.
+  async function autosave() {
+    if (current) return;
+    const body = fullBody(sha);
+    const sent = JSON.stringify({ ...body, sha: null });
+    saving = true;
+    auto = autosaveStep(auto, { type: 'start' });
+    let ok = false;
+    try {
+      const res = await send('PUT', `/portal/blog/${encodeURIComponent(postSlug)}/autosave`, body);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { status.textContent = `Not autosaved: ${errorText(data, res, 'error')}`; return; }
+      savedJson = sent;
+      status.textContent = dirty() ? 'Unsaved changes' : `Autosaved ${savedLabel(new Date()).slice(6)}; Save to put it on the site`;
+      ok = true;
+    } catch (e) {
+      status.textContent = 'Not autosaved: offline';
+    } finally {
+      saving = false;
+      auto = autosaveStep(auto, { type: 'done', ok });
+      schedule();
+    }
+  }
+
+  // ----- preview: the unsaved post built by the site, in a panel -----
   async function preview() {
     previewBtn.disabled = true;
     try {
-      const res = await fetch(`/portal/blog/${id}/preview`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
-        body: JSON.stringify(fullBody(undefined)),
-        credentials: 'same-origin',
-      });
+      const res = await send('POST', `/portal/blog/${encodeURIComponent(postSlug)}/preview`, fullBody(sha));
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        showError(data.error || `Could not render the preview (HTTP ${res.status}).`, false, data.errors);
+        showError(errorText(data, res, 'Could not render the preview'), false, data.errors);
         return;
       }
       showError('');
@@ -769,38 +817,52 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     }
   }
 
-  // ----- publish: saves what's unsaved, then sets the publish date (now, unless one is set) -----
+  // ----- publish: one commit of the post with the publish date set (now, unless one is set) -----
   async function publish() {
     if (current) await current;
-    if (dirty() && !(await save())) return;
-    publishBtn.disabled = true;
+    await save(true);
+  }
+
+  // ----- unpublish: back to a draft (one commit); edits not saved yet stay in the editor -----
+  async function unpublish() {
+    if (current) await current;
+    if (!sha || !confirm('Take this post off the blog? It stays in the repository as a draft.')) return;
+    unpublishBtn.disabled = true;
     try {
-      const res = await fetch(`/portal/blog/${id}/publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
-        body: JSON.stringify({ updated_at: updatedAt }),
-        credentials: 'same-origin',
-      });
+      const res = await send('POST', `/portal/blog/${encodeURIComponent(postSlug)}/unpublish`, { sha });
       const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.current) {
-        auto = autosaveStep(auto, { type: 'stop' });
-        showError(data.error || 'This post was changed elsewhere since you loaded it.', true);
-        return;
-      }
-      if (!res.ok) { showError(data.error || `Could not publish (HTTP ${res.status}).`, false, data.errors); return; }
+      if (res.status === 409 && data.error === 'conflict') { conflicted(data); return; }
+      if (!res.ok) { showError(errorText(data, res, 'Could not unpublish'), false, data.errors); return; }
       showError('');
-      updatedAt = data.post.updated_at;
-      publishedAt = data.post.published_at;
-      settings.published_at = publishedAt;
-      dateInput.value = toLocalInput(publishedAt);
-      slugAuto = false;
-      savedJson = snapshot();
+      committed(data.post);
+      settings.published_at = null;
+      dateInput.value = '';
       showState();
+      changed();
       say(stateLine.textContent);
     } catch (e) {
       showError('Could not reach the portal. Check your connection and try again.');
     } finally {
-      publishBtn.disabled = false;
+      unpublishBtn.disabled = false;
+    }
+  }
+
+  // ----- delete: removes the post's folder from the repository (one commit) -----
+  async function removePost() {
+    if (current) await current;
+    if (!confirm(sha ? 'Delete this post from the website repository? Its page goes away when the site rebuilds.' : 'Discard this new post?')) return;
+    deleteBtn.disabled = true;
+    try {
+      const res = await send('DELETE', `/portal/blog/${encodeURIComponent(postSlug)}`, { sha });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.error === 'conflict') { conflicted(data); return; }
+      if (!res.ok) { showError(errorText(data, res, 'Could not delete'), false, data.errors); return; }
+      savedJson = snapshot();
+      location.href = '/portal/blog';
+    } catch (e) {
+      showError('Could not reach the portal. Check your connection and try again.');
+    } finally {
+      deleteBtn.disabled = false;
     }
   }
 
@@ -812,7 +874,12 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       h('p', null, h('strong', null, conflict ? 'Not saved: someone else changed this post. ' : 'Not saved. '), msg));
     if (Array.isArray(list_) && list_.length) box.append(h('ul', null, ...list_.map((x) => h('li', null, String(x)))));
     if (conflict) box.append(h('p', { class: 'muted' }, 'Your edits are still here: copy anything you need before reloading.'),
-      h('button', { type: 'button', class: 'btn', onclick: () => { savedJson = snapshot(); location.reload(); } }, 'Reload the latest version'));
+      h('button', { type: 'button', class: 'btn', onclick: async () => {
+        savedJson = snapshot();
+        // The autosave of the older version would come back on reload; the latest committed post is wanted.
+        await send('DELETE', `/portal/blog/${encodeURIComponent(postSlug)}/autosave`).catch(() => {});
+        location.reload();
+      } }, 'Reload the latest version'));
     err.append(box);
   }
 
@@ -822,4 +889,5 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   renderTags();
   showImg();
   showState();
+  if (post.autosaved_at) status.textContent = `Autosaved changes from ${new Date(post.autosaved_at).toLocaleString()}; Save to put them on the site`;
 })();

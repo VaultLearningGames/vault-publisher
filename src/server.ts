@@ -2,7 +2,6 @@ import { serve } from '@hono/node-server';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp } from './app.ts';
-import { SiteRebuilder } from './blog/siteRebuild.ts';
 import { createVerifier } from './auth.ts';
 import { loadConfig } from './config.ts';
 import { Db } from './db.ts';
@@ -73,8 +72,6 @@ const app = createApp({
   },
   previewRetentionDays: config.previewRetentionDays,
   siteUrl: config.siteUrl,
-  siteRebuild: new SiteRebuilder({ token: config.siteRebuildToken, repository: config.adminRepository,
-    environment: config.siteRebuildEnvironment, debounceMs: config.siteRebuildDebounceMs }),
   previewSites: config.previewSites,
   sitePreview,
   taskInvokerEmail: config.taskInvokerEmail,

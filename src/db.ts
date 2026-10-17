@@ -309,7 +309,8 @@ const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS blog_slug_redirects_post ON blog_slug_redirects (post_id);
   `,
-  // v18: moving a post's images when its slug changes (src/blog/slugMove.ts). keys_json is the old object keys the move
+  // v18: moving a post’s images when its slug changes (the old src/blog/slugMove.ts; unused since the blog moved to
+  // vault-site). keys_json is the old object keys the move
   // copied; 'cleanup_pending' means the post points at the new keys and the old ones still need deleting.
   `
   CREATE TABLE IF NOT EXISTS blog_slug_moves (

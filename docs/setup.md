@@ -648,30 +648,17 @@ on this repository in Secret Manager; or (b) a scheduled workflow that compares 
 published site was built from (a hash published as a file of the site) and rebuilds only when they differ, which
 needs no new credential and is at most one schedule interval late.
 
-### Rebuilding the site when the blog changes
+### The blog: posts as Markdown in vault-site
 
-The public blog (`/blog`) is built by Hugo from the portal's `/v1/blog` (`site/content/blog/_content.gotmpl`), like
-the games. The portal starts the rebuild itself, way (a) above: a change to a public post (publish, unpublish, edit,
-delete) dispatches `deploy.yml` for the system's environment with `site_only=true`, one minute after the last such
-change (`src/blog/siteRebuild.ts`; drafts never do). *Republish* (`POST /portal/api/blog/republish`) dispatches at
-once. The deploy sets `SITE_REBUILD_ENVIRONMENT`; the credential is one step per system:
-
-```sh
-# A fine-grained GitHub token for VaultLearningGames/vault-publisher with "Actions: Read and write" only.
-printf %s "$TOKEN" | gcloud secrets create "$SERVICE-site-rebuild-token" --data-file=- --project "$GCP_PROJECT_ID"
-gcloud secrets add-iam-policy-binding "$SERVICE-site-rebuild-token" --project "$GCP_PROJECT_ID" \
-  --member "serviceAccount:$PUBLISHER_SERVICE_ACCOUNT" --role roles/secretmanager.secretAccessor
-```
-
-then add `SITE_REBUILD_TOKEN=${{ vars.SERVICE }}-site-rebuild-token:latest` to the `secrets:` of *Deploy to Cloud Run*
-in `deploy.yml` (a secret that doesn't exist yet fails the deploy, so it isn't there until both systems have one).
-Without it the rebuild is off: Republish answers 409 and the blog changes with the next site build.
-
-### Blog posts as Markdown in vault-site (not used yet)
-
-With the repository split, posts move to `VaultLearningGames/vault-site` as `content/blog/<slug>/index.md`, read and
-written through GitHub's API (`src/site-content/`). Nothing in the portal uses it yet. Its settings, read when it is
-first used:
+Blog posts live in `VaultLearningGames/vault-site` as `content/blog/<slug>/index.md` on `main`, read and written by
+the portal's blog editor through GitHub's API (`src/site-content/`, `src/blog/siteRepo.ts`). Save, Publish,
+Unpublish, a slug rename (new folder, `/blog/<old>/` added to `aliases`, the post's CDN images moved to
+`site/<new slug>/`) and Delete are each one commit; the file's SHA as loaded is the conflict check (409). Autosaves
+are not commits: they are kept in the portal's database (`blog_scratch`) until the next Save. Each commit to vault-site
+runs that repository's own workflow (Hugo build and publish); the portal no longer builds or rebuilds the blog, has no
+`/v1/blog`, and sends `/blog/...` to `SITE_URL`. The editor's Preview builds the post with Hugo on the site source at
+`SITE_DIR`. Settings, read when the blog is first used (without a token the blog pages say the repository isn't
+connected):
 
 | Variable | Default | |
 |---|---|---|

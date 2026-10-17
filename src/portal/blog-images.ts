@@ -5,12 +5,11 @@
 // by its first bytes (JPEG, PNG, WebP or GIF; anything else 415), at most 10 MiB (413), and stores it in the Vault
 // CDN (release) bucket at site/<slug>/<sha-256>.<ext> (blog/imageKey.ts), cached for a year. The same bytes are the
 // same key: an object that is already there isn't written again (created: false). Nothing is deleted here; renaming
-// a post's slug moves its images to the new slug's folder and repoints the post at them (blog/slugMove.ts).
+// a post’s slug moves its images to the new slug’s folder and repoints the post at them (blog/imageMove.ts).
 import type { Hono } from 'hono';
 import { fail } from '../app.ts';
 import { IMAGE_CACHE } from '../assets.ts';
 import { buildImageKey, contentHash, imageUrl, sniffImageType } from '../blog/imageKey.ts';
-import { BlogRepo } from '../blog/repo.ts';
 import { isBlogSlug } from '../blog/slug.ts';
 import { objectExists } from '../storage.ts';
 import type { ListingHelpers } from './listings.ts';
@@ -19,15 +18,15 @@ export const MAX_BLOG_IMAGE_BYTES = 10 * 1024 * 1024;
 // Room for the multipart boundaries and part headers around the file itself.
 const MULTIPART_OVERHEAD = 64 * 1024;
 
-export function registerBlogImages(app: Hono, h: ListingHelpers) {
-  const repo = new BlogRepo(h.db.sqlite);
+// `postExists`: whether a post is at the slug (in the website repository, or a new post's autosave).
+export function registerBlogImages(app: Hono, h: ListingHelpers, o: { postExists: (slug: string) => Promise<boolean> }) {
 
   app.post('/portal/api/blog/:slug/images', async (c) => {
     const u = h.apiUser(c);
     if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can manage the blog.');
     const slug = c.req.param('slug');
     if (!isBlogSlug(slug)) fail(400, 'Invalid blog post slug.');
-    if (!repo.bySlug(slug)) fail(404, 'No such blog post.');
+    if (!(await o.postExists(slug).catch(() => true))) fail(404, 'No such blog post.');
     const storage = h.deps.production;
     if (!storage) fail(503, 'The Vault CDN storage isn’t configured here, so images can’t be uploaded.');
 

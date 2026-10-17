@@ -1,30 +1,37 @@
-// Admin-only blog REST API (/portal/api/blog). Vault admins only; everyone else gets 403 (401 when signed out).
-//   GET    /portal/api/blog/posts[?status=published|private]
-//   GET    /portal/api/blog/posts/:id
-//   POST   /portal/api/blog/posts            -> 201
-//   PUT|PATCH /portal/api/blog/posts/:id     (fields omitted keep their value)
-//   DELETE /portal/api/blog/posts/:id
-//   POST   /portal/api/blog/posts/:id/slug-move/retry  finishes deleting images an earlier rename left -> { pending }
-// A slug change moves the post's images to site/<new slug>/ (blog/slugMove.ts): 502 { error: 'image_move_failed' }
-// or 409 when they can't be moved, and then nothing changed. The response's "move" says what happened to them.
-//   GET    /portal/api/blog/slugify?title=...  -> { slug } (a free slug for the title)
-//   POST   /portal/api/blog/republish        rebuilds the website's blog now (blog/siteRebuild.ts) -> { dispatched, environment }
-//   POST   /portal/api/blog/:slug/images     an image upload (multipart "file") -> { key, url, ... } (blog-images.ts)
+// The blog editor and its admin API. Posts live in the vault-site repository, content/blog/<slug>/index.md on main
+// (blog/siteRepo.ts over the GitHub client in site-content/). Every Save, Publish, Unpublish, rename and delete is one
+// commit there, and the site's own workflow rebuilds and publishes the site on it; the portal builds nothing.
+// Autosaves are not commits: they go to the portal's scratch storage (blog/scratch.ts) until the next Save.
+// A post's blob SHA, as loaded, is the conflict check: a write naming another SHA gets 409 { error: 'conflict' }.
+// Vault admins only; everyone else gets 403 (401 when signed out).
+//   GET    /portal/api/blog/posts                 -> { posts: [{ slug, sha, title, date, draft, private, tags, author }] }
+//   GET    /portal/api/blog/posts/:slug           -> { post }
+//   POST   /portal/api/blog/posts                 a new post (committed) -> 201 { post }
+//   PUT|PATCH /portal/api/blog/posts/:slug        { sha, ...fields } (fields omitted keep their value; a new slug renames)
+//   DELETE /portal/api/blog/posts/:slug?sha=      removes the post's folder -> { ok, commit }
+//   GET    /portal/api/blog/slugify?title=...     -> { slug } (a free slug for the title)
+//   POST   /portal/api/blog/:slug/images          an image upload (multipart "file") -> { key, url, ... } (blog-images.ts)
+// A slug change (rename) is one commit that moves the post's folder and adds /blog/<old>/ to its aliases; the post's
+// CDN images move to site/<new slug>/ around it (blog/imageMove.ts): 502 { error: 'image_move_failed' } or 409 when they
+// can't be moved, and then nothing changed. The response's "move" says what happened to them.
 // The editor (pages need a session; the JSON routes are API routes like the ones above):
-//   GET    /portal/blog/new                 creates an empty draft, 302 -> /portal/blog/edit/<id>
-//   GET    /portal/blog/edit/:id            the editor page, with the post as JSON in #blog-post-data
-//   PUT    /portal/blog/:id                 save; body has the post's updated_at as loaded -> { post }, or 409 { error, current }
-//   POST   /portal/blog/:id/preview         the unsaved body rendered as the public post page; saves nothing
-//   POST   /portal/blog/:id/publish         sets published_at (now, unless already set) -> { post }
-//   GET    /portal/blog/slug-check?slug=&id= -> { slug, available } (slug normalized)
+//   GET    /portal/blog                     every post in the repository, and new posts not committed yet
+//   GET    /portal/blog/new                 a new post (scratch only until its first Save), 302 -> /portal/blog/edit/<slug>
+//   GET    /portal/blog/edit/:slug          the editor page, with the post as JSON in #blog-post-data (its autosave if any)
+//   PUT    /portal/blog/:slug/autosave      { sha, ...fields } -> { autosaved_at }; scratch storage only, no commit
+//   DELETE /portal/blog/:slug/autosave      throws the autosave away (the editor then reloads the committed post)
+//   PUT    /portal/blog/:slug               Save: { sha (null for a new post), ...fields } -> { post } (one commit)
+//   POST   /portal/blog/:slug/publish       Save with the publish date set (now, unless set) -> { post }
+//   POST   /portal/blog/:slug/unpublish     { sha } back to a draft (no date; off the site) -> { post }
+//   DELETE /portal/blog/:slug               { sha } -> { ok } (a new post: just its autosave)
+//   POST   /portal/blog/:slug/preview       the unsaved post built by the site (Hugo); saves nothing
+//   GET    /portal/blog/slug-check?slug=&current= -> { slug, available } (slug normalized)
 //   GET    /portal/blog/tags?q=             -> { tags } up to 10 existing tags whose name starts with q
 //   GET    /assets/portal-blog-editor.js|.css  the editor's script (an ES module) and styles
 //   GET    /assets/portal-blog-image-editor.js  the image editor (crop, resize, compress, alt text) the editor imports
-// A draft is a 'published' post with no published_at: the public blog 404s it until it is published.
-// The public blog is built by the website (Hugo, from GET /v1/blog). With site rebuilds on (blog/siteRebuild.ts), a
-// change that commits and touches a public post (publish, unpublish, edit or delete of a post that was or is viewable)
-// then asks for a site rebuild, debounced so a burst of saves is one build; a draft's changes don't. The response
-// carries "site_rebuild": { queued: true, environment }.
+// A draft is a post with no publish date (draft: true in its front matter): the site doesn't publish it.
+// Errors: 409 { error: 'conflict', currentSha } (the file changed since it was loaded), 409 { error: 'slug_taken' },
+// 502 { error: 'upstream' } (GitHub failed or couldn't be reached; nothing was saved), 503 { error: 'not_configured' }.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -33,11 +40,14 @@ import { HTTPException } from 'hono/http-exception';
 import { fail, jsonBody } from '../app.ts';
 import type { User } from '../db.ts';
 import { validateBlocks, isSafeImageSrc, type Block } from '../blog/blocks.ts';
-import { BlogRepo, SlugTakenError, type BlogPost, type BlogPostInput, type BlogStatus } from '../blog/repo.ts';
-import { isBlogSlug, MAX_SLUG, slugify } from '../blog/slug.ts';
-import { postPage } from '../blog/publicRender.ts';
-import { isViewable } from '../blog/publicQueries.ts';
-import { retrySlugMoves, rewriteMovedRefs, SlugMoveError, updatePost, type SlugMoveDeps } from '../blog/slugMove.ts';
+import type { BlogPostInput, BlogStatus } from '../blog/repo.ts';
+import { BlogScratch } from '../blog/scratch.ts';
+import { PostSlugTakenError, SiteBlogRepo, type RepoPost } from '../blog/siteRepo.ts';
+import { isBlogSlug, MAX_SLUG, slugify, uniqueSlug } from '../blog/slug.ts';
+import { copyImages, deleteOld, discardCopies, ImageMoveError, rewriteImageRefs, withImageLock } from '../blog/imageMove.ts';
+import {
+  applyPostInput, FrontMatterError, parsePostFile, postInputFromFile, SaveConflictError, SAVE_CONFLICT_MESSAGE, serializePostFile, SiteContentConfigError, SiteContentError,
+} from '../site-content/index.ts';
 import { registerBlogImages } from './blog-images.ts';
 import { head, pill } from './routes.ts';
 import { html, raw } from './html.ts';
@@ -47,8 +57,8 @@ const FIELDS = ['slug', 'title', 'blocks', 'excerpt', 'featured_image', 'author'
 const MAX_TAGS = 20;
 // Slugs set from the editor are normalized ("My  Post!" -> "my-post") and at most this long.
 export const EDITOR_MAX_SLUG = 80;
-// Keys of a loaded post the editor may send back unchanged; they are not editable.
-const READ_ONLY = ['id', 'created_at', 'updated_at', 'redirects'];
+// Keys of a loaded post the editor may send back unchanged; they are not editable. `sha` is read separately.
+const READ_ONLY = ['sha', 'aliases', 'autosaved_at', 'committed', 'publish'];
 
 const hasCtl = (s: string) => /[\u0000-\u001f\u007f]/.test(s);
 
@@ -69,7 +79,7 @@ function isoDate(v: string): boolean {
 
 // Validates a create/update body over `base` (the current post on update). Collects every error into one 400.
 // A published post without published_at gets now, unless `publishNow` is false (the editor saves drafts that way).
-function parseInput(b: Record<string, unknown>, base: BlogPost | undefined, repo: BlogRepo, publishNow = true): BlogPostInput {
+function parseInput(b: Record<string, unknown>, base: BlogPostInput | undefined, freeSlug: (base: string) => string, publishNow = true): BlogPostInput {
   const errors: string[] = [];
   for (const k of Object.keys(b)) if (!FIELDS.includes(k)) errors.push(`unknown field "${k}"`);
 
@@ -127,21 +137,39 @@ function parseInput(b: Record<string, unknown>, base: BlogPost | undefined, repo
   }
   if (errors.length) fail(400, 'Invalid blog post.', { errors: errors.slice(0, 50) });
 
-  const finalStatus = status ?? base?.status ?? 'private';
+  const finalStatus = status ?? base?.status ?? 'published';
   let finalPublishedAt = publishedAt !== undefined ? publishedAt : base?.published_at ?? null;
   if (publishNow && finalStatus === 'published' && !finalPublishedAt) finalPublishedAt = new Date().toISOString();
   const finalTitle = title ?? base!.title;
-  if (slug === undefined) slug = base ? base.slug : repo.freeSlug(slugify(finalTitle));
+  if (slug === undefined) slug = base ? base.slug : freeSlug(slugify(finalTitle));
 
   return {
     slug, title: finalTitle, blocks: blocks ?? base?.blocks ?? [], excerpt: excerpt ?? base?.excerpt ?? '',
     featured_image: featured !== undefined ? featured : base?.featured_image ?? null, author: author ?? base?.author ?? '',
-    status: finalStatus, published_at: finalPublishedAt, tags: tags ?? base?.tags.map((t) => t.name) ?? [],
+    status: finalStatus, published_at: finalPublishedAt, tags: tags ?? base?.tags ?? [],
   };
 }
 
+// A post as the editor and the API get it.
+export interface EditorPost extends BlogPostInput {
+  // The file's blob SHA as loaded; null for a post not committed yet.
+  sha: string | null;
+  aliases: string[];
+  // Whether the post is in the repository.
+  committed: boolean;
+  // When the fields came from an autosave rather than the committed file.
+  autosaved_at?: string;
+}
+
+const fromRepo = (p: RepoPost): EditorPost => ({ ...p.input, sha: p.sha, aliases: p.aliases, committed: true });
+const fields = (p: BlogPostInput): Omit<BlogPostInput, 'slug'> => {
+  const { slug: _slug, ...rest } = p;
+  return rest;
+};
+
 export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
-  const repo = new BlogRepo(h.db.sqlite);
+  const repo = new SiteBlogRepo({ client: h.deps.siteContent ?? undefined });
+  const scratch = new BlogScratch(h.db.sqlite);
   // The editor's script and styles, read once at startup and versioned by content like the portal's own assets.
   const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
   const editorJs = asset('portal-blog-editor.js'), editorCss = asset('portal-blog-editor.css'), imageJs = asset('portal-blog-image-editor.js');
@@ -151,128 +179,178 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   // The editor imports it by this unversioned address, so browsers revalidate it rather than keep it for good.
   app.get('/assets/portal-blog-image-editor.js', (c) => c.body(imageJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
   app.get('/assets/portal-blog-editor.css', (c) => c.body(editorCss, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
-  registerBlogImages(app, h);
+  registerBlogImages(app, h, { postExists: async (slug) => scratch.has(slug) || (await repo.listPosts()).some((p) => p.slug === slug) });
   const admin = (c: Context): User => {
     const u = h.apiUser(c);
     if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can manage the blog.');
     return u;
   };
-  const idOf = (c: Context): number => {
-    const raw = c.req.param('id') ?? '';
-    if (!/^[1-9]\d{0,15}$/.test(raw)) fail(404, 'No such blog post.');
-    return Number(raw);
+  const slugOf = (c: Context): string => {
+    const s = c.req.param('slug') ?? '';
+    if (!isBlogSlug(s)) fail(404, 'No such blog post.');
+    return s;
   };
-  const slugTaken = (err: SlugTakenError) => {
-    const error = `The slug "${err.message}" is already used by another post.`;
-    return new HTTPException(409, { res: Response.json({ error, field: 'slug', detail: { field: 'slug' } }, { status: 409 }) });
-  };
-  const save = <T>(fn: () => T): T => {
-    try { return fn(); } catch (err) {
-      if (err instanceof SlugTakenError) throw slugTaken(err);
-      throw err;
+  const shaOf = (v: unknown, required: boolean): string | null => {
+    if (v === null || v === undefined || v === '') {
+      if (required) fail(400, 'sha (the post’s SHA as loaded) is required.', { field: 'sha' });
+      return null;
     }
+    if (typeof v !== 'string' || !/^[0-9a-f]{40,64}$/i.test(v)) fail(400, 'sha must be the post’s blob SHA as loaded.', { field: 'sha' });
+    return v;
   };
-  const rebuilder = h.deps.siteRebuild ?? null;
-  type Visibility = Pick<BlogPost, 'status' | 'published_at'> | undefined;
-  // After a committed change: asks for a site rebuild when the post was or is public. Never fails the request; the
-  // build itself happens later (debounced), so nothing here waits for GitHub.
-  const republish = async (before: Visibility, after: Visibility): Promise<{ site_rebuild?: Record<string, unknown> }> => {
-    const now = new Date().toISOString();
-    if (!rebuilder?.enabled || !((before && isViewable(before, now)) || (after && isViewable(after, now)))) return {};
-    return rebuilder.request() ? { site_rebuild: { queued: true, environment: rebuilder.environment } } : {};
+  const jsonError = (status: number, body: Record<string, unknown>) =>
+    new HTTPException(status as 409, { res: Response.json(body, { status }) });
+  // A failure of the repository as the HTTP answer. Nothing reached scratch storage or the repository when these throw.
+  const repoError = (err: unknown): never => {
+    if (err instanceof HTTPException) throw err;
+    if (err instanceof SaveConflictError) throw jsonError(409, { error: 'conflict', message: SAVE_CONFLICT_MESSAGE, currentSha: err.currentSha ?? null });
+    if (err instanceof PostSlugTakenError) {
+      throw jsonError(409, { error: 'slug_taken', message: `The slug "${err.slug}" is already used by another post.`, field: 'slug', detail: { field: 'slug' } });
+    }
+    if (err instanceof ImageMoveError) throw jsonError(err.status, { error: err.code, message: err.message, field: 'slug' });
+    if (err instanceof FrontMatterError) throw jsonError(422, { error: 'unreadable', message: `The post’s front matter can’t be read: ${err.message}` });
+    if (err instanceof SiteContentConfigError) throw jsonError(503, { error: 'not_configured', message: err.message });
+    if (err instanceof SiteContentError) {
+      if (err.status === 400) throw jsonError(400, { error: err.code, message: err.message });
+      if (err.status === 404) throw jsonError(404, { error: 'not_found', message: 'No such blog post.' });
+      console.error(`blog: ${err.message}`);
+      throw jsonError(502, { error: 'upstream', message: 'The website repository on GitHub could not be reached or refused the change. Nothing was saved; try again.' });
+    }
+    throw err;
   };
-  const moveDeps = (): SlugMoveDeps => ({ repo, storage: h.deps.production, publicBase: h.deps.prodPublicUrl });
-  // An update that may change the slug, moving the post's images with it.
-  const saveMoving = async (id: number, base: BlogPost, input: BlogPostInput) => {
-    try { return await updatePost(moveDeps(), id, base, input); } catch (err) {
-      if (err instanceof SlugTakenError) throw slugTaken(err);
-      if (err instanceof SlugMoveError) {
-        throw new HTTPException(err.status, { res: Response.json({ error: err.code, message: err.message, field: 'slug' }, { status: err.status }) });
+  const guarded = async <T>(fn: () => Promise<T>): Promise<T> => { try { return await fn(); } catch (err) { return repoError(err); } };
+
+  const freeSlugFrom = (taken: Set<string>) => (base: string) => uniqueSlug(base.slice(0, EDITOR_MAX_SLUG).replace(/-+$/, ''), (s) => taken.has(s) || scratch.has(s));
+  const takenSlugs = async () => {
+    const out = new Set<string>();
+    for (const p of await repo.cache.list()) {
+      out.add(p.slug);
+      for (const a of p.frontMatter?.aliases ?? []) { const m = /^\/?blog\/([^/]+)\/?$/.exec(a.trim()); if (m) out.add(m[1]); }
+    }
+    return out;
+  };
+
+  // The post at `slug` as the editor should open it: its autosave over the committed file, or a new post's autosave.
+  const editorPost = async (slug: string): Promise<EditorPost | null> => {
+    const committed = await repo.getPost(slug);
+    const s = scratch.get(slug);
+    if (s) {
+      const base = committed ? committed.input : undefined;
+      const input = scratchInput(s.data, slug, base) ?? base ?? newPostInput(slug, '');
+      // An autosave of an older version keeps the SHA it started from, so Save reports the conflict instead of overwriting.
+      return { ...input, sha: s.base_sha, aliases: committed?.aliases ?? [], committed: !!committed, autosaved_at: s.updated_at };
+    }
+    return committed ? fromRepo(committed) : null;
+  };
+  const commitMessage = (verb: string, what: string, u: User) => `blog: ${verb} ${what}\n\nBy ${h.actor(u)} in the Vault Studio Portal.`;
+
+  // A Save: create (sha null), update, or rename (a new slug), each one commit. Clears the post's autosave.
+  const commit = async (u: User, slug: string, sha: string | null, input: BlogPostInput, verb?: string): Promise<{ post: EditorPost; move?: unknown }> => {
+    if (sha === null) {
+      const r = await repo.savePost(input.slug, fields(input), null, commitMessage(verb ?? 'create', input.slug, u));
+      scratch.delete(slug);
+      h.db.audit(h.actor(u), 'blog.create', input.slug, { commit: r.commit });
+      return { post: { ...input, sha: r.sha, aliases: [], committed: true } };
+    }
+    if (input.slug === slug) {
+      const r = await repo.savePost(slug, fields(input), sha, commitMessage(verb ?? 'update', slug, u));
+      scratch.delete(slug);
+      h.db.audit(h.actor(u), `blog.${verb ?? 'update'}`, slug, { commit: r.commit });
+      const after = await repo.getPost(slug).catch(() => null);
+      return { post: { ...input, sha: r.sha, aliases: after?.aliases ?? [], committed: true } };
+    }
+    // A rename: images first, then the commit; the copies are removed again when the commit fails.
+    return withImageLock(slug, async () => {
+      const storage = h.deps.production;
+      const copy = await copyImages(storage, slug, input.slug);
+      const moved = copy.keys.length ? rewriteImageRefs(input, copy, h.deps.prodPublicUrl) : input;
+      let r;
+      try {
+        r = await repo.renamePost(slug, input.slug, fields(moved), sha, commitMessage('rename', `${slug} -> ${input.slug}`, u));
+      } catch (err) {
+        await discardCopies(storage, copy);
+        throw err;
       }
-      throw err;
-    }
+      const move = copy.keys.length ? await deleteOld(storage, copy) : undefined;
+      scratch.delete(slug);
+      scratch.delete(input.slug);
+      h.db.audit(h.actor(u), 'blog.rename', input.slug, { from: slug, commit: r.commit, ...(move ? { move } : {}) });
+      const after = await repo.getPost(input.slug).catch(() => null);
+      return { post: { ...moved, sha: r.sha, aliases: after?.aliases ?? [], committed: true }, ...(move ? { move } : {}) };
+    });
   };
 
-  app.get('/portal/api/blog/posts', (c) => {
+  // ---------- the API ----------
+  app.get('/portal/api/blog/posts', async (c) => {
     admin(c);
-    const s = c.req.query('status');
-    if (s !== undefined && s !== 'published' && s !== 'private') fail(400, 'status must be "published" or "private"');
-    return c.json({ posts: repo.list(s as BlogStatus | undefined) });
+    return c.json({ posts: await guarded(() => repo.listPosts()) });
   });
 
-  app.get('/portal/api/blog/slugify', (c) => {
+  app.get('/portal/api/blog/slugify', async (c) => {
     admin(c);
-    return c.json({ slug: repo.freeSlug(slugify(c.req.query('title') ?? '')) });
+    const taken = await guarded(takenSlugs);
+    return c.json({ slug: freeSlugFrom(taken)(slugify(c.req.query('title') ?? '')) });
   });
 
-  app.get('/portal/api/blog/posts/:id', (c) => {
+  app.get('/portal/api/blog/posts/:slug', async (c) => {
     admin(c);
-    const post = repo.get(idOf(c));
+    const post = await guarded(() => repo.getPost(slugOf(c)));
     if (!post) fail(404, 'No such blog post.');
-    return c.json({ post });
+    return c.json({ post: fromRepo(post) });
   });
 
   app.post('/portal/api/blog/posts', async (c) => {
     const u = admin(c);
-    const input = parseInput(await jsonBody(c), undefined, repo);
-    const post = save(() => repo.create(input));
-    h.db.audit(h.actor(u), 'blog.create', post.slug, { id: post.id, status: post.status });
-    return c.json({ post, ...await republish(undefined, post) }, 201);
+    const body = await jsonBody(c);
+    const taken = await guarded(takenSlugs);
+    const input = parseInput(body, undefined, freeSlugFrom(taken));
+    const r = await guarded(() => commit(u, input.slug, null, input));
+    return c.json(r, 201);
   });
 
-  const update = async (c: Context) => {
+  const apiUpdate = async (c: Context) => {
     const u = admin(c);
-    const id = idOf(c);
-    const base = repo.get(id);
+    const slug = slugOf(c);
+    const body = await jsonBody(c);
+    const sha = shaOf(body.sha, true)!;
+    delete body.sha;
+    const base = await guarded(() => repo.getPost(slug));
     if (!base) fail(404, 'No such blog post.');
-    const input = parseInput(await jsonBody(c), base, repo);
-    const { post, move } = await saveMoving(id, base, input);
-    if (!post) fail(404, 'No such blog post.');
-    h.db.audit(h.actor(u), 'blog.update', post.slug, { id, ...(base.slug !== post.slug ? { from: base.slug } : {}), status: post.status, ...(move ? { move } : {}) });
-    return c.json({ post, ...(move ? { move } : {}), ...await republish(base, post) });
+    if (base.sha !== sha) throw jsonError(409, { error: 'conflict', message: SAVE_CONFLICT_MESSAGE, currentSha: base.sha });
+    const input = parseInput(body, base.input, () => slug);
+    return c.json(await guarded(() => commit(u, slug, sha, input)));
   };
-  app.put('/portal/api/blog/posts/:id', update);
-  app.patch('/portal/api/blog/posts/:id', update);
+  app.put('/portal/api/blog/posts/:slug', apiUpdate);
+  app.patch('/portal/api/blog/posts/:slug', apiUpdate);
 
-  app.post('/portal/api/blog/posts/:id/slug-move/retry', async (c) => {
+  const remove = async (c: Context, sha: string | null) => {
     const u = admin(c);
-    const id = idOf(c);
-    const post = repo.get(id);
-    if (!post) fail(404, 'No such blog post.');
-    let pending;
-    try { pending = await retrySlugMoves(moveDeps(), id); } catch (err) {
-      if (err instanceof SlugMoveError) throw new HTTPException(err.status, { res: Response.json({ error: err.code, message: err.message }, { status: err.status }) });
-      throw err;
+    const slug = slugOf(c);
+    if (sha === null) {
+      // A post never committed: only its autosave is there.
+      if (!scratch.delete(slug)) fail(400, 'sha (the post’s SHA as loaded) is required.', { field: 'sha' });
+      h.db.audit(h.actor(u), 'blog.discard', slug, {});
+      return c.json({ ok: true });
     }
-    h.db.audit(h.actor(u), 'blog.slug-move.retry', post.slug, { id, pending: pending.length });
-    return c.json({ pending: pending.map((m) => ({ id: m.id, old_slug: m.old_slug, new_slug: m.new_slug, error: m.last_error })) });
-  });
-
-  app.delete('/portal/api/blog/posts/:id', async (c) => {
-    const u = admin(c);
-    const id = idOf(c);
-    const post = repo.get(id);
-    if (!post || !repo.delete(id)) fail(404, 'No such blog post.');
-    h.db.audit(h.actor(u), 'blog.delete', post.slug, { id });
-    return c.json({ ok: true, ...await republish(post, undefined) });
-  });
-
-  // Rebuilds the website's blog now: recovery after a failed build, or a scheduled post whose time has come.
-  app.post('/portal/api/blog/republish', async (c) => {
-    const u = admin(c);
-    if (!rebuilder?.enabled) fail(409, 'Site rebuilds are off on this system.');
-    try { await rebuilder.flush(); } catch (err) {
-      fail(503, `The site rebuild could not be started: ${(err as Error).message}`);
-    }
-    h.db.audit(h.actor(u), 'blog.republish', 'blog', { environment: rebuilder.environment });
-    return c.json({ dispatched: true, environment: rebuilder.environment });
-  });
+    const r = await guarded(() => repo.deletePost(slug, sha, commitMessage('delete', slug, u)));
+    scratch.delete(slug);
+    h.db.audit(h.actor(u), 'blog.delete', slug, { commit: r.commit });
+    return c.json({ ok: true, commit: r.commit });
+  };
+  app.delete('/portal/api/blog/posts/:slug', (c) => remove(c, shaOf(c.req.query('sha'), true)));
 
   // ---------- the editor ----------
   // Pages: signed out -> sign-in, non-admins -> the portal's "No access" page, like the other Vault pages.
   const NOT_ADMIN = 'Only Vault admins can manage the blog.';
   const notFoundPage = (c: Context) =>
-    h.page(c, 'Not found', html`${head('Not found', 'No such blog post.')}<p><a href="/">Back to the portal</a></p>`, { status: 404 });
+    h.page(c, 'Not found', html`${head('Not found', 'No such blog post.')}<p><a href="/portal/blog">Back to the blog</a></p>`, { status: 404 });
+  const errorPage = (c: Context, err: unknown) => {
+    const msg = err instanceof SiteContentConfigError ? 'The portal isn’t connected to the website repository here (VAULT_SITE_GITHUB_TOKEN).'
+      : err instanceof FrontMatterError ? `This post’s front matter can’t be read: ${err.message}. Fix the file in the vault-site repository.`
+      : 'The website repository on GitHub could not be reached. Try again in a moment.';
+    if (!(err instanceof SiteContentConfigError || err instanceof FrontMatterError || err instanceof SiteContentError)) throw err;
+    return h.page(c, 'Blog', html`${head('Blog', msg)}<p><a href="/portal">Back to the portal</a></p>`, { status: err instanceof FrontMatterError ? 422 : 503, active: 'blog' });
+  };
   // An editor body: drops the read-only keys and normalizes the slug.
   const editorBody = (b: Record<string, unknown>): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
@@ -284,105 +362,171 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     }
     return out;
   };
-  const conflict = (c: Context, current: BlogPost) =>
-    c.json({ error: 'This post was changed elsewhere since you loaded it. Reload to get the latest version.', current }, 409);
+  // An autosave's fields (over `base`, the committed post), or undefined when they no longer validate.
+  const scratchInput = (data: Record<string, unknown>, slug: string, base?: BlogPostInput): BlogPostInput | undefined => {
+    try { return parseInput(editorBody(data), base, () => slug, false); } catch { return undefined; }
+  };
+  // A new post's fields: an empty draft.
+  const newPostInput = (slug: string, author: string): BlogPostInput => ({
+    slug, title: 'Untitled', blocks: [], excerpt: '', featured_image: null, author, status: 'published', published_at: null, tags: [],
+  });
+  // The committed post at `slug` (null: a new post, only in scratch), or 404.
+  const baseOf = async (slug: string): Promise<{ input: BlogPostInput; sha: string | null }> => {
+    const committed = await guarded(() => repo.getPost(slug));
+    if (committed) return { input: committed.input, sha: committed.sha };
+    const s = scratch.get(slug);
+    if (!s || s.base_sha !== null) fail(404, 'No such blog post.');
+    return { input: scratchInput(s.data, slug) ?? newPostInput(slug, ''), sha: null };
+  };
 
-  // Every post, newest first (the API's order), with a link to its editor.
-  app.get('/portal/blog', (c) => {
+  // Every post, newest first, with a link to its editor; new posts that only have an autosave come first.
+  app.get('/portal/blog', async (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isVaultAdmin(u)) return h.denied(c, NOT_ADMIN);
-    const posts = repo.list();
-    // A draft is a 'published' post with no published_at.
-    const status = (p: BlogPost) => (p.status === 'private' ? pill('off', 'private') : p.published_at ? pill('ok', 'published') : pill('wait', 'draft'));
-    const rows = posts.map((p) => html`<tr><td class="proj"><b>${p.title || '(untitled)'}</b><span class="mono">${p.slug}</span></td>
-      <td>${status(p)}</td><td>${p.published_at ? p.published_at.slice(0, 10) : '—'}</td><td>${p.author || '—'}</td>
-      <td class="r"><a class="btn sm" href="/portal/blog/edit/${p.id}">Edit</a></td></tr>`);
-    const body = html`${head('Blog', 'Every post on the Vault blog: drafts, published and private ones.', html`<a class="btn pri" href="/portal/blog/new">New post</a>`)}
-      ${posts.length
+    let posts;
+    try { posts = await repo.listPosts(); } catch (err) { return errorPage(c, err); }
+    posts.sort((a, b) => (b.date ?? '9999').localeCompare(a.date ?? '9999') || a.slug.localeCompare(b.slug));
+    const status = (p: { draft: boolean; private: boolean; date: string | null }) =>
+      (p.private ? pill('off', 'private') : !p.draft && p.date ? pill('ok', 'published') : pill('wait', 'draft'));
+    const fresh = scratch.newPosts().filter((s) => !posts.some((p) => p.slug === s.slug));
+    const rows = [
+      ...fresh.map((s) => html`<tr><td class="proj"><b>${typeof s.data.title === 'string' && s.data.title ? s.data.title : '(untitled)'}</b><span class="mono">${s.slug}</span></td>
+        <td>${pill('wait', 'not saved yet')}</td><td>—</td><td>${typeof s.data.author === 'string' && s.data.author ? s.data.author : '—'}</td>
+        <td class="r"><a class="btn sm" href="/portal/blog/edit/${s.slug}">Edit</a></td></tr>`),
+      ...posts.map((p) => html`<tr><td class="proj"><b>${p.title || '(untitled)'}</b><span class="mono">${p.slug}</span>${p.parseError ? html` <span class="err">front matter can’t be read</span>` : ''}</td>
+        <td>${status(p)}${scratch.has(p.slug) ? html` ${pill('wait', 'autosaved')}` : ''}</td><td>${p.date ? p.date.slice(0, 10) : '—'}</td><td>${p.author || '—'}</td>
+        <td class="r">${p.parseError ? '' : html`<a class="btn sm" href="/portal/blog/edit/${p.slug}">Edit</a>`}</td></tr>`),
+    ];
+    const body = html`${head('Blog', 'Every post on the Vault blog, from the website repository: drafts, published and private ones. Saving commits to the site; the site rebuilds itself.', html`<a class="btn pri" href="/portal/blog/new">New post</a>`)}
+      ${rows.length
         ? html`<div class="tbl-wrap"><table><thead><tr><th>Title</th><th>Status</th><th>Published</th><th>Author</th><th class="r"></th></tr></thead><tbody>${rows}</tbody></table></div>`
         : html`<p class="muted">No posts yet.</p>`}`;
     return h.page(c, 'Blog', body, { active: 'blog' });
   });
 
-  app.get('/portal/blog/new', (c) => {
+  // A new post exists only as an autosave until its first Save commits it.
+  app.get('/portal/blog/new', async (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isVaultAdmin(u)) return h.denied(c, NOT_ADMIN);
-    const post = repo.create({ slug: repo.freeSlug('untitled'), title: 'Untitled', blocks: [], excerpt: '', featured_image: null,
-      author: u.name || u.login, status: 'published', published_at: null, tags: [] });
-    h.db.audit(h.actor(u), 'blog.create', post.slug, { id: post.id, status: post.status, draft: true });
-    return c.redirect(`/portal/blog/edit/${post.id}`, 302);
+    let taken;
+    try { taken = await takenSlugs(); } catch (err) { return errorPage(c, err); }
+    const slug = freeSlugFrom(taken)('untitled');
+    const input = newPostInput(slug, u.name || u.login);
+    scratch.put(slug, null, { ...input }, h.actor(u));
+    return c.redirect(`/portal/blog/edit/${slug}`, 302);
   });
 
-  app.get('/portal/blog/edit/:id', (c) => {
+  app.get('/portal/blog/edit/:slug', async (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isVaultAdmin(u)) return h.denied(c, NOT_ADMIN);
-    const raw_ = c.req.param('id') ?? '';
-    const post = /^[1-9]\d{0,15}$/.test(raw_) ? repo.get(Number(raw_)) : undefined;
+    const slug = c.req.param('slug') ?? '';
+    if (!isBlogSlug(slug)) return notFoundPage(c);
+    let post;
+    try { post = await editorPost(slug); } catch (err) { return errorPage(c, err); }
     if (!post) return notFoundPage(c);
-    // '<' as \u003c, so nothing in the post can close the script element.
+    // '<' as <, so nothing in the post can close the script element.
     const data = JSON.stringify(post).replace(/</g, '\\u003c');
-    return h.page(c, `Edit: ${post.title || 'Untitled'}`, html`${head('Edit post', post.published_at ? 'Published' : 'Draft: not on the blog yet')}
+    const sub = !post.committed ? 'New post: not in the website repository until you save it'
+      : post.published_at ? 'Published' : 'Draft: not on the blog yet';
+    return h.page(c, `Edit: ${post.title || 'Untitled'}`, html`${head('Edit post', sub)}
       <link rel="stylesheet" href="/assets/portal-blog-editor.css?v=${editorVersion}">
-      <div id="blog-editor" data-id="${post.id}" data-site-url="${h.deps.siteUrl ?? 'https://vaultlearninggames.org'}"></div>
+      <div id="blog-editor" data-slug="${slug}" data-site-url="${h.deps.siteUrl ?? 'https://vaultlearninggames.org'}"></div>
       <script type="application/json" id="blog-post-data">${raw(data)}</script>
       <script type="module" src="/assets/portal-blog-editor.js?v=${editorVersion}"></script>`);
   });
 
-  app.put('/portal/blog/:id', async (c) => {
+  // Autosave: scratch storage only.
+  app.put('/portal/blog/:slug/autosave', async (c) => {
     const u = admin(c);
-    const id = idOf(c);
+    const slug = slugOf(c);
     const body = await jsonBody(c);
-    const base = repo.get(id);
-    if (!base) fail(404, 'No such blog post.');
-    if (typeof body.updated_at !== 'string' || !body.updated_at) fail(400, 'updated_at (as loaded) is required.', { field: 'updated_at' });
-    if (body.updated_at !== base.updated_at) return conflict(c, base);
-    const input = parseInput(editorBody(body), base, repo, false);
-    const { post, move } = await saveMoving(id, base, input);
-    if (!post) fail(404, 'No such blog post.');
-    h.db.audit(h.actor(u), 'blog.update', post.slug, { id, ...(base.slug !== post.slug ? { from: base.slug } : {}), status: post.status, ...(move ? { move } : {}) });
-    return c.json({ post, ...(move ? { move } : {}), ...await republish(base, post) });
+    const sha = shaOf(body.sha, false);
+    const existing = scratch.get(slug);
+    // A post that is neither committed nor started as a new post isn't autosaved into being.
+    if (sha === null && !existing) fail(404, 'No such blog post.');
+    const input = parseInput(editorBody(body), (existing && scratchInput(existing.data, slug)) ?? newPostInput(slug, ''), () => slug, false);
+    const saved = scratch.put(slug, sha ?? existing?.base_sha ?? null, { ...input }, h.actor(u));
+    return c.json({ autosaved_at: saved.updated_at });
   });
 
-  app.post('/portal/blog/:id/preview', async (c) => {
+  app.delete('/portal/blog/:slug/autosave', (c) => {
     admin(c);
-    const id = idOf(c);
-    const body = await jsonBody(c);
-    const base = repo.get(id);
-    if (!base) fail(404, 'No such blog post.');
-    const p = rewriteMovedRefs(repo.sqlite, id, parseInput(editorBody(body), base, repo, false), h.deps.prodPublicUrl);
-    const tags = p.tags.map((name) => ({ slug: slugify(name), name }));
-    const page = postPage(h.deps.siteUrl ?? 'https://vaultlearninggames.org', { id, ...p, tags }, []);
-    return c.html(String(page), 200, { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' });
+    const slug = slugOf(c);
+    const s = scratch.get(slug);
+    // A new post's autosave is the post; it is only removed by deleting the post.
+    if (s && s.base_sha !== null) scratch.delete(slug);
+    return c.json({ ok: true });
   });
 
-  app.post('/portal/blog/:id/publish', async (c) => {
+  // Save and Publish: one commit each.
+  const save = (publish: boolean) => async (c: Context) => {
     const u = admin(c);
-    const id = idOf(c);
-    const body = await c.req.json().catch(() => ({})) as Record<string, unknown> | null;
-    const base = repo.get(id);
+    const slug = slugOf(c);
+    const body = await jsonBody(c);
+    if (!('sha' in body)) fail(400, 'sha (the post’s SHA as loaded, or null for a new post) is required.', { field: 'sha' });
+    const sha = shaOf(body.sha, false);
+    const base = await baseOf(slug);
+    if (base.sha !== sha) throw jsonError(409, { error: 'conflict', message: SAVE_CONFLICT_MESSAGE, currentSha: base.sha });
+    const input = parseInput(editorBody(body), base.input, () => slug, false);
+    if (publish && !input.published_at) input.published_at = new Date().toISOString();
+    const verb = publish ? 'publish' : undefined;
+    return c.json(await guarded(() => commit(u, slug, sha, input, verb)));
+  };
+  app.put('/portal/blog/:slug', save(false));
+  app.post('/portal/blog/:slug/publish', save(true));
+
+  app.post('/portal/blog/:slug/unpublish', async (c) => {
+    const u = admin(c);
+    const slug = slugOf(c);
+    const body = await jsonBody(c);
+    const sha = shaOf(body.sha, true)!;
+    const base = await guarded(() => repo.getPost(slug));
     if (!base) fail(404, 'No such blog post.');
-    const loaded = body && typeof body === 'object' ? body.updated_at : undefined;
-    if (loaded !== undefined && loaded !== base.updated_at) return conflict(c, base);
-    // Scheduled posts keep their date; status (published or private) is the editor's choice and stays.
-    const input: BlogPostInput = { slug: base.slug, title: base.title, blocks: base.blocks, excerpt: base.excerpt, featured_image: base.featured_image,
-      author: base.author, status: base.status, published_at: base.published_at ?? new Date().toISOString(), tags: base.tags.map((t) => t.name) };
-    const post = save(() => repo.update(id, input));
-    if (!post) fail(404, 'No such blog post.');
-    h.db.audit(h.actor(u), 'blog.publish', post.slug, { id, status: post.status, published_at: post.published_at });
-    return c.json({ post, ...await republish(base, post) });
+    if (base.sha !== sha) throw jsonError(409, { error: 'conflict', message: SAVE_CONFLICT_MESSAGE, currentSha: base.sha });
+    const input = { ...base.input, published_at: null };
+    return c.json(await guarded(() => commit(u, slug, sha, input, 'unpublish')));
   });
 
-  app.get('/portal/blog/slug-check', (c) => {
+  app.delete('/portal/blog/:slug', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown> | null;
+    return remove(c, shaOf(body && typeof body === 'object' ? body.sha : undefined, false));
+  });
+
+  // The unsaved post as the site builds it: the file it would commit, rendered by Hugo on the site source.
+  app.post('/portal/blog/:slug/preview', async (c) => {
+    admin(c);
+    const slug = slugOf(c);
+    const body = await jsonBody(c);
+    const previewer = h.deps.sitePreview;
+    if (!previewer?.blogPage) fail(503, 'This portal can’t build website previews (no site source here).');
+    const committed = await guarded(() => repo.client.getPost(slug));
+    const prev = committed ? await guarded(async () => parsePostFile(committed.raw)) : undefined;
+    const input = parseInput(editorBody(body), prev ? postInputFromFile(slug, prev) : newPostInput(slug, ''), () => slug, false);
+    const file = applyPostInput(fields(input), prev);
+    let page: string;
+    try {
+      page = await previewer.blogPage({ slug: input.slug, markdown: serializePostFile(file) });
+    } catch (err) {
+      console.error(`blog preview ${slug}: ${(err as Error).message}`);
+      throw jsonError(500, { error: 'preview_failed', message: 'The preview could not be built. Try again; if it keeps happening, tell the Vault team.' });
+    }
+    return c.html(page, 200, { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' });
+  });
+
+  app.get('/portal/blog/slug-check', async (c) => {
     admin(c);
     const slug = editorSlug(c.req.query('slug') ?? '');
-    const rawId = c.req.query('id') ?? '';
-    const id = /^[1-9]\d{0,15}$/.test(rawId) ? Number(rawId) : undefined;
-    return c.json({ slug, available: !!slug && isBlogSlug(slug) && !repo.slugTaken(slug, id) });
+    const current = c.req.query('current') ?? '';
+    if (!slug || !isBlogSlug(slug)) return c.json({ slug, available: false });
+    if (slug === current) return c.json({ slug, available: true });
+    const taken = await guarded(() => repo.slugTaken(slug, current || undefined));
+    return c.json({ slug, available: !taken && !scratch.has(slug) });
   });
 
-  app.get('/portal/blog/tags', (c) => {
+  app.get('/portal/blog/tags', async (c) => {
     admin(c);
-    return c.json({ tags: repo.searchTags((c.req.query('q') ?? '').trim().slice(0, 50), 10) });
+    const names = await guarded(() => repo.searchTags((c.req.query('q') ?? '').trim().slice(0, 50), 10));
+    return c.json({ tags: names.map((name) => ({ slug: slugify(name), name })) });
   });
 }
 

@@ -462,11 +462,9 @@ longer where the site is edited or deployed from. Details of the theme: [site/RE
 
 * **Game pages come from the portal**, not from files: `npm run site:catalog` saves this system's `GET /v1/catalog`
   to `site/data/catalog.json` (not in git), and `site/content/games/_content.gotmpl` turns each listing into a page.
-* **The blog comes from the portal** the same way: `GET /v1/blog` (every public post, its blocks, tags, related posts
-  and old-slug redirects: `src/blog/publicPayload.ts`) is saved to `site/data/blog.json`, and
-  `site/content/blog/_content.gotmpl` makes `/blog/<slug>` and `/blog/tag/<tag>` (with `rss.xml` feeds) from it. A
-  local build without a portal: `BLOG_DATA_FIXTURE=site/data-fixtures/blog.sample.json` (made by
-  `node scripts/blog-sample.ts`). A change to a public post rebuilds the site (`src/blog/siteRebuild.ts`, docs/setup.md).
+* **The blog is Markdown in `VaultLearningGames/vault-site`** (`content/blog/<slug>/index.md`), which the portal's blog
+  editor commits to (docs/setup.md, "The blog"). vault-site's own workflow builds and publishes it. The portal has no
+  `/v1/blog` any more, so `npm run site:catalog` leaves this copy's blog empty.
 * **Build:** `VAULT_PORTAL=https://portal.vaultlearninggames-staging.org npm run site:build` → `site/public`
   (catalog, `hugo`, `site/scripts/squarespace-paths.mjs` for the `/game-cards/category|tag/…` addresses, then
   `scripts/site-hosting.ts` for the hosting's `_headers` and `_redirects`).

@@ -50,6 +50,7 @@ import { validateBlocks, isSafeImageSrc, type Block } from '../blog/blocks.ts';
 import type { BlogPostInput, BlogStatus } from '../blog/repo.ts';
 import { BlogScratch } from '../blog/scratch.ts';
 import { markDeployPending } from '../deploy-status.ts';
+import { judgePush, signatureValid } from '../site-content/webhook.ts';
 import { PostSlugTakenError, SiteBlogRepo, type RepoPost } from '../blog/siteRepo.ts';
 import { isBlogSlug, MAX_SLUG, slugify, uniqueSlug } from '../blog/slug.ts';
 import { copyImages, deleteOld, discardCopies, ImageMoveError, rewriteImageRefs, withImageLock } from '../blog/imageMove.ts';
@@ -179,6 +180,24 @@ const fields = (p: BlogPostInput): Omit<BlogPostInput, 'slug'> => {
 export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   const repo = new SiteBlogRepo({ client: h.deps.siteContent ?? undefined });
   const scratch = new BlogScratch(h.db.sqlite);
+  // GitHub's push webhook (see site-content/webhook.ts): a push by a person drops the post-list cache. Not behind
+  // sign-in; the HMAC signature is the credential. Pushes by this portal's own App are ignored.
+  app.post('/hooks/github', async (c) => {
+    const secret = process.env.VAULT_SITE_WEBHOOK_SECRET?.trim() ?? '';
+    if (!secret) return c.json({ error: 'webhook_not_configured' }, 503);
+    const raw = await c.req.text();
+    if (!signatureValid(secret, raw, c.req.header('X-Hub-Signature-256'))) return c.json({ error: 'bad_signature' }, 401);
+    let payload: unknown = null;
+    try { payload = JSON.parse(raw); } catch { return c.json({ error: 'bad_json' }, 400); }
+    const own = (process.env.VAULT_SITE_APP_BOT_LOGIN ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    const v = judgePush(c.req.header('X-GitHub-Event'), payload, own);
+    if (v.action === 'invalidate') {
+      repo.cache.invalidate();
+      h.db.audit(`github:${v.sender || 'unknown'}`, 'blog.cache.invalidate', v.ref, { source: 'push webhook' });
+    }
+    return c.json({ ok: true, action: v.action });
+  });
+
   // The editor's script and styles, read once at startup and versioned by content like the portal's own assets.
   const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
   const editorJs = asset('portal-blog-editor.js'), editorCss = asset('portal-blog-editor.css'), imageJs = asset('portal-blog-image-editor.js');

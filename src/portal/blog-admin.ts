@@ -4,7 +4,7 @@
 // Autosaves are not commits: they go to the portal's scratch storage (blog/scratch.ts) until the next Save.
 // A post's blob SHA, as loaded, is the conflict check: a write naming another SHA gets 409 { error: 'conflict' }.
 // Vault admins only; everyone else gets 403 (401 when signed out).
-//   GET    /portal/api/blog/posts                 -> { posts: [{ slug, sha, title, date, draft, private, tags, author }] }
+//   GET    /portal/api/blog/posts                 -> { posts: [{ slug, sha, title, date, draft, private, tags, author, image }] } (image: a thumbnail, or null)
 //   GET    /portal/api/blog/posts/:slug           -> { post }
 //   POST   /portal/api/blog/posts                 a new post (committed) -> 201 { post }
 //   PUT|PATCH /portal/api/blog/posts/:slug        { sha, ...fields } (fields omitted keep their value; a new slug renames)
@@ -17,7 +17,8 @@
 // The editor (pages need a session; the JSON routes are API routes like the ones above):
 //   GET    /portal/blog                     every post in the repository, and new posts not committed yet
 //   GET    /portal/blog/new                 a new post (scratch only until its first Save), 302 -> /portal/blog/edit/<slug>
-//   GET    /portal/blog/edit/:slug          the editor page, with the post as JSON in #blog-post-data (its autosave if any)
+//   GET    /portal/blog/edit/:slug          the editor page, with the post as JSON in #blog-post-data (its autosave if any):
+//                                           the post list (thumbnails) on the left, the body in the middle, settings on the right
 //   PUT    /portal/blog/:slug/autosave      { sha, ...fields } -> { autosaved_at }; scratch storage only, no commit
 //   DELETE /portal/blog/:slug/autosave      throws the autosave away (the editor then reloads the committed post)
 //   PUT    /portal/blog/:slug               Save: { sha (null for a new post), ...fields } -> { post } (one commit)
@@ -29,6 +30,7 @@
 //   GET    /portal/blog/tags?q=             -> { tags } up to 10 existing tags whose name starts with q
 //   GET    /assets/portal-blog-editor.js|.css  the editor's script (an ES module) and styles
 //   GET    /assets/portal-blog-image-editor.js  the image editor (crop, resize, compress, alt text) the editor imports
+//   GET    /assets/portal-blog-editor-commands.js  the editor's formatting commands (all its execCommand calls)
 // A draft is a post with no publish date (draft: true in its front matter): the site doesn't publish it.
 // Errors: 409 { error: 'conflict', currentSha } (the file changed since it was loaded), 409 { error: 'slug_taken' },
 // 502 { error: 'upstream' } (GitHub failed or couldn't be reached; nothing was saved), 503 { error: 'not_configured' }.
@@ -50,7 +52,7 @@ import {
 } from '../site-content/index.ts';
 import { registerBlogImages } from './blog-images.ts';
 import { head, pill } from './routes.ts';
-import { html, raw } from './html.ts';
+import { html, raw, type Html } from './html.ts';
 import type { ListingHelpers } from './listings.ts';
 
 const FIELDS = ['slug', 'title', 'blocks', 'excerpt', 'featured_image', 'author', 'status', 'published_at', 'tags'];
@@ -173,11 +175,13 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   // The editor's script and styles, read once at startup and versioned by content like the portal's own assets.
   const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
   const editorJs = asset('portal-blog-editor.js'), editorCss = asset('portal-blog-editor.css'), imageJs = asset('portal-blog-image-editor.js');
-  const editorVersion = createHash('sha256').update(editorJs).update(editorCss).update(imageJs).digest('hex').slice(0, 10);
+  const commandsJs = asset('portal-blog-editor-commands.js');
+  const editorVersion = createHash('sha256').update(editorJs).update(editorCss).update(imageJs).update(commandsJs).digest('hex').slice(0, 10);
   const immutable = 'public, max-age=31536000, immutable';
   app.get('/assets/portal-blog-editor.js', (c) => c.body(editorJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': immutable }));
   // The editor imports it by this unversioned address, so browsers revalidate it rather than keep it for good.
   app.get('/assets/portal-blog-image-editor.js', (c) => c.body(imageJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
+  app.get('/assets/portal-blog-editor-commands.js', (c) => c.body(commandsJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
   app.get('/assets/portal-blog-editor.css', (c) => c.body(editorCss, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
   registerBlogImages(app, h, { postExists: async (slug) => scratch.has(slug) || (await repo.listPosts()).some((p) => p.slug === slug) });
   const admin = (c: Context): User => {
@@ -430,9 +434,26 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const data = JSON.stringify(post).replace(/</g, '\\u003c');
     const sub = !post.committed ? 'New post: not in the website repository until you save it'
       : post.published_at ? 'Published' : 'Draft: not on the blog yet';
+    // The post list beside the editor; the editor still opens when the list can't be read.
+    let pane: PaneItem[] | null = null;
+    try {
+      const posts = (await repo.listPosts()).filter((p) => !p.parseError);
+      posts.sort((a, b) => (b.date ?? '9999').localeCompare(a.date ?? '9999') || a.slug.localeCompare(b.slug));
+      const fresh = scratch.newPosts().filter((s) => !posts.some((p) => p.slug === s.slug));
+      pane = [
+        ...fresh.map((s): PaneItem => ({
+          slug: s.slug, title: typeof s.data.title === 'string' && s.data.title ? s.data.title : s.slug, status: 'New', date: null,
+          image: typeof s.data.featured_image === 'string' ? s.data.featured_image : null,
+        })),
+        ...posts.map((p): PaneItem => ({ slug: p.slug, title: p.title || p.slug, status: postStatus(p), date: p.date, image: p.image })),
+      ];
+    } catch (err) {
+      if (!(err instanceof SiteContentError || err instanceof SiteContentConfigError)) throw err;
+    }
     return h.page(c, `Edit: ${post.title || 'Untitled'}`, html`${head('Edit post', sub)}
       <link rel="stylesheet" href="/assets/portal-blog-editor.css?v=${editorVersion}">
-      <div id="blog-editor" data-slug="${slug}" data-site-url="${h.deps.siteUrl ?? 'https://vaultlearninggames.org'}"></div>
+      <div class="be-shell">${postsPane(pane, slug)}
+      <div id="blog-editor" data-slug="${slug}" data-site-url="${h.deps.siteUrl ?? 'https://vaultlearninggames.org'}"></div></div>
       <script type="application/json" id="blog-post-data">${raw(data)}</script>
       <script type="module" src="/assets/portal-blog-editor.js?v=${editorVersion}"></script>`, { active: 'blog' });
   });
@@ -534,6 +555,28 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
 
 // A post's status on the posts list, by the editor's rules: a draft (draft: true, or no date) isn't on the site at all;
 // otherwise a private post has a page but is in no list, tag page or feed (Unlisted).
+// One post in the editor's post list (the left pane).
+export interface PaneItem { slug: string; title: string; status: 'New' | 'Draft' | 'Published' | 'Unlisted'; date: string | null; image: string | null }
+
+// The editor's left pane: every post, scrollable, each with a thumbnail (its image when that is a safe address, else
+// the title's first letter), title, status and date; the one being edited is marked aria-current. Selecting one opens
+// it in the editor. `items` null: the list couldn't be read.
+export function postsPane(items: PaneItem[] | null, current: string): Html {
+  const kind = { New: 'wait', Draft: 'wait', Published: 'ok', Unlisted: 'off' } as const;
+  const thumb = (p: PaneItem) => p.image && isSafeImageSrc(p.image)
+    ? html`<img class="be-thumb" src="${p.image}" alt="" loading="lazy" decoding="async">`
+    : html`<span class="be-thumb be-thumb-ph" aria-hidden="true">${(p.title.trim()[0] ?? '?').toUpperCase()}</span>`;
+  const list = items === null
+    ? html`<p class="muted be-posts-msg">The post list couldn’t be loaded.</p>`
+    : items.length === 0 ? html`<p class="muted be-posts-msg">No posts yet.</p>`
+    : html`<ul class="be-posts-list">${items.map((p) => html`<li><a class="be-post${p.slug === current ? ' is-current' : ''}" href="/portal/blog/edit/${p.slug}" data-slug="${p.slug}"${p.slug === current ? raw(' aria-current="page"') : ''}>
+        ${thumb(p)}<span class="be-post-text"><span class="be-post-title">${p.title}</span>
+        <span class="be-post-meta">${pill(kind[p.status], p.status)} ${p.date ? listDate(p.date) : ''}</span></span></a></li>`)}</ul>`;
+  return html`<nav class="card be-posts" aria-label="Blog posts">
+    <div class="be-posts-head"><h2>Posts</h2><a class="btn sm pri" href="/portal/blog/new">New post</a></div>
+    ${list}</nav>`;
+}
+
 export function postStatus(p: { draft: boolean; private: boolean; date: string | null }): 'Draft' | 'Published' | 'Unlisted' {
   if (p.draft || !p.date) return 'Draft';
   return p.private ? 'Unlisted' : 'Published';

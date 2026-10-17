@@ -12,10 +12,17 @@
 // Image blocks and the featured image take an uploaded image (picker, drag and drop, or paste) through the image
 // editor in portal-blog-image-editor.js: crop, resize, compress, alt text, then stored on the CDN under the post's slug.
 //
+// Three panes: the post list (rendered by the server, beside #blog-editor), the body in the middle, settings on the
+// right. Each block is a section with a thin outline and a '+' before and after it to add a block there; clicking a
+// section selects it and shows its trash button, which asks before deleting. Clicking into a paragraph shows its format
+// bar (style, bold, italic, underline, strikethrough, link, lists, quote, indent); the commands are in
+// portal-blog-editor-commands.js, and the server sanitizes the HTML they make.
+//
 // This file is an ES module so its pure functions (serialize, deserialize, reorder, slugs, tags, autosave timing) can be tested with node:test;
 // the page itself is set up by the IIFE at the bottom, which only runs in a browser.
 
 import { imageDropTarget, openImageEditor } from './portal-blog-image-editor.js';
+import * as commands from './portal-blog-editor-commands.js';
 
 export const BLOCK_TYPES = ['heading', 'paragraph', 'image', 'divider'];
 export const ALIGNS = ['left', 'center', 'right', 'wide', 'full'];
@@ -116,10 +123,11 @@ export function saveBody(title, items, sha) {
   return { title: String(title || '').trim(), blocks: serializeBlocks(items), sha: sha ?? null };
 }
 
-// Links in paragraphs, as the server accepts them: http(s), mailto:, or a path starting with one "/".
+// Links in paragraphs, as the server accepts them: http(s), mailto:, a path starting with one "/", or a #fragment.
 export function isLinkHref(href) {
   const h = String(href || '').trim();
   if (!h || /\s/.test(h)) return false;
+  if (h.startsWith('#')) return /^#[A-Za-z0-9_:.-]{0,200}$/.test(h);
   if (h.startsWith('/')) return !h.startsWith('//') && !h.startsWith('/\\');
   return /^(https?:\/\/[^/?#]+|mailto:.+)/i.test(h);
 }
@@ -224,6 +232,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   const root = document.getElementById('blog-editor');
   const dataEl = document.getElementById('blog-post-data');
   if (!root || !dataEl) return;
+  commands.setup();
   const post = JSON.parse(dataEl.textContent || '{}');
   // The post's slug in the repository (its address here), and the file's SHA as loaded; both change on Save.
   let postSlug = root.dataset.slug;
@@ -276,7 +285,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   const slugMsg = h('p', { class: 'err be-slug-msg', 'aria-live': 'polite' });
 
   const imgInput = h('input', { type: 'url', id: fieldId('img'), value: settings.featured_image, placeholder: 'https://… or /path',
-    oninput: () => { settings.featured_image = imgInput.value; showImg(); changed(); } });
+    oninput: () => { settings.featured_image = imgInput.value; showImg(); paneThumb(); changed(); } });
   const imgPrev = h('img', { class: 'be-img-prev', alt: '', hidden: true });
   const imgMsg = h('p', { class: 'err' });
   const imgField = h('div', { class: 'be-img-drop' }, imgInput);
@@ -284,7 +293,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     const r = await editImage(file, { title: 'Featured image', withAlt: false });
     if (!r) return;
     imgInput.value = settings.featured_image = r.url;
-    showImg(); changed(); say('Featured image uploaded.');
+    showImg(); paneThumb(); changed(); say('Featured image uploaded.');
   }));
   function showImg() {
     const v = imgInput.value.trim();
@@ -367,7 +376,17 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     }, Math.max(0, auto.dueAt - Date.now()));
   }
 
+  // The post list's entry for this post follows the title and the featured image as they're edited.
+  const paneEntry = () => document.querySelector('.be-posts .be-post[aria-current="page"]');
+  function paneTitle() { const a = paneEntry(); const t = a && a.querySelector('.be-post-title'); if (t) t.textContent = titleInput.value.trim() || 'Untitled'; }
+  function paneThumb() {
+    const a = paneEntry(); if (!a) return;
+    const old = a.querySelector('.be-thumb'); const v = imgInput.value.trim();
+    const ok = /^https:\/\/[^/?#\s]+\S*$/i.test(v) || (v.startsWith('/') && !v.startsWith('//') && !/\s/.test(v));
+    if (ok) { if (old.tagName === 'IMG') old.src = v; else old.replaceWith(h('img', { class: 'be-thumb', src: v, alt: '' })); }
+  }
   function onTitle() {
+    paneTitle();
     if (slugAuto) { slugInput.value = slugify(titleInput.value); setSlug(slugInput.value); }
     changed();
   }
@@ -459,16 +478,22 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   });
 
   // ----- the '+' inserter: a button that opens a row of block types -----
-  function inserter(at) {
+  // `where`: 'before' or 'after' the block it is in (a number: the index, for the one above an empty post).
+  function inserter(where) {
     const menu = h('div', { class: 'be-ins-menu', hidden: true, role: 'group', 'aria-label': 'Add a block' },
       ...[['heading', 'Heading'], ['paragraph', 'Paragraph'], ['image', 'Image'], ['divider', 'Divider']].map(([type, label]) =>
         h('button', { type: 'button', class: 'btn sm', onclick: () => { close(); add(type, indexAfter()); } }, label)));
-    const btn = h('button', { type: 'button', class: 'be-ins-btn', 'aria-expanded': 'false', title: 'Add a block here', 'aria-label': 'Add a block here', onclick: () => (menu.hidden ? open() : close()) }, '+');
-    const wrap = h('div', { class: 'be-ins', onkeydown: (e) => { if (e.key === 'Escape' && !menu.hidden) { close(); btn.focus(); } } }, btn, menu);
+    const label = where === 'before' ? 'Add a block above' : where === 'after' ? 'Add a block below' : 'Add a block here';
+    const btn = h('button', { type: 'button', class: 'be-ins-btn', 'aria-expanded': 'false', title: label, 'aria-label': label, onclick: () => (menu.hidden ? open() : close()) }, '+');
+    const wrap = h('div', { class: `be-ins${typeof where === 'string' ? ` be-ins-${where}` : ''}`, onkeydown: (e) => { if (e.key === 'Escape' && !menu.hidden) { close(); btn.focus(); } } }, btn, menu);
     function open() { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); menu.querySelector('button').focus(); }
     function close() { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
-    // The inserter at the top adds at 0; one inside a block adds right after that block, wherever it is now.
-    const indexAfter = () => { const blk = wrap.closest('.be-block'); return blk ? items.findIndex((e) => e.key === blk.dataset.key) + 1 : at; };
+    // The inserter at the top adds at 0; one inside a block adds right before or after that block, wherever it is now.
+    const indexAfter = () => {
+      const blk = wrap.closest('.be-block');
+      if (!blk) return typeof where === 'number' ? where : 0;
+      return items.findIndex((e) => e.key === blk.dataset.key) + (where === 'before' ? 0 : 1);
+    };
     return wrap;
   }
 
@@ -479,7 +504,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     sync();
     changed();
     const el = els.get(item.key);
-    (el.querySelector('[contenteditable], input, select') || el.querySelector('.be-del')).focus();
+    (el.querySelector('[contenteditable]') || el.querySelector('input, select') || el.querySelector('.be-del')).focus();
   }
 
   function remove(key) {
@@ -568,11 +593,38 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       h('span', { class: 'be-type' }, LABELS[item.type]),
       h('button', { type: 'button', class: 'btn sm be-up', 'aria-label': 'Move up', title: 'Move up', onclick: () => move(key, idx() - 1, '.be-up') }, '↑'),
       h('button', { type: 'button', class: 'btn sm be-down', 'aria-label': 'Move down', title: 'Move down', onclick: () => move(key, idx() + 1, '.be-down') }, '↓'),
-      h('button', { type: 'button', class: 'btn sm be-del', 'aria-label': 'Delete block', title: 'Delete block', onclick: () => remove(key) }, '✕'));
+      h('button', { type: 'button', class: 'btn sm be-del', 'aria-label': 'Delete section', title: 'Delete section', 'aria-expanded': 'false', onclick: () => askDelete() }, trashIcon()));
+    // Delete asks first, in place: "Delete this section?" with Delete and Cancel.
+    const confirmBox = h('div', { class: 'be-confirm', role: 'alertdialog', 'aria-label': 'Confirm delete', hidden: true,
+      onkeydown: (e) => { if (e.key === 'Escape') { e.preventDefault(); cancelDelete(); } } },
+      h('span', null, `Delete this ${LABELS[item.type].toLowerCase()} section?`),
+      h('button', { type: 'button', class: 'btn sm danger be-confirm-yes', onclick: () => remove(key) }, 'Delete'),
+      h('button', { type: 'button', class: 'btn sm be-confirm-no', onclick: () => cancelDelete() }, 'Cancel'));
+    function askDelete() { select(el); confirmBox.hidden = false; tools.querySelector('.be-del').setAttribute('aria-expanded', 'true'); confirmBox.querySelector('.be-confirm-no').focus(); }
+    function cancelDelete() { confirmBox.hidden = true; const d = tools.querySelector('.be-del'); d.setAttribute('aria-expanded', 'false'); d.focus(); }
     const el = h('div', { class: `be-block be-${item.type}`, role: 'listitem', 'data-key': key },
-      handle, h('div', { class: 'be-main' }, tools, editorFor(item)), inserter(0));
+      inserter('before'), handle, h('div', { class: 'be-main' }, tools, confirmBox, editorFor(item)), inserter('after'));
     return el;
   }
+  const trashIcon = () => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('width', '15'); svg.setAttribute('height', '15'); svg.setAttribute('aria-hidden', 'true');
+    svg.innerHTML = '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+    return svg;
+  };
+
+  // ----- the selected section: the one last clicked or focused; its trash button shows -----
+  function select(el) {
+    for (const x of list.querySelectorAll('.be-block.be-selected')) {
+      if (x === el) continue;
+      x.classList.remove('be-selected');
+      const c = x.querySelector('.be-confirm'); if (c && !c.hidden) { c.hidden = true; x.querySelector('.be-del').setAttribute('aria-expanded', 'false'); }
+    }
+    if (el) el.classList.add('be-selected');
+  }
+  list.addEventListener('focusin', (e) => select(e.target.closest('.be-block')));
+  list.addEventListener('mousedown', (e) => select(e.target.closest('.be-block')));
+  document.addEventListener('mousedown', (e) => { if (!list.contains(e.target)) select(null); });
 
   function editorFor(item) {
     const set = (k) => (e) => { item[k] = e.target.value; changed(); };
@@ -585,7 +637,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     if (item.type === 'paragraph') return paragraphEditor(item);
     if (item.type === 'image') {
       const preview = h('img', { class: 'be-img-prev', alt: '', hidden: !item.src });
-      const showPreview = () => { const ok = isLinkHref(item.src) && !/^(http:|mailto:)/i.test(item.src); preview.hidden = !ok; if (ok) preview.src = item.src; };
+      const showPreview = () => { const ok = isLinkHref(item.src) && !/^(http:|mailto:|#)/i.test(item.src); preview.hidden = !ok; if (ok) preview.src = item.src; };
       showPreview();
       const f = (label, input) => h('label', { class: 'field' }, h('span', { class: 'lab' }, label), input);
       const srcInput = h('input', { type: 'url', value: item.src, placeholder: 'https://… or /path', oninput: (e) => { item.src = e.target.value; showPreview(); changed(); } });
@@ -619,34 +671,42 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     return openImageEditor(file, { ...opts, slug: savedSlug });
   }
 
-  // A contenteditable paragraph with a toolbar: bold, italic, link, bulleted and numbered lists.
+  // A contenteditable text section with a format bar that shows while it has focus: style (paragraph, headings, quote),
+  // bold, italic, underline, strikethrough, link, bulleted and numbered lists, quote, outdent/indent, clear formatting.
   function paragraphEditor(item) {
     const area = h('div', { class: 'be-p', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Paragraph' });
     area.innerHTML = item.html;
     const update = () => { item.html = area.innerHTML; changed(); };
     area.addEventListener('input', () => { linkErr.textContent = ''; update(); });
     area.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey && commands.currentBlock(area)?.tagName === 'LI') { e.preventDefault(); act(() => commands.indent(area, e.shiftKey ? -1 : 1)); return; }
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
-      if (k === 'b' || k === 'i') { e.preventDefault(); cmd(k === 'b' ? 'bold' : 'italic'); }
+      const map = { b: 'bold', i: 'italic', u: 'underline' };
+      if (map[k]) { e.preventDefault(); cmd(map[k]); }
       else if (k === 'k') { e.preventDefault(); openLink(); }
+      else if (k === ']' || k === '[') { e.preventDefault(); act(() => commands.indent(area, k === ']' ? 1 : -1)); }
     });
     // Paste as plain text: formatting from elsewhere is mostly not allowed in a post.
     area.addEventListener('paste', (e) => {
       const text = e.clipboardData && e.clipboardData.getData('text/plain');
       if (text === undefined || text === null) return;
       e.preventDefault();
-      document.execCommand('insertText', false, text);
+      commands.insertText(text);
     });
     let range = null;
     const keep = () => { const s = getSelection(); if (s.rangeCount && area.contains(s.anchorNode)) range = s.getRangeAt(0).cloneRange(); };
     const restore = () => { area.focus(); if (range) { const s = getSelection(); s.removeAllRanges(); s.addRange(range); } };
-    function cmd(name, value) { restore(); document.execCommand(name, false, value); update(); keep(); }
+    // Runs a command on the kept selection, then saves the change and refreshes the bar.
+    function act(fn) { restore(); fn(); update(); keep(); refresh(); }
+    const cmd = (name) => act(() => commands.run(name));
 
     const linkInput = h('input', { type: 'text', placeholder: 'https://…, mailto:… or /path', 'aria-label': 'Link address' });
+    const linkNew = h('input', { type: 'checkbox', 'aria-label': 'Open in a new tab' });
     const linkErr = h('span', { class: 'err' });
     const linkBox = h('span', { class: 'be-link', hidden: true },
       linkInput,
+      h('label', { class: 'be-link-new' }, linkNew, ' New tab'),
       h('button', { type: 'button', class: 'btn sm', onclick: applyLink }, 'Apply'),
       h('button', { type: 'button', class: 'btn sm', onclick: () => { linkBox.hidden = true; restore(); } }, 'Cancel'));
     linkInput.addEventListener('keydown', (e) => {
@@ -657,31 +717,64 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       keep();
       if (!range || range.collapsed) { linkErr.textContent = 'Select some text to link first.'; return; }
       const a = (range.commonAncestorContainer.parentElement || area).closest('a');
-      linkInput.value = a && area.contains(a) ? a.getAttribute('href') || '' : '';
+      const has = a && area.contains(a);
+      linkInput.value = has ? a.getAttribute('href') || '' : '';
+      linkNew.checked = !!has && a.getAttribute('target') === '_blank';
       linkErr.textContent = '';
       linkBox.hidden = false;
       linkInput.focus();
     }
     function applyLink() {
       const href = linkInput.value.trim();
-      if (!href) { linkBox.hidden = true; cmd('unlink'); return; }
-      if (!isLinkHref(href)) { linkErr.textContent = 'Use an http(s) address, a mailto: link or a path starting with /.'; return; }
+      if (!href) { linkBox.hidden = true; act(() => commands.unlink()); return; }
+      if (!isLinkHref(href)) { linkErr.textContent = 'Use an http(s) address, a mailto: link, a path starting with / or a #fragment.'; return; }
       linkBox.hidden = true;
-      cmd('createLink', href);
+      act(() => {
+        commands.createLink(href);
+        // The link just made (the selection is inside it): new tab or not.
+        const s = getSelection();
+        const n = s.rangeCount ? s.getRangeAt(0).commonAncestorContainer : null;
+        const links = n ? [...(n.nodeType === 1 ? n.querySelectorAll('a') : []), (n.nodeType === 1 ? n : n.parentElement).closest('a')] : [];
+        for (const a of links) if (a && area.contains(a) && a.getAttribute('href') === href) {
+          if (linkNew.checked) { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); } else { a.removeAttribute('target'); a.removeAttribute('rel'); }
+        }
+      });
     }
-    area.addEventListener('keyup', keep);
-    area.addEventListener('mouseup', keep);
+    area.addEventListener('keyup', () => { keep(); refresh(); });
+    area.addEventListener('mouseup', () => { keep(); refresh(); });
+    area.addEventListener('focus', () => refresh());
     area.addEventListener('blur', keep);
 
-    // Toolbar buttons don't take focus on mousedown, so the selection in the paragraph stays.
-    const tb = (label, title, fn) => h('button', { type: 'button', class: 'btn sm', title, 'aria-label': title, onmousedown: (e) => e.preventDefault(), onclick: fn }, label);
-    const toolbar = h('div', { class: 'be-tb', role: 'toolbar', 'aria-label': 'Paragraph formatting' },
-      tb(h('b', null, 'B'), 'Bold (Ctrl+B)', () => cmd('bold')),
-      tb(h('i', null, 'I'), 'Italic (Ctrl+I)', () => cmd('italic')),
-      tb('Link', 'Link (Ctrl+K); empty address removes it', openLink),
-      tb('• List', 'Bulleted list', () => cmd('insertUnorderedList')),
-      tb('1. List', 'Numbered list', () => cmd('insertOrderedList')),
+    // Bar buttons don't take focus on mousedown, so the selection in the section stays.
+    const tb = (label, title, fn, name) => h('button', { type: 'button', class: 'btn sm be-fb', title, 'aria-label': title, 'aria-pressed': name ? 'false' : undefined, 'data-cmd': name,
+      onmousedown: (e) => e.preventDefault(), onclick: fn }, label);
+    const style = h('select', { class: 'be-style', 'aria-label': 'Text style', title: 'Text style',
+      onchange: () => act(() => commands.setStyle(area, style.value)) },
+      ...commands.STYLES.map(([tag, label]) => h('option', { value: tag }, label)));
+    const sep = () => h('span', { class: 'be-fb-sep', 'aria-hidden': 'true' });
+    const toolbar = h('div', { class: 'be-tb be-fbar', role: 'toolbar', 'aria-label': 'Formatting' },
+      style, sep(),
+      tb(h('b', null, 'B'), 'Bold (Ctrl+B)', () => cmd('bold'), 'bold'),
+      tb(h('i', null, 'I'), 'Italic (Ctrl+I)', () => cmd('italic'), 'italic'),
+      tb(h('u', null, 'U'), 'Underline (Ctrl+U)', () => cmd('underline'), 'underline'),
+      tb(h('s', null, 'S'), 'Strikethrough', () => cmd('strike'), 'strike'),
+      sep(),
+      tb('🔗', 'Link (Ctrl+K); empty address removes it', openLink),
+      tb('•≡', 'Bulleted list', () => cmd('bullets')),
+      tb('1≡', 'Numbered list', () => cmd('numbers')),
+      tb('❝', 'Block quote', () => act(() => commands.setStyle(area, 'blockquote'))),
+      sep(),
+      tb('⇤', 'Outdent (Ctrl+[)', () => act(() => commands.indent(area, -1))),
+      tb('⇥', 'Indent (Ctrl+])', () => act(() => commands.indent(area, 1))),
+      tb('T̸', 'Clear formatting', () => cmd('clear')),
       linkBox, linkErr);
+    // The bar's state at the caret: the block's style and which inline formats are on.
+    function refresh() {
+      if (!area.contains(document.activeElement) && document.activeElement !== area) return;
+      style.value = commands.currentStyle(area);
+      const on = commands.active();
+      for (const b of toolbar.querySelectorAll('[data-cmd]')) b.setAttribute('aria-pressed', on[b.dataset.cmd] ? 'true' : 'false');
+    }
     return h('div', { class: 'be-para' }, toolbar, area);
   }
 

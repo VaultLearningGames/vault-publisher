@@ -33,6 +33,9 @@ export function isSafeHref(href: string): boolean {
   return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname;
 }
 
+// In-page links in editor HTML: "#" and a fragment id.
+export const isFragmentHref = (href: string): boolean => /^#[A-Za-z0-9_:.-]{0,200}$/.test(href);
+
 // Image sources: absolute https URL or a root-relative path.
 export function isSafeImageSrc(src: string): boolean {
   if (src.length === 0 || src.length > 2000 || hasCtl(src) || /\s/.test(src)) return false;
@@ -51,7 +54,15 @@ function heading(b: Record<string, unknown>, at: string, errors: string[]): Bloc
 }
 
 export const MAX_PARAGRAPH_HTML = 20000;
-const ALLOWED_TAGS = new Set(['p', 'strong', 'b', 'em', 'i', 'a', 'ul', 'ol', 'li', 'br']);
+const ALLOWED_TAGS = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'del', 'a', 'ul', 'ol', 'li', 'blockquote', 'h2', 'h3', 'h4', 'code', 'span']);
+// Elements that may carry data-indent="1".."4" (the editor's Indent/Outdent); no other attribute but a[href] and a[target].
+const INDENTABLE = new Set(['p', 'li', 'h2', 'h3', 'h4', 'blockquote']);
+// Elements that end an open paragraph (or heading) instead of nesting in it, as in a browser.
+const BLOCK_TAGS = new Set(['p', 'ul', 'ol', 'blockquote', 'h2', 'h3', 'h4']);
+const attrValue = (attrs: string, name: string): string | undefined => {
+  const m = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\`]+))`, 'i').exec(attrs);
+  return m ? decodeEntities(m[1] ?? m[2] ?? m[3] ?? '').trim() : undefined;
+};
 // Elements dropped together with everything inside them; any other element not allowed keeps only its text.
 const DROP_WITH_CONTENT = new Set(['script', 'style', 'iframe', 'object', 'embed', 'template', 'textarea', 'title', 'noscript', 'svg', 'math', 'select', 'xmp', 'noembed', 'noframes', 'plaintext']);
 const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0', colon: ':', tab: '\t', newline: '\n' };
@@ -68,10 +79,13 @@ function decodeEntities(s: string): string {
 const escText = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const escAttr = (s: string) => escText(s).replace(/"/g, '&quot;');
 
-// Whitelist sanitizer for paragraph HTML: keeps p, strong, b, em, i, a[href], ul, ol, li and br, with no other attributes.
-// Other tags are removed (script-like ones with their content), comments dropped, text re-escaped, and tags balanced.
-// An <a> whose href is not an http(s) URL, a mailto: link or a root-relative path (javascript:, data:, ...) is an error,
-// not silently dropped. Returns the clean HTML, or null with errors pushed.
+// Whitelist sanitizer for paragraph HTML, the one the server applies to everything the editor sends: keeps p, br,
+// strong, b, em, i, u, s, strike, del, a, ul, ol, li, blockquote, h2-h4, code and span. Attributes: a[href], a[target]
+// (only _blank, and then rel="noopener noreferrer" is added), and data-indent="1".."4" on p, li, h2-h4 and blockquote;
+// every other attribute (style, class, on*, ...) is dropped. Other tags are removed (script-like ones with their
+// content), comments dropped, text re-escaped, and tags balanced.
+// An <a> whose href is not an http(s) URL, a mailto: link, a root-relative path or a #fragment (javascript:, data:, ...)
+// is an error, not silently dropped. Returns the clean HTML, or null with errors pushed.
 export function sanitizeParagraphHtml(input: string, at: string, errors: string[]): string | null {
   if (input.length > MAX_PARAGRAPH_HTML) { errors.push(`${at}.html must be at most ${MAX_PARAGRAPH_HTML} characters`); return null; }
   let out = '';
@@ -94,15 +108,23 @@ export function sanitizeParagraphHtml(input: string, at: string, errors: string[
       while (open.length > i) out += `</${open.pop()}>`;
       continue;
     }
-    // As in a browser, a block element ends an open paragraph instead of nesting in it.
-    if ((name === 'p' || name === 'ul' || name === 'ol') && open.includes('p')) { const i = open.lastIndexOf('p'); while (open.length > i) out += `</${open.pop()}>`; }
+    // As in a browser, a block element ends an open paragraph or heading instead of nesting in it.
+    if (BLOCK_TAGS.has(name)) {
+      const i = Math.max(open.lastIndexOf('p'), open.lastIndexOf('h2'), open.lastIndexOf('h3'), open.lastIndexOf('h4'));
+      if (i >= 0) while (open.length > i) out += `</${open.pop()}>`;
+    }
     if (name === 'a') {
-      const hm = /(?:^|\s)href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i.exec(attrs);
-      if (hm) {
-        const href = decodeEntities(hm[1] ?? hm[2] ?? hm[3] ?? '').trim();
-        if (!isSafeHref(href)) { errors.push(`${at}.html: link "${href.slice(0, 80)}" must be an http(s) URL, a mailto: link, or a path starting with /`); bad = true; continue; }
-        out += `<a href="${escAttr(href)}">`;
-      } else out += '<a>';
+      const href = attrValue(attrs, 'href');
+      let tag = '<a';
+      if (href !== undefined) {
+        if (!isSafeHref(href) && !isFragmentHref(href)) { errors.push(`${at}.html: link "${href.slice(0, 80)}" must be an http(s) URL, a mailto: link, a path starting with / or a #fragment`); bad = true; continue; }
+        tag += ` href="${escAttr(href)}"`;
+      }
+      if (attrValue(attrs, 'target')?.toLowerCase() === '_blank') tag += ' target="_blank" rel="noopener noreferrer"';
+      out += `${tag}>`;
+    } else if (INDENTABLE.has(name)) {
+      const indent = attrValue(attrs, 'data-indent');
+      out += indent && /^[1-4]$/.test(indent) ? `<${name} data-indent="${indent}">` : `<${name}>`;
     } else out += `<${name}>`;
     open.push(name);
   }

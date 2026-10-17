@@ -9,6 +9,8 @@ export interface PostListEntry extends PostRef {
   frontMatter: FrontMatter | null;
   // Why frontMatter is null.
   error?: string;
+  // The first image in the body (Markdown image, figure shortcode or <img>), for thumbnails; unchecked.
+  firstImage?: string;
 }
 
 export interface PostListCache {
@@ -24,10 +26,21 @@ export interface PostListCache {
 export const DEFAULT_POST_LIST_TTL_MS = 60_000;
 const FETCH_CONCURRENCY = 8;
 
-type Parsed = { frontMatter: FrontMatter | null; error?: string };
+type Parsed = { frontMatter: FrontMatter | null; error?: string; firstImage?: string };
+
+// The first image's address in a post body: ![alt](src), {{< figure src="..." >}} or <img src="...">.
+export function firstImageIn(body: string): string | undefined {
+  const m = /!\[(?:[^\]\\]|\\.)*\]\(\s*<?((?:[^\s()\\>]|\\.)+)>?|\{\{<\s*figure\b[^}]*?\bsrc\s*=\s*["`]([^"`]+)["`]|<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/i.exec(body);
+  const src = m && (m[1] ?? m[2] ?? m[3]);
+  return src ? src.replace(/\\(.)/g, '$1') : undefined;
+}
 
 function parse(raw: string): Parsed {
-  try { return { frontMatter: splitFrontMatter(raw).frontMatter }; } catch (err) {
+  try {
+    const split = splitFrontMatter(raw);
+    const firstImage = firstImageIn(split.body);
+    return { frontMatter: split.frontMatter, ...(firstImage ? { firstImage } : {}) };
+  } catch (err) {
     return { frontMatter: null, error: err instanceof Error ? err.message : String(err) };
   }
 }
@@ -46,7 +59,7 @@ export function createPostListCache(o: { client: SiteContentClient; ttlMs?: numb
 
   const entry = (r: PostRef): PostListEntry => {
     const p = bySha.get(r.sha) ?? { frontMatter: null, error: 'not read' };
-    return { ...r, frontMatter: p.frontMatter && structuredClone(p.frontMatter), ...(p.error ? { error: p.error } : {}) };
+    return { ...r, frontMatter: p.frontMatter && structuredClone(p.frontMatter), ...(p.error ? { error: p.error } : {}), ...(p.firstImage ? { firstImage: p.firstImage } : {}) };
   };
 
   // SHAs whose read failed (rather than whose text didn't parse), dropped before the next refresh.

@@ -513,3 +513,10 @@ html:not(.js) .sq-form:target .form-done { display: block; }
 .vault-player { --vp-accent: var(--accent) !important; }
 .blog-pages a[hidden], .gg [hidden] { display: none !important; }
 .sqsrte-scaled-text, .sqsrte-scaled-text * { white-space: nowrap !important; }
+
+/* Blog post HTML from the portal's editor: indents (data-indent="1".."4") and block quotes. */
+.sq-text [data-indent="1"] { margin-left: 2em; }
+.sq-text [data-indent="2"] { margin-left: 4em; }
+.sq-text [data-indent="3"] { margin-left: 6em; }
+.sq-text [data-indent="4"] { margin-left: 8em; }
+.blog-post .sq-text blockquote { margin: 1em 0; padding-left: 1em; border-left: 3px solid currentColor; opacity: .85; }

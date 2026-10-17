@@ -2,7 +2,7 @@
 // (site-content/github-client.ts) plus the post-list cache, the post file mapping (front matter + Markdown body <->
 // the editor's fields and blocks) and the rules the editor needs. A post is <blogDir>/<slug>/index.md on the
 // configured branch (main); its blob SHA is the conflict check.
-//   listPosts()                                   every post's slug, title, date, draft, private, tags, author, sha
+//   listPosts()                                   every post's slug, title, date, draft, private, tags, author, image, sha
 //   getPost(slug)                                 { slug, sha, input, aliases } or null
 //   savePost(slug, input, expectedSha, message)   creates (expectedSha null: the file must not exist) or updates
 //   renamePost(old, new, input, expectedSha, message)  one commit: the folder moved, /blog/<old>/ added to aliases
@@ -24,6 +24,8 @@ export class PostSlugTakenError extends Error {
 
 export interface RepoPostSummary {
   slug: string; sha: string; title: string; date: string | null; draft: boolean; private: boolean; tags: string[]; author: string;
+  // A thumbnail for the post: its featured image, else the first image in its body; null when it has none.
+  image: string | null;
   parseError?: boolean; error?: string;
 }
 
@@ -137,6 +139,7 @@ function checkSlug(slug: string) {
 
 function summary(e: PostListEntry): RepoPostSummary {
   const fm = e.frontMatter;
-  if (!fm) return { slug: e.slug, sha: e.sha, title: e.slug, date: null, draft: false, private: false, tags: [], author: '', parseError: true, ...(e.error ? { error: e.error } : {}) };
-  return { slug: e.slug, sha: e.sha, title: fm.title || e.slug, date: fm.draft ? null : fm.date, draft: fm.draft, private: fm.private, tags: [...fm.tags], author: fm.author };
+  if (!fm) return { slug: e.slug, sha: e.sha, title: e.slug, date: null, draft: false, private: false, tags: [], author: '', image: null, parseError: true, ...(e.error ? { error: e.error } : {}) };
+  return { slug: e.slug, sha: e.sha, title: fm.title || e.slug, date: fm.draft ? null : fm.date, draft: fm.draft, private: fm.private, tags: [...fm.tags], author: fm.author,
+    image: fm.featured_image ?? e.firstImage ?? null };
 }

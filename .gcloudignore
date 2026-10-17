@@ -1,0 +1,14 @@
+# gcloud run deploy --source uploads the folder minus these patterns. With no .gcloudignore it falls back to .gitignore,
+# which lists vault-site-src/ (the checkout the Dockerfile copies), so that folder must be uploaded: keep it OUT of this list.
+.git
+.github
+node_modules
+/data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.wrangler/
+.DS_Store
+.dispatch/
+site/

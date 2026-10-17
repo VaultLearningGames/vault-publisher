@@ -1,10 +1,9 @@
-{{- /* /blog: every listed post, newest first, as the site's blog-item cards, with the tags to filter by
-       (content/blog/_index.md; the posts are data/blog.json, content/blog/_content.gotmpl). */ -}}
+{{- /* /blog: every listed post, newest first, as the site's blog-item cards, with the topics to filter by
+       (partials/blog/filter.html; content/blog/_index.md; the posts are data/blog.json, content/blog/_content.gotmpl). */ -}}
 {{- define "head" }}{{ partial "blog/head.html" (dict "page" . "feeds" (slice (dict "title" "Vault Learning Games Blog" "path" "/blog/rss.xml"))) }}{{ end }}
 {{- define "main" }}
 {{- $blog := hugo.Data.blog | default dict }}
-{{- $tags := sort ($blog.tags | default slice) "name" }}
-<section class="sq-sec theme-white sq-blog is-first"><div class="blog-grid"><h1>Blog</h1>
-{{- with $tags }}<nav class="blog-filter" aria-label="Tags"><ul>{{ range . }}<li><a href="{{ printf "/blog/tag/%s" .slug }}">{{ .name }}</a></li>{{ end }}</ul></nav>{{ end -}}
+<section class="sq-sec theme-white sq-blog is-first"><div class="blog-grid blog-head"><h1>Blog</h1>
+{{- partial "blog/filter.html" (dict "active" "") -}}
 </div>{{ partial "blog/grid.html" (where ($blog.posts | default slice) "listed" true) }}</section>
 {{- end }}

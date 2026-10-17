@@ -412,6 +412,27 @@ picture { display: contents; }
 .blog-excerpt { margin: 0 10%; font-size: 14.92px; line-height: 1.5; }
 .blog-excerpt p { margin: 0; }
 .blog-more { padding-top: 7.8px; font-size: 14.92px; line-height: 1.5; text-decoration: underline; text-underline-offset: .2em; }
+/* /blog's cards: under the image (an empty frame without one) three lines of one line's height each, tags, date and
+   author, there even when empty, so the titles of a row start at the same height. */
+.blog-img--none { background: #f2f2f2; }
+.blog-card__meta { display: flex; flex-direction: column; gap: 4px; width: 80%; margin: 16.6px 10% 7.8px; font: 500 16px/24px var(--meta); }
+.blog-card__meta > div { height: 24px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.blog-card__tags { display: flex; justify-content: center; gap: 6px; }
+.blog-card__tag { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 10px;
+  border: 1px solid currentColor; border-radius: 999px; font-size: 12px; line-height: 22px; text-decoration: none; }
+.blog-card__tag--more { flex-shrink: 0; border-style: dashed; }
+/* The blog's topics: "All" and the 8 busiest tags as pills in a row, the rest under "+N more"; the current one filled. */
+.blog-grid.blog-head { display: block; padding-bottom: 0; }
+.blog-filter { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin: 24px 0 0; }
+.blog-filter ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.blog-pill { display: inline-block; padding: 4px 14px; border: 1px solid currentColor; border-radius: 999px;
+  font: 500 14px/20px var(--meta); text-decoration: none; white-space: nowrap; cursor: pointer; }
+.blog-pill:hover, .blog-pill:focus-visible { background: rgba(0, 0, 0, .06); }
+.blog-pill.is-active { background: #000; border-color: #000; color: #fff; }
+.blog-filter__more summary { list-style: none; border-style: dashed; }
+.blog-filter__more summary::-webkit-details-marker { display: none; }
+.blog-filter__more[open] { flex-basis: 100%; }
+.blog-filter__more[open] summary { margin-bottom: 8px; }
 .blog-pages { display: flex; justify-content: space-between; width: 100%; max-width: 1400px; padding: 0 var(--gutter); margin: 6vw auto 3vw; }
 .blog-pages a { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; }
 .blog-older { margin-left: auto; }
@@ -425,7 +446,7 @@ picture { display: contents; }
 }
 @media (min-width: 768px) {
   .blog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 100px; }
-  .blog-meta { margin: 35px 10% 25px; }
+  .blog-meta, .blog-card__meta { margin: 35px 10% 25px; }
   .blog-excerpt, .blog-more { font-size: 14.272px; }
   .blog-more { padding-top: 20px; }
 }

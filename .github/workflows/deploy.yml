@@ -251,6 +251,9 @@ jobs:
           GITHUB_CLIENT_SECRET=${{ vars.SERVICE }}-github-client-secret:latest
           SESSION_SECRET=${{ vars.SERVICE }}-session-secret:latest
           VAULT_SITE_GITHUB_TOKEN=${{ vars.SERVICE }}-vault-site-github-token:latest
+          ${{ vars.SERVICE == 'vault-publisher-staging' && 'DEPLOY_STATUS_GITHUB_TOKEN=vault-publisher-staging-deploy-status-token:latest' || '' }}
+        # The deploy bar's token (Actions: read on both repositories, docs/setup.md "The deploy bar") is staging's only
+        # for now; on production the line above is empty, which the action skips.
         # Exactly one instance: SQLite has a single writer, and it stays warm so Litestream isn't restoring on every request.
         # 1Gi: listing previews run Hugo in this container (up to two at once, about 130 MB each, with their
         # files in the in-memory /tmp) next to Node and Litestream.

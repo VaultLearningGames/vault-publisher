@@ -668,6 +668,38 @@ connected):
 | `VAULT_SITE_BLOG_DIR` | `content/blog` | |
 | `VAULT_SITE_API_BASE` | `https://api.github.com` | |
 
+### The deploy bar
+
+Every portal page shows a bar while a deploy of that system runs (README, [The deploy bar](../README.md#the-deploy-bar)).
+The portal reads the runs of *Deploy (portal and site)* (this repository) and *Deploy (site)* (vault-site) from GitHub
+Actions. `VAULT_SITE_GITHUB_TOKEN` can't (it is *Contents* only), so the bar has its own token: a fine-grained token
+on the VaultLearningGames organization with **Actions: Read-only** on `vault-publisher` and `vault-site` and nothing
+else. Settings:
+
+| Variable | Default | |
+|---|---|---|
+| `DEPLOY_STATUS_GITHUB_TOKEN` | (none: no bar) | the token above; empty or unset turns the bar off |
+| `DEPLOY_STATUS_STAGING_BRANCH` | `main` | the branch whose runs are the staging portal's deploys |
+| `DEPLOY_STATUS_PRODUCTION_BRANCH` | `production` | the branch whose runs are the production portal's deploys |
+
+Which system a portal is: staging when its `PORTAL_URL` is a staging address (the one that shows the staging banner),
+production when it isn't and `SITE_REBUILD_ENVIRONMENT` (set by `deploy.yml`) is `production`; anything else (a local
+portal, the tests) shows no bar. The answer is cached for 15 s; when GitHub can't be read the last answer stands for
+2 minutes, then no bar.
+
+Staging (once, **before** the change that adds it to `deploy.yml` is deployed: Cloud Run refuses a revision whose
+secret doesn't exist):
+
+```bash
+printf 'token: '; read -rs v; echo; printf '%s' "$v" | gcloud secrets create vault-publisher-staging-deploy-status-token --data-file=-; unset v
+gcloud secrets add-iam-policy-binding vault-publisher-staging-deploy-status-token \
+  --member=serviceAccount:vault-publisher-staging@PROJECT.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+```
+
+(The service account is the staging environment's `PUBLISHER_SERVICE_ACCOUNT`.)
+`deploy.yml` passes it to staging only. Production, later: create `vault-publisher-deploy-status-token` the same way,
+then make the `DEPLOY_STATUS_GITHUB_TOKEN` line in `deploy.yml` apply to both systems.
+
 ## 9. Pilot
 
 Add the caller workflow from the README to a branch of `fielddaylab/wake`, push, and open

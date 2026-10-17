@@ -518,6 +518,18 @@ temporary copy; the site source is never written to.
   renames them `retired_blog_*` at startup (`Db.retireBlogTables`; nothing reads them but the export).
 * The companion change in vault-site (the submodule and its clone/dev notes): [docs/vault-site.md](docs/vault-site.md).
 
+## The deploy bar
+
+While a deploy of this system runs (*Deploy (portal and site)* here, or *Deploy (site)* in vault-site), every portal
+page shows a slim bar under the staging banner: "Deploying: about N min left" and a progress bar, the expected time
+being the median of that workflow's last 5 successful runs (3 min portal, 2 min site when there are none). Past it,
+"taking longer than usual"; a run that fails says "Deploy failed" with a link to it for 10 minutes. A run counts when
+it is on the system's branch: `main` for staging, `production` for production. The portal reads GitHub Actions with
+`DEPLOY_STATUS_GITHUB_TOKEN` (*Actions: read* on both repositories), at most once every 15 s
+(`src/deploy-status.ts`, `GET /portal/deploy-status`); the page asks every 15 s only while the bar shows, and keeps
+its last answer while the portal restarts. No token, or GitHub not answering: no bar. Setup:
+[docs/setup.md](docs/setup.md#the-deploy-bar).
+
 ## Site checks
 
 The live website is tested in a headless Chromium: every game opens, no missing images or scripts, no broken links,

@@ -24,6 +24,7 @@ import { githubAccount, githubRepository, registerPeople, type GitHubAccountLook
 import { buildOrigin, registerUploads } from './uploads.ts';
 import { registerBlogAdmin } from './blog-admin.ts';
 import type { MonitorEnv } from '../url-monitor.ts';
+import { DeployStatusCache, deployBranch, githubRunsFetcher, type RunsFetcher } from '../deploy-status.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -46,6 +47,8 @@ export interface PortalConfig {
   oauth?: OAuthClient; // injected in tests
   githubAccount?: GitHubAccountLookup; // injected in tests
   githubRepository?: GitHubRepositoryLookup; // injected in tests
+  // The deploy bar (src/deploy-status.ts). No token (and no fetchRuns): no bar, no endpoint.
+  deployStatus?: { token?: string; environment?: string; stagingBranch?: string; productionBranch?: string; fetchRuns?: RunsFetcher; now?: () => number };
 }
 
 type ReleaseResult = { release: Release; url: string };
@@ -127,6 +130,15 @@ function stagingBannerFor(baseUrl: string): Html | '' {
     <span>Settings, game data and anything else saved here apply only to staging, and are overwritten whenever the Vault code changes.
     Make real changes, and preview them, on the production portal${prod ? html`: <a href="${prod}/">${new URL(prod).host}</a>` : ''}.</span></div>`;
 }
+// The deploy bar, under the staging banner on every page while a deploy of this system runs (public/portal.js fills it
+// in and polls DEPLOY_STATUS_PATH). Set by registerPortal; null when the system has no deploy status.
+export const DEPLOY_STATUS_PATH = '/portal/deploy-status';
+let deployStatus: DeployStatusCache | null = null;
+function deployBar(): Html | '' {
+  if (!deployStatus) return '';
+  const known = deployStatus.peek();
+  return html`<div class="deploy-bar" id="deploy-bar" role="status" aria-live="polite" data-src="${DEPLOY_STATUS_PATH}"${known?.deploys.length ? html` data-state="${JSON.stringify(known)}"` : ''} hidden></div>`;
+}
 interface Nav { user: User; studio?: Studio; memberships: (Membership & { studio_slug: string; studio_name: string })[]; allStudios: Studio[] }
 function layout(title: string, nav: Nav | null, body: Html | string, active = ''): string {
   const u = nav?.user;
@@ -169,7 +181,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
 <meta name="robots" content="noindex, nofollow"><title>${escape(title)} · Vault Studio Portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="/assets/portal.css?v=${assetVersion}"></head><body${stagingBanner ? ' class="staging"' : ''}>${stagingBanner}
+<link rel="stylesheet" href="/assets/portal.css?v=${assetVersion}"></head><body${stagingBanner ? ' class="staging"' : ''}>${stagingBanner}${deployBar()}
 <div class="${nav ? 'shell' : 'shell solo'}">${side}<main id="main">${body}</main></div>
 <script src="/assets/portal.js?v=${assetVersion}" defer></script></body></html>`;
 }
@@ -188,6 +200,15 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const admins = new Set(cfg.vaultAdmins.map((l) => l.toLowerCase()));
   supportUrl = cfg.supportUrl ?? DEFAULT_SUPPORT_URL;
   stagingBanner = stagingBannerFor(cfg.baseUrl);
+  const ds = cfg.deployStatus;
+  const deployFrom = deployBranch({ isStaging: stagingProductionUrl(cfg.baseUrl) !== null, environment: ds?.environment, stagingBranch: ds?.stagingBranch, productionBranch: ds?.productionBranch });
+  const fetchRuns = ds?.fetchRuns ?? (ds?.token ? githubRunsFetcher(ds.token) : null);
+  deployStatus = fetchRuns && deployFrom ? new DeployStatusCache(fetchRuns, deployFrom, { now: ds?.now }) : null;
+  if (deployStatus) {
+    const cache = deployStatus;
+    // Public, like the bar (it shows on the sign-in page too): which deploys run, and links to their runs.
+    app.get(DEPLOY_STATUS_PATH, async (c) => c.json(await cache.get(), 200, { 'Cache-Control': 'no-store' }));
+  }
 
   // Browsers that reach the portal on the service's default *.run.app address are sent to the portal's
   // real address (GitHub sign-in only returns there). The API and health check keep answering on both.

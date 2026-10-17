@@ -61,6 +61,19 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .env-banner { background: var(--wait-soft); color: var(--ink); border-bottom: 2px solid var(--wait); font-size: 13px; padding: 8px 20px; display: flex; gap: 4px 12px; flex-wrap: wrap; align-items: baseline; }
 .env-banner strong { color: var(--ink); font-weight: 600; }
 .env-banner a { color: var(--ink); text-decoration: underline; }
+/* The deploy bar (portal.js): one slim row per running deploy, under the staging banner. */
+.deploy-bar { background: var(--run-soft); color: var(--ink); border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.deploy-bar[hidden] { display: none; }
+.deploy-row { display: flex; align-items: center; gap: 4px 12px; flex-wrap: wrap; padding: 5px 20px; }
+.deploy-row + .deploy-row { border-top: 1px solid var(--line-2); }
+.deploy-row b { font-weight: 600; }
+.deploy-row a { color: var(--ink); text-decoration: underline; }
+.deploy-track { flex: 0 1 220px; min-width: 80px; height: 6px; border-radius: 3px; background: var(--surface); overflow: hidden; }
+.deploy-fill { height: 100%; background: var(--run); transition: width 1s linear; }
+.deploy-row.late .deploy-fill { background: var(--wait); }
+.deploy-row.failed { background: var(--bad-soft); }
+.deploy-row.failed b { color: var(--bad); }
+.deploy-row .deploy-x { margin-left: auto; background: none; border: 0; color: var(--ink-2); cursor: pointer; font: inherit; padding: 0 4px; }
 body.staging .shell { min-height: auto; }
 .shell.solo { grid-template-columns: 1fr; }
 .side { background: var(--sunk); border-right: 1px solid var(--line); padding: 18px 14px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }

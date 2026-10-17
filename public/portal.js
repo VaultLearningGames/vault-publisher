@@ -420,3 +420,87 @@
     if (e.target.closest('[data-close]')) e.target.closest('dialog').close();
   });
 })();
+
+// The deploy bar (src/deploy-status.ts): while a deploy of this system runs, "Deploying: about N min left" and a
+// progress bar from the time it has run over the time a run usually takes. It asks once when the page loads, then
+// every 15 s only while it shows something. The portal is what's being deployed, so a request may fail while it
+// restarts: then the bar keeps the last answer (also kept for the next page in sessionStorage) and asks again.
+(function () {
+  const bar = document.getElementById('deploy-bar');
+  if (!bar) return;
+  const POLL_MS = 15000, KEEP_MS = 10 * 60000, KEY = 'vault-deploy-status', DISMISSED = 'vault-deploy-dismissed';
+  const LABEL = { portal: 'the portal and site', site: 'the site' };
+  let state = null, timer = 0, clock = 0;
+  const valid = (s) => s && Array.isArray(s.deploys);
+  try { const s = bar.dataset.state && JSON.parse(bar.dataset.state); if (valid(s)) state = s; } catch (e) { /* none */ }
+  if (!state) {
+    try { const k = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (k && valid(k.state) && Date.now() - k.at < KEEP_MS) state = k.state; } catch (e) { /* none */ }
+  }
+  const dismissed = () => { try { return JSON.parse(sessionStorage.getItem(DISMISSED) || '[]'); } catch (e) { return []; } };
+  const shown = () => (state ? state.deploys.filter((d) => d.state === 'running' || !dismissed().includes(d.url)) : []);
+  const runLink = (d, text) => {
+    const a = document.createElement('a');
+    if (/^https:\/\/github\.com\//.test(d.url || '')) a.href = d.url;
+    a.target = '_blank'; a.rel = 'noopener'; a.textContent = text;
+    return a;
+  };
+
+  function render() {
+    const list = shown();
+    bar.replaceChildren();
+    bar.hidden = !list.length;
+    for (const d of list) {
+      const row = document.createElement('div');
+      row.className = 'deploy-row';
+      const b = document.createElement('b');
+      const what = document.createElement('span');
+      what.textContent = `(${LABEL[d.kind] || d.kind})`;
+      if (d.state === 'failed') {
+        row.classList.add('failed');
+        b.textContent = 'Deploy failed';
+        const x = document.createElement('button');
+        x.type = 'button'; x.className = 'deploy-x'; x.textContent = '×'; x.setAttribute('aria-label', 'Dismiss');
+        x.addEventListener('click', () => {
+          try { sessionStorage.setItem(DISMISSED, JSON.stringify(dismissed().concat(d.url).slice(-20))); } catch (e) { /* ignore */ }
+          render();
+        });
+        row.append(b, what, runLink(d, 'View the run'), x);
+      } else {
+        const elapsed = Math.max(0, (Date.now() - Date.parse(d.startedAt)) / 1000);
+        const expected = Math.max(1, Number(d.expectedSeconds) || 180);
+        const left = expected - elapsed;
+        b.textContent = left > 0 ? `Deploying: about ${Math.max(1, Math.ceil(left / 60))} min left` : 'Deploying: taking longer than usual';
+        if (left <= 0) row.classList.add('late');
+        const track = document.createElement('div');
+        track.className = 'deploy-track';
+        track.setAttribute('role', 'progressbar');
+        track.setAttribute('aria-valuemin', '0'); track.setAttribute('aria-valuemax', '100');
+        const pct = Math.min(100, Math.round((elapsed / expected) * 100));
+        track.setAttribute('aria-valuenow', String(pct));
+        const fill = document.createElement('div');
+        fill.className = 'deploy-fill'; fill.style.width = `${pct}%`;
+        track.append(fill);
+        row.append(b, what, track, runLink(d, 'Details'));
+      }
+      bar.append(row);
+    }
+    clearInterval(clock);
+    if (list.some((d) => d.state === 'running')) clock = setInterval(render, 5000);
+    return list.length > 0;
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch(bar.dataset.src, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const s = res.ok ? await res.json() : null;
+      if (valid(s)) {
+        state = s;
+        try { sessionStorage.setItem(KEY, JSON.stringify({ at: Date.now(), state })); } catch (e) { /* ignore */ }
+      }
+    } catch (e) { /* restarting: keep the last answer */ }
+    clearTimeout(timer);
+    if (render()) timer = setTimeout(poll, POLL_MS);
+  }
+  render();
+  poll();
+})();

@@ -1,4 +1,5 @@
 // Block schema for blog post bodies. Pure functions: validateBlocks returns the normalized blocks or a list of errors.
+import { htmlToBlocks } from '../site-content/markdown-blocks.ts';
 export const MAX_BLOCKS = 500;
 export const MARKS = ['bold', 'italic', 'code'] as const;
 export const ALIGNS = ['left', 'center', 'right', 'wide', 'full'] as const;
@@ -138,6 +139,7 @@ function paragraph(b: Record<string, unknown>, at: string, errors: string[]): Bl
     unknownKeys(b, ['type', 'html'], at, errors);
     if (typeof b.html !== 'string') { errors.push(`${at}.html must be a string`); return null; }
     const clean = sanitizeParagraphHtml(b.html, at, errors);
+    if (clean !== null) { const r = htmlToBlocks(clean); if (typeof r === 'string') { errors.push(`${at}.html: ${r}`); return null; } }
     return clean === null ? null : { type: 'paragraph', html: clean };
   }
   unknownKeys(b, ['type', 'children'], at, errors);

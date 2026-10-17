@@ -250,6 +250,7 @@ jobs:
           R2_CDN_SECRET_ACCESS_KEY=${{ vars.SERVICE }}-r2-cdn-secret-access-key:latest
           GITHUB_CLIENT_SECRET=${{ vars.SERVICE }}-github-client-secret:latest
           SESSION_SECRET=${{ vars.SERVICE }}-session-secret:latest
+          VAULT_SITE_GITHUB_TOKEN=${{ vars.SERVICE }}-vault-site-github-token:latest
         # Exactly one instance: SQLite has a single writer, and it stays warm so Litestream isn't restoring on every request.
         # 1Gi: listing previews run Hugo in this container (up to two at once, about 130 MB each, with their
         # files in the in-memory /tmp) next to Node and Litestream.

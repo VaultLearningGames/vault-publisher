@@ -21,7 +21,7 @@ import { MARKS, ALIGNS, type Align, type Block, type Mark, type Span } from '../
 
 // ---------- writing ----------
 
-const ENT: Record<string, string> = { '\n': '&#10;', '\r': '&#13;', '\t': '&#9;' };
+const ENT: Record<string, string> = { '\n': '\\\n', '\r': '&#13;', '\t': '&#9;' };
 
 // Text as Markdown that reads back as exactly that text. `edges`: also the spaces at the start and end, which
 // Markdown would drop or which would stop a delimiter from working.
@@ -96,13 +96,13 @@ function shortcodeValue(v: string): string | null {
 function imageMarkdown(b: Extract<Block, { type: 'image' }>): string | null {
   if (b.caption === undefined && b.align === undefined) return `![${escapeText(b.alt, true)}](${escapeDest(b.src)})`;
   const params: string[] = [];
-  for (const [k, v] of [['src', b.src], ['alt', b.alt], ['caption', b.caption], ['class', b.align && `align-${b.align}`]] as const) {
+  for (const [k, v] of [['src', b.src], ['alt', b.alt], ['caption', b.caption], ['align', b.align]] as const) {
     if (v === undefined) continue;
     const q = shortcodeValue(v);
     if (q === null) return null;
     params.push(`${k}=${q}`);
   }
-  return `{{< figure ${params.join(' ')} >}}`;
+  return `{{< image ${params.join(' ')} >}}`;
 }
 
 function blockMarkdown(b: Block): string | null {
@@ -111,7 +111,7 @@ function blockMarkdown(b: Block): string | null {
     case 'divider': return '---';
     case 'image': return imageMarkdown(b);
     case 'paragraph':
-      if (b.html !== undefined) return HTML_START.test(b.html) ? encodeHtml(b.html) : `${HTML_MARK}\n${encodeHtml(b.html)}`;
+      if (b.html !== undefined) return null; // converted to Markdown blocks first (htmlToBlocks), never written as HTML
       return paragraphMarkdown(b.children);
     default: return null;
   }
@@ -131,6 +131,12 @@ export function blockToMarkdown(b: Block): string {
 
 // A post body: the blocks' Markdown, a blank line between blocks, ending with a line break ('' for no blocks).
 export function blocksToMarkdown(blocks: Block[], eol: '\n' | '\r\n' = '\n'): string {
+  blocks = blocks.flatMap((b) => {
+    if (b.type !== 'paragraph' || b.html === undefined) return [b];
+    const r = htmlToBlocks(b.html);
+    if (typeof r === 'string') throw new Error(r);
+    return r;
+  });
   if (!blocks.length) return '';
   return blocks.map(blockToMarkdown).join('\n\n').replace(/\n/g, eol) + eol;
 }
@@ -193,6 +199,9 @@ class InlineParser {
       if (close !== null && s.startsWith(close, i) && !(close === '*' && s.startsWith('**', i) && !f.marks.has('italic'))) {
         flush(); return i + close.length;
       }
+      if (c === '\\' && s[i + 1] === '\n') { buf += '\n'; i += 2; continue; }
+      if (c === ' ' && s[i + 1] === ' ' && /^ +\n/.test(s.slice(i))) { buf += '\n'; i = s.indexOf('\n', i) + 1; continue; }
+      if (c === '\n') { buf += ' '; i++; continue; }
       if (c === '\\' && i + 1 < s.length && PUNCT.test(s[i + 1])) { buf += s[i + 1]; i += 2; continue; }
       if (c === '&') { const e = entityAt(s, i); if (e) { buf += e[0]; i += e[1]; continue; } }
       if (s.startsWith(SEP, i)) { flush(); this.split = true; i += SEP.length; continue; }
@@ -272,7 +281,12 @@ function chunkBlock(chunk: string): Block {
   if ((m = /^<!-- vault:block (\{.*\}) -->$/.exec(chunk))) {
     try { const b = JSON.parse(m[1]) as Block; if (b && typeof b === 'object' && typeof b.type === 'string') return b; } catch { /* text, below */ }
   }
-  if (chunk.startsWith(HTML_MARK + '\n')) return { type: 'paragraph', html: decodeHtml(chunk.slice(HTML_MARK.length + 1)) };
+  if (chunk.startsWith(HTML_MARK + '\n')) {
+    // Posts the older portal wrote: the marker was only a note, the text after it is Markdown (or the escaped shortcode).
+    const rest = chunk.slice(HTML_MARK.length + 1);
+    const sc = decodeHtml(rest).replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    return chunkBlock(/^\{\{<\s*image\s/.test(sc) ? sc : rest);
+  }
   if (HTML_START.test(chunk)) return { type: 'paragraph', html: decodeHtml(chunk) };
   if ((m = /^(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(chunk)) && !chunk.includes('\n')) {
     const level = Math.min(4, Math.max(2, m[1].length)) as 2 | 3 | 4;
@@ -280,12 +294,12 @@ function chunkBlock(chunk: string): Block {
   }
   if (/^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(chunk)) return { type: 'divider' };
   if ((m = /^!\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^()\\\s])+)\)$/.exec(chunk))) return { type: 'image', src: unescapeText(m[2]), alt: unescapeText(m[1]) };
-  if ((m = /^\{\{<\s*figure\s([\s\S]*?)\s*\/?>\}\}$/.exec(chunk))) {
+  if ((m = /^\{\{<\s*(?:image|figure)\s([\s\S]*?)\s*\/?>\}\}$/.exec(chunk))) {
     const p = shortcodeParams(m[1]);
     if (p && p.src !== undefined) {
       const b: Block = { type: 'image', src: p.src, alt: p.alt ?? '' };
       if (p.caption !== undefined) b.caption = p.caption;
-      const align = /^align-(\w+)$/.exec(p.class ?? '')?.[1];
+      const align = p.align ?? /^align-(\w+)$/.exec(p.class ?? '')?.[1];
       if (align && (ALIGNS as readonly string[]).includes(align)) b.align = align as Align;
       return b;
     }
@@ -305,4 +319,64 @@ export function markdownToBlocks(md: string): Block[] {
   }
   flush();
   return blocks;
+}
+
+// ---------- the editor's HTML as blocks ----------
+// The site renders Markdown and its own shortcodes only (raw HTML is off), so the editor's paragraph HTML is written
+// as Markdown: p, h2-h4, br, strong/b, em/i, code and a. Anything else (lists, quotes, u, s, span, indent) is
+// returned as an error string, so a save fails with a message rather than writing what the site would drop.
+export function htmlToBlocks(html: string): Block[] | string {
+  const out: Block[] = [];
+  let spans: Span[] = [];
+  let inP = false, head: 2 | 3 | 4 | null = null, headText = '';
+  const marks = { bold: 0, italic: 0, code: 0 };
+  let href: string | undefined;
+  const addText = (t: string) => {
+    if (!t) return;
+    if (head) { headText += t; return; }
+    if (!inP) { inP = true; }
+    const m = MARKS.filter((k) => marks[k] > 0);
+    const last = spans.at(-1);
+    if (last && (last.marks ?? []).join() === m.join() && last.href === href) { last.text += t; return; }
+    const sp: Span = { text: t };
+    if (m.length) sp.marks = m;
+    if (href !== undefined) sp.href = href;
+    spans.push(sp);
+  };
+  const flushP = () => {
+    if (!inP) return;
+    inP = false;
+    while (spans.length && /^\s*$/.test(spans.at(-1)!.text) && !spans.at(-1)!.marks) spans.pop();
+    while (spans.length && /^\s*$/.test(spans[0].text) && !spans[0].marks) spans.shift();
+    if (spans.length) out.push({ type: 'paragraph', children: spans });
+    spans = [];
+  };
+  const re = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:[^>"']|"[^"]*"|'[^']*')*)>|([^<]+)/g;
+  for (let m; (m = re.exec(html));) {
+    if (m[4] !== undefined) { const t = decodeEntities(m[4]); if (inP || head || t.trim()) addText(head ? t : inP ? t : t.trim()); continue; }
+    const close = m[1] === '/', name = m[2].toLowerCase(), attrs = m[3];
+    if (!close && /data-indent/i.test(attrs)) return 'indented text is not supported on the site; remove the indent';
+    switch (name) {
+      case 'p': if (close) flushP(); else { flushP(); inP = true; } break;
+      case 'h2': case 'h3': case 'h4':
+        if (close) { const t = headText.replace(/\s+/g, ' ').trim(); if (t) out.push({ type: 'heading', level: head!, text: t }); head = null; headText = ''; }
+        else { flushP(); head = Number(name[1]) as 2 | 3 | 4; headText = ''; }
+        break;
+      case 'br': if (!close) { if (head) headText += ' '; else { const h = href, mk = { ...marks }; href = undefined; marks.bold = marks.italic = marks.code = 0; addText('\n'); href = h; Object.assign(marks, mk); } } break;
+      case 'strong': case 'b': marks.bold += close ? -1 : 1; break;
+      case 'em': case 'i': marks.italic += close ? -1 : 1; break;
+      case 'code': marks.code += close ? -1 : 1; break;
+      case 'a': if (close) href = undefined; else { const h = /href\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs); href = h ? decodeEntities(h[1] ?? h[2]) : undefined; } break;
+      default: return `<${name}> is not supported on the site (Markdown has p, headings, bold, italic, code, links and line breaks only)`;
+    }
+  }
+  flushP();
+  return out;
+}
+
+function decodeEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+    if (e[0] === '#') { const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10); return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : m; }
+    return NAMED[e.toLowerCase()] ?? m;
+  });
 }

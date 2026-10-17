@@ -408,6 +408,8 @@ picture { display: contents; }
   max-width: 80%; overflow-wrap: break-word;
   font-size: clamp(12px, calc(80cqw / var(--fit, 1)), var(--h3)); }   /* see "Titles that fit" */
 .blog-title a { text-decoration: none; }
+.post-nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; padding: 0 6vw 40px; font: 500 16px/24px var(--meta); }
+.post-nav-next { margin-left: auto; text-align: right; }
 .blog-title a::after { content: " \2192"; }
 .blog-excerpt { margin: 0 10%; font-size: 14.92px; line-height: 1.5; }
 .blog-excerpt p { margin: 0; }

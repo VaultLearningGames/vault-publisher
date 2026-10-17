@@ -18,11 +18,7 @@
 <div class="blog-body">{{ range .blocks }}{{ partial "blog/block.html" . }}{{ end }}</div>
 {{ with .tags }}<div class="blog-meta blog-tags">{{ partial "blog/tags.html" . }}</div>{{ end }}
 </div></article>
-{{- $related := slice }}
-{{- range .related }}{{ with where (where $all "listed" true) "slug" . }}{{ $related = $related | append (index . 0) }}{{ end }}{{ end }}
-{{- with $related }}
-<section class="sq-sec theme-white sq-blog blog-related"><div class="blog-grid"><h2>More posts</h2></div><div class="blog-grid">{{ range . }}{{ partial "blog/card.html" . }}{{ end }}</div></section>
-{{- end }}
+{{- partial "blog/post-nav.html" (dict "post" . "all" $all) }}
 {{- end }}
 {{- end }}
 {{- end }}

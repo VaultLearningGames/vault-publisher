@@ -1,5 +1,7 @@
 node_modules
-/data/
+/data/*
+# The Squarespace blog import's snapshot is committed (scripts/import-squarespace-blog.ts).
+!/data/blog-import/
 *.db
 *.db-shm
 *.db-wal

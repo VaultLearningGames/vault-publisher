@@ -226,6 +226,16 @@ export function autosaveStep(state, action, delay = AUTOSAVE_DELAY) {
 // Whether a save should start at time `now`.
 export const autosaveDue = (state, now) => !state.stopped && !state.saving && state.dueAt !== null && now >= state.dueAt;
 
+// Whether the settings panel is hidden, remembered in localStorage as '1' / '0'. No value, or no usable storage
+// (private mode, disabled), means shown; a failed write still lets the panel be toggled for this page.
+export const SETTINGS_COLLAPSED_KEY = 'vault-portal:blog-editor:settings-collapsed';
+export function readSettingsCollapsed(storage) {
+  try { return !!storage && storage.getItem(SETTINGS_COLLAPSED_KEY) === '1'; } catch (_) { return false; }
+}
+export function writeSettingsCollapsed(storage, collapsed) {
+  try { if (storage) storage.setItem(SETTINGS_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (_) { /* in-session only */ }
+}
+
 // ---------- the page ----------
 (function () {
   if (typeof document === 'undefined') return;
@@ -323,7 +333,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
 
   const stateLine = h('p', { class: 'be-state', role: 'status' });
 
-  const panel = h('aside', { class: 'card be-settings', 'aria-label': 'Post settings' },
+  const panel = h('aside', { class: 'card be-settings', id: 'be-settings', 'aria-label': 'Post settings' },
     h('h2', null, 'Settings'),
     stateLine,
     field('slug', 'URL slug', slugInput, slugUrl, slugMsg),
@@ -344,13 +354,29 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       h('button', { type: 'button', class: 'btn sm', onclick: () => previewDlg.close() }, 'Close')),
     previewFrame);
 
+  // Show/hide the settings to give the body the full width. Hidden settings keep their inputs and values, and are
+  // still saved; the state is applied before the editor is first attached, so it doesn't flash.
+  const settingsToggle = h('button', { type: 'button', class: 'btn be-settings-toggle', 'aria-controls': 'be-settings',
+    onclick: () => { setCollapsed(!panel.hidden, true); settingsToggle.focus(); } });
+  const layout = h('div', { class: 'be-layout' },
+    h('div', { class: 'be-col' },
+      h('div', { class: 'card be-head' }, h('div', { class: 'field' }, h('label', { for: 'be-title' }, 'Title'), titleInput)),
+      h('div', { class: 'card be-body' }, inserter(0), list)),
+    panel);
+  function storage() { try { return window.localStorage; } catch (_) { return null; } }
+  function setCollapsed(collapsed, remember) {
+    if (collapsed && panel.contains(document.activeElement)) settingsToggle.focus();
+    panel.hidden = collapsed;
+    layout.classList.toggle('be-layout--settings-collapsed', collapsed);
+    settingsToggle.textContent = collapsed ? 'Show settings' : 'Hide settings';
+    settingsToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    if (remember) writeSettingsCollapsed(storage(), collapsed);
+  }
+  setCollapsed(readSettingsCollapsed(storage()), false);
+
   root.append(
-    h('div', { class: 'be-layout' },
-      h('div', { class: 'be-col' },
-        h('div', { class: 'card be-head' }, h('div', { class: 'field' }, h('label', { for: 'be-title' }, 'Title'), titleInput)),
-        h('div', { class: 'card be-body' }, inserter(0), list)),
-      panel),
-    h('div', { class: 'be-bar' }, saveBtn, previewBtn, publishBtn, unpublishBtn, deleteBtn, status),
+    layout,
+    h('div', { class: 'be-bar' }, saveBtn, previewBtn, publishBtn, unpublishBtn, deleteBtn, status, settingsToggle),
     err, announce, previewDlg,
   );
 
@@ -829,7 +855,10 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       if (res.status === 409 && data.error === 'slug_taken') {
         settings.slugTaken = true;
         slugMsg.textContent = 'Another post already uses this slug. Choose a different one; until then the post keeps its current URL.';
+        if (panel.hidden) setCollapsed(false, true); // the message is in the settings: show them
       }
+      // TODO: the server's other validation errors (data.errors) are plain strings with no field, shown in showError;
+      // once they name their field, show the settings when one of them is a settings field.
       if (!res.ok) {
         showError(errorText(data, res, 'Something went wrong'), false, data.errors);
         status.textContent = 'Not saved';

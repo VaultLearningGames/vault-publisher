@@ -55,6 +55,9 @@
 .be-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
 .be-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .be-settings { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+.be-settings[hidden] { display: none; }
+.be-layout--settings-collapsed { grid-template-columns: minmax(0, 1fr); }
+.be-settings-toggle { margin-left: auto; }
 .be-settings h2 { margin: 0; font-size: 15px; }
 .be-settings .field input, .be-settings .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); color: var(--ink); font: inherit; width: 100%; box-sizing: border-box; }
 .be-settings .field p { margin: 2px 0 0; font-size: 12px; }

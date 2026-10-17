@@ -76,6 +76,23 @@ jobs:
 
     - uses: actions/checkout@v7
 
+    # The portal image carries vault-site (private) at the commit pinned in vault-site.ref, for previews.
+    - name: Fetch vault-site at the pinned ref
+      if: ${{ !inputs.site_only }}
+      env:
+        VAULT_SITE_READ_TOKEN: ${{ secrets.VAULT_SITE_READ_TOKEN }}
+      run: |
+        ref="$(grep -v '^[[:space:]]*#' vault-site.ref | tr -d '[:space:]' | head -c 200)"
+        [ -n "$ref" ] || { echo "::error::vault-site.ref is empty"; exit 1; }
+        [ -n "$VAULT_SITE_READ_TOKEN" ] || { echo "::error::VAULT_SITE_READ_TOKEN is not set"; exit 1; }
+        git init -q vault-site-src
+        git -C vault-site-src remote add origin https://github.com/VaultLearningGames/vault-site.git
+        b64="$(printf 'x-access-token:%s' "$VAULT_SITE_READ_TOKEN" | base64 | tr -d '\n')"
+        echo "::add-mask::$b64"
+        git -C vault-site-src -c http.extraheader="AUTHORIZATION: basic $b64" fetch -q origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+        git -C vault-site-src checkout -q "$ref^{commit}"
+        echo "vault-site $(git -C vault-site-src rev-parse HEAD) (ref $ref)"
+
     - uses: actions/setup-node@v7
       with:
         node-version: 24

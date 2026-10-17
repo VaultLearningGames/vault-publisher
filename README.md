@@ -502,9 +502,9 @@ temporary copy; the site source is never written to.
 
 * **The image** fetches vault-site at build time (Dockerfile, stage `site`) at the ref in **`vault-site.ref`** (or
   `--build-arg VAULT_SITE_REF=…`), drops its `.git` and `portal/`, and sets `SITE_DIR=/app/vault-site`. vault-site is
-  private, so a build needs a token that can read it, as a BuildKit secret:
-  `GH_TOKEN=… docker build --secret id=gh_token,env=GH_TOKEN .` The token is sent as a header for the fetch only; it is
-  in no layer, remote URL or config, and the fetch stage isn't in the image.
+  private, so the deploy workflow checks it out into `vault-site-src/` first, with the repository secret
+  `VAULT_SITE_READ_TOKEN` (read access to vault-site); the Dockerfile copies that folder. For a local image build, clone
+  vault-site into `vault-site-src/` and check out the ref yourself.
 * **Updating the vault-site pin:** put the vault-site commit (all 40 characters: `git -C ../ rev-parse HEAD` from the
   submodule layout) on the first non-comment line of `vault-site.ref`, commit, and the next deploy carries it. An
   abbreviated SHA works but makes the build fetch the whole history. Previews then render with that commit's templates.

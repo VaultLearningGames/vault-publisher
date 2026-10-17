@@ -16,3 +16,6 @@ site/.hugo_build.lock
 
 # The card pipeline's per-worktree folder; never commit it.
 .dispatch/
+
+# vault-site checkout the image build copies (deploy workflow).
+vault-site-src/

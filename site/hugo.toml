@@ -95,3 +95,8 @@ disableKinds = ['taxonomy', 'term', 'rss']
 
 [outputs]
   home = ['html', 'cardredirects', 'cdnredirects', 'blogredirects']
+
+# The templates may read these environment variables (Hugo's defaults plus VAULT_ATTRIBUTION_UTM=off, which stops the
+# player tagging game addresses with Vault's UTM parameters: partials/vault-player.html, assets/js/vault-attribution.js).
+[security.funcs]
+  getenv = ['^HUGO_', '^CI$', '^VAULT_ATTRIBUTION_UTM$']

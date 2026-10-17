@@ -1,6 +1,8 @@
-// The blog editor and its admin API. Posts live in the vault-site repository, content/blog/<slug>/index.md on main
-// (blog/siteRepo.ts over the GitHub client in site-content/). Every Save, Publish, Unpublish, rename and delete is one
-// commit there, and the site's own workflow rebuilds and publishes the site on it; the portal builds nothing.
+// The blog editor and its admin API. Posts live in the vault-site repository, content/blog/<slug>/index.md on this
+// system's branch (staging or production; site-repo/config.ts) (blog/siteRepo.ts over the GitHub client in
+// site-content/). Every Save, Publish, Unpublish, rename and delete is one commit there by the bot user, with a
+// Portal-User trailer naming the editor, and the site's own workflow rebuilds and publishes the site on it; the
+// portal builds nothing. SITE_PUBLISHING_ENABLED=false refuses every write: 503 { error: 'publishing_disabled' }.
 // Autosaves are not commits: they go to the portal's scratch storage (blog/scratch.ts) until the next Save.
 // A post's blob SHA, as loaded, is the conflict check: a write naming another SHA gets 409 { error: 'conflict' }.
 // Vault admins do everything. Blog maintainers (the Vault permission blog.maintain, db.ts) edit any post: they list,
@@ -54,6 +56,7 @@ import { copyImages, deleteOld, discardCopies, ImageMoveError, rewriteImageRefs,
 import {
   applyPostInput, FrontMatterError, parsePostFile, postInputFromFile, SaveConflictError, SAVE_CONFLICT_MESSAGE, serializePostFile, SiteContentConfigError, SiteContentError,
 } from '../site-content/index.ts';
+import { withPortalUserTrailer } from '../site-repo/config.ts';
 import { registerBlogImages } from './blog-images.ts';
 import { head, pill } from './routes.ts';
 import { html, raw, type Html } from './html.ts';
@@ -239,6 +242,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     if (err instanceof SiteContentConfigError) throw jsonError(503, { error: 'not_configured', message: err.message });
     if (err instanceof SiteContentError) {
       if (err.status === 400) throw jsonError(400, { error: err.code, message: err.message });
+      if (err.code === 'publishing_disabled') throw jsonError(503, { error: 'publishing_disabled', message: err.message });
       if (err.status === 404) throw jsonError(404, { error: 'not_found', message: 'No such blog post.' });
       console.error(`blog: ${err.message}`);
       throw jsonError(502, { error: 'upstream', message: 'The website repository on GitHub could not be reached or refused the change. Nothing was saved; try again.' });
@@ -269,7 +273,9 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     }
     return committed ? fromRepo(committed) : null;
   };
-  const commitMessage = (verb: string, what: string, u: User) => `blog: ${verb} ${what}\n\nBy ${h.actor(u)} in the Vault Studio Portal.`;
+  // Committed by the bot user; the trailer says who in the portal made the change.
+  const commitMessage = (verb: string, what: string, u: User) =>
+    withPortalUserTrailer(`blog: ${verb} ${what}\n\nBy ${h.actor(u)} in the Vault Studio Portal.`, u.login);
 
   // A Save: create (sha null), update, or rename (a new slug), each one commit. Clears the post's autosave.
   const commit = async (u: User, slug: string, sha: string | null, input: BlogPostInput, verb?: string): Promise<{ post: EditorPost; move?: unknown }> => {

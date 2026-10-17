@@ -8,7 +8,10 @@
 //   deletePost(slug, {sha, message})  removes the post's folder: one commit
 //   renamePost(from, to, {sha, message, raw?})  moves the post's folder (and optionally writes new text): one commit
 // The token is sent only in the Authorization header and is never logged; it is removed from any error message.
+// Every commit is authored and committed by the bot user (config `author`); the caller's message carries the
+// Portal-User trailer. With SITE_PUBLISHING_ENABLED=false every write fails (503 publishing_disabled) before a request.
 import { Buffer } from 'node:buffer';
+import { sitePublishingEnabled } from '../site-repo/config.ts';
 import { checkSiteContentConfig, readSiteContentConfig, type SiteContentConfig } from './config.ts';
 import { SaveConflictError, SiteContentConfigError, SiteContentError } from './errors.ts';
 
@@ -95,6 +98,13 @@ export function createSiteContentClient(opts: SiteContentClientOptions = {}): Si
   }
 
   const repoPath = () => `/repos/${conf().repo}`;
+  // Read on every write, so turning publishing off takes effect at once.
+  const checkPublishing = () => {
+    if (!sitePublishingEnabled(opts.env)) {
+      throw new SiteContentError(503, 'publishing_disabled', 'Publishing to the website repository is turned off here (SITE_PUBLISHING_ENABLED=false). Nothing was saved.');
+    }
+  };
+  const identity = () => ({ name: conf().author.name, email: conf().author.email });
   const postPath = (slug: string) => `${conf().blogDir}/${slug}/index.md`;
   const checkSlug = (slug: string) => {
     if (!isPostSlug(slug)) throw new SiteContentError(400, 'bad_slug', `"${String(slug).slice(0, 80)}" is not a post folder name.`);
@@ -163,10 +173,11 @@ export function createSiteContentClient(opts: SiteContentClientOptions = {}): Si
 
   async function putPost(slug: string, raw: string, o: { sha: string | null; message: string }): Promise<WriteResult> {
     checkSlug(slug);
+    checkPublishing();
     const c = conf();
     const path = postPath(slug);
     const r = await request('PUT', `${repoPath()}/contents/${encPath(path)}`,
-      { message: o.message, content: b64(raw), branch: c.branch, ...(o.sha ? { sha: o.sha } : {}) });
+      { message: o.message, content: b64(raw), branch: c.branch, author: identity(), committer: identity(), ...(o.sha ? { sha: o.sha } : {}) });
     // 409: the SHA is not the file's; 422: "sha" missing (the file exists) or wrong; 404 with a SHA: the file is gone.
     const msg = String(obj(r.json).message ?? '');
     if (r.status === 409 || (r.status === 422 && /sha/i.test(msg)) || (r.status === 404 && o.sha)) throw await conflict(slug);
@@ -202,7 +213,8 @@ export function createSiteContentClient(opts: SiteContentClientOptions = {}): Si
       const baseTree = String(obj(obj(commit.json).tree).sha ?? '');
       const entries = await change(head);
       const tree = await call('POST', `${repoPath()}/git/trees`, { base_tree: baseTree, tree: entries });
-      const made = await call('POST', `${repoPath()}/git/commits`, { message, tree: String(obj(tree.json).sha ?? ''), parents: [head] });
+      const made = await call('POST', `${repoPath()}/git/commits`,
+        { message, tree: String(obj(tree.json).sha ?? ''), parents: [head], author: identity(), committer: identity() });
       const sha = String(obj(made.json).sha ?? '');
       const upd = await request('PATCH', refPath, { sha, force: false });
       if (upd.status === 200) return sha;
@@ -221,6 +233,7 @@ export function createSiteContentClient(opts: SiteContentClientOptions = {}): Si
 
   async function deletePost(slug: string, o: { sha: string; message: string }): Promise<{ commit: string }> {
     checkSlug(slug);
+    checkPublishing();
     const commit = await commitChange(slug, o.message, async (head) =>
       (await loadedFiles(slug, o.sha, head)).map((f) => ({ path: f.path, mode: f.mode, type: 'blob', sha: null })));
     return { commit };
@@ -229,6 +242,7 @@ export function createSiteContentClient(opts: SiteContentClientOptions = {}): Si
   async function renamePost(from: string, to: string, o: { sha: string; message: string; raw?: string }): Promise<WriteResult> {
     checkSlug(from); checkSlug(to);
     if (from === to) throw new SiteContentError(400, 'bad_slug', 'A post is renamed to a different slug.');
+    checkPublishing();
     const blogDir = conf().blogDir;
     let indexSha = o.sha;
     if (o.raw !== undefined) {

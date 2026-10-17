@@ -1,7 +1,10 @@
 // The deploy bar: whether a deploy of this system is running, read from GitHub Actions. Two workflows deploy it: this
 // repository's "Deploy (portal and site)" and vault-site's "Deploy (site)". A run counts for this system when it is on
-// the system's branch (main is staging, production is production). The portal asks GitHub at most once per
+// the system's branch: here main is staging and production is production; in vault-site the portal's commits go to
+// staging or production (site-repo/config.ts), so its runs are read on that branch. The portal asks GitHub at most once per
 // CACHE_MS, whatever the number of pages open; without DEPLOY_STATUS_GITHUB_TOKEN nothing here runs.
+
+import { PRODUCTION_SITE_BRANCH, STAGING_SITE_BRANCH } from './site-repo/config.ts';
 
 export type DeployKind = 'portal' | 'site';
 export type DeployEnvironment = 'staging' | 'production';
@@ -105,6 +108,13 @@ export function deployBranch(opts: { isStaging: boolean; environment?: string; s
   return null;
 }
 
+// The vault-site branch this system's site deploys run on: the branch the portal commits to (VAULT_SITE_BRANCH when
+// set), staging for the staging system and production for production; null where deployBranch is null.
+export function siteDeployBranch(opts: { isStaging: boolean; environment?: string; siteBranch?: string }): string | null {
+  if (!opts.isStaging && opts.environment?.trim() !== 'production') return null;
+  return opts.siteBranch?.trim() || (opts.isStaging ? STAGING_SITE_BRANCH : PRODUCTION_SITE_BRANCH);
+}
+
 export type RunsFetcher = (wf: DeployWorkflow, branch: string) => Promise<WorkflowRun[]>;
 
 // Reads a workflow's latest runs on a branch from GitHub's API: the workflow's id (by its name; kept for the life of
@@ -146,8 +156,9 @@ export class DeployStatusCache {
   private pending: Promise<DeployStatus> | null = null;
   private readonly fetchRuns: RunsFetcher;
   private readonly branch: string;
-  private readonly opts: { now?: () => number; workflows?: readonly DeployWorkflow[] };
-  constructor(fetchRuns: RunsFetcher, branch: string, opts: { now?: () => number; workflows?: readonly DeployWorkflow[] } = {}) {
+  // siteBranch: the branch vault-site's workflows are read on (default: `branch`, as for this repository's).
+  private readonly opts: { now?: () => number; workflows?: readonly DeployWorkflow[]; siteBranch?: string };
+  constructor(fetchRuns: RunsFetcher, branch: string, opts: { now?: () => number; workflows?: readonly DeployWorkflow[]; siteBranch?: string } = {}) {
     this.fetchRuns = fetchRuns;
     this.branch = branch;
     this.opts = opts;
@@ -171,9 +182,10 @@ export class DeployStatusCache {
   private async refresh(): Promise<DeployStatus> {
     try {
       const workflows = this.opts.workflows ?? DEPLOY_WORKFLOWS;
-      const runs = await Promise.all(workflows.map((wf) => this.fetchRuns(wf, this.branch)));
+      const branchOf = (wf: DeployWorkflow) => (wf.kind === 'site' && this.opts.siteBranch) || this.branch;
+      const runs = await Promise.all(workflows.map((wf) => this.fetchRuns(wf, branchOf(wf))));
       const now = this.now();
-      const deploys = workflows.map((wf, i) => deployFor(runs[i], wf, this.branch, now)).filter((d): d is Deploy => d !== null);
+      const deploys = workflows.map((wf, i) => deployFor(runs[i], wf, branchOf(wf), now)).filter((d): d is Deploy => d !== null);
       this.value = { deploys };
       this.fetchedAt = now;
       return this.value;

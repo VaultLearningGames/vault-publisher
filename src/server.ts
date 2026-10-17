@@ -76,6 +76,7 @@ const app = createApp({
       environment: config.deployEnvironment,
       stagingBranch: config.deployStatusStagingBranch,
       productionBranch: config.deployStatusProductionBranch,
+      siteBranch: process.env.VAULT_SITE_BRANCH?.trim() || undefined,
     },
   },
   previewRetentionDays: config.previewRetentionDays,

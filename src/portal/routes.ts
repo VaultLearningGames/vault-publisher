@@ -24,7 +24,7 @@ import { githubAccount, githubRepository, registerPeople, type GitHubAccountLook
 import { buildOrigin, registerUploads } from './uploads.ts';
 import { registerBlogAdmin } from './blog-admin.ts';
 import type { MonitorEnv } from '../url-monitor.ts';
-import { DeployStatusCache, deployBranch, getScheduledDeploy, githubRunsFetcher, settleScheduled, type DeployStatus, type RunsFetcher, type SettingsStore } from '../deploy-status.ts';
+import { DeployStatusCache, deployBranch, siteDeployBranch, getScheduledDeploy, githubRunsFetcher, settleScheduled, type DeployStatus, type RunsFetcher, type SettingsStore } from '../deploy-status.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -48,7 +48,7 @@ export interface PortalConfig {
   githubAccount?: GitHubAccountLookup; // injected in tests
   githubRepository?: GitHubRepositoryLookup; // injected in tests
   // The deploy bar (src/deploy-status.ts). No token (and no fetchRuns): no running deploys, only scheduled ones.
-  deployStatus?: { token?: string; environment?: string; stagingBranch?: string; productionBranch?: string; fetchRuns?: RunsFetcher; now?: () => number };
+  deployStatus?: { token?: string; environment?: string; stagingBranch?: string; productionBranch?: string; siteBranch?: string; fetchRuns?: RunsFetcher; now?: () => number };
 }
 
 type ReleaseResult = { release: Release; url: string };
@@ -214,7 +214,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const ds = cfg.deployStatus;
   const deployFrom = deployBranch({ isStaging: stagingProductionUrl(cfg.baseUrl) !== null, environment: ds?.environment, stagingBranch: ds?.stagingBranch, productionBranch: ds?.productionBranch });
   const fetchRuns = ds?.fetchRuns ?? (ds?.token ? githubRunsFetcher(ds.token) : null);
-  deployStatus = fetchRuns && deployFrom ? new DeployStatusCache(fetchRuns, deployFrom, { now: ds?.now }) : null;
+  const siteFrom = siteDeployBranch({ isStaging: stagingProductionUrl(cfg.baseUrl) !== null, environment: ds?.environment, siteBranch: ds?.siteBranch });
+  deployStatus = fetchRuns && deployFrom ? new DeployStatusCache(fetchRuns, deployFrom, { now: ds?.now, siteBranch: siteFrom ?? undefined }) : null;
   scheduledStore = db;
   deployNow = ds?.now;
   const deployCache = deployStatus;

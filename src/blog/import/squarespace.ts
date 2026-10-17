@@ -380,7 +380,7 @@ export function importTags(item: SquarespaceItem): string[] {
     const s = slugify(name);
     if (!s || seen.has(s)) continue;
     seen.add(s);
-    out.push(name);
+    out.push(s); // the site's tags are kebab-case (docs/portal-contract.json)
   }
   return out.slice(0, 20);
 }

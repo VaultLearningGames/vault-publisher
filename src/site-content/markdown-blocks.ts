@@ -108,6 +108,15 @@ function imageMarkdown(b: Extract<Block, { type: 'image' }>): string | null {
 function blockMarkdown(b: Block): string | null {
   switch (b.type) {
     case 'heading': return `${'#'.repeat(b.level)} ${escapeText(b.text, true)}`;
+    case 'list': {
+      const lines: string[] = [];
+      for (let i = 0; i < b.items.length; i++) {
+        const md = paragraphMarkdown(b.items[i]);
+        if (md === null || /\n[ \t]*\n/.test(md)) return null;
+        lines.push(`${b.ordered ? `${i + 1}.` : '-'} ${md.replace(/\\\n/g, '\\\n   ')}`);
+      }
+      return lines.join('\n');
+    }
     case 'divider': return '---';
     case 'image': return imageMarkdown(b);
     case 'paragraph':
@@ -292,6 +301,20 @@ function chunkBlock(chunk: string): Block {
     const level = Math.min(4, Math.max(2, m[1].length)) as 2 | 3 | 4;
     return { type: 'heading', level, text: unescapeText(m[2] ?? '') };
   }
+  const lm = /^(?:[-*+]|\d{1,9}[.)])[ \t]+\S/.exec(chunk);
+  if (lm) {
+    const ordered = /^\d/.test(chunk);
+    const marker = ordered ? /^\d{1,9}[.)][ \t]+/ : /^[-*+][ \t]+/;
+    const items: string[] = [];
+    let ok = true;
+    for (const line of chunk.split('\n')) {
+      if (marker.test(line)) items.push(line.replace(marker, ''));
+      else if (items.length && /^ {2,}\S/.test(line)) items[items.length - 1] += '\n' + line.trim();
+      else if (items.length && /^\S/.test(line) && items.at(-1)!.endsWith('\\')) items[items.length - 1] += '\n' + line;
+      else { ok = false; break; }
+    }
+    if (ok && items.length) return { type: 'list', ordered, items: items.map(parseInline) };
+  }
   if (/^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(chunk)) return { type: 'divider' };
   if ((m = /^!\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^()\\\s])+)\)$/.exec(chunk))) return { type: 'image', src: unescapeText(m[2]), alt: unescapeText(m[1]) };
   if ((m = /^\{\{<\s*(?:image|figure)\s([\s\S]*?)\s*\/?>\}\}$/.exec(chunk))) {
@@ -343,12 +366,13 @@ export function htmlToBlocks(html: string): Block[] | string {
     if (href !== undefined) sp.href = href;
     spans.push(sp);
   };
+  let list: { ordered: boolean; items: Span[][] } | null = null;
   const flushP = () => {
     if (!inP) return;
     inP = false;
     while (spans.length && /^\s*$/.test(spans.at(-1)!.text) && !spans.at(-1)!.marks) spans.pop();
     while (spans.length && /^\s*$/.test(spans[0].text) && !spans[0].marks) spans.shift();
-    if (spans.length) out.push({ type: 'paragraph', children: spans });
+    if (spans.length) { if (list) list.items.push(spans); else out.push({ type: 'paragraph', children: spans }); }
     spans = [];
   };
   const re = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:[^>"']|"[^"]*"|'[^']*')*)>|([^<]+)/g;
@@ -366,8 +390,16 @@ export function htmlToBlocks(html: string): Block[] | string {
       case 'strong': case 'b': marks.bold += close ? -1 : 1; break;
       case 'em': case 'i': marks.italic += close ? -1 : 1; break;
       case 'code': marks.code += close ? -1 : 1; break;
+      case 'ul': case 'ol':
+        if (close) { if (list) { out.push({ type: 'list', ordered: list.ordered, items: list.items }); list = null; } }
+        else { flushP(); list = { ordered: name === 'ol', items: [] }; }
+        break;
+      case 'li':
+        if (!list) return '<li> outside a list';
+        if (close) { flushP(); } else { flushP(); inP = true; }
+        break;
       case 'a': if (close) href = undefined; else { const h = /href\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs); href = h ? decodeEntities(h[1] ?? h[2]) : undefined; } break;
-      default: return `<${name}> is not supported on the site (Markdown has p, headings, bold, italic, code, links and line breaks only)`;
+      default: return `<${name}> is not supported on the site (Markdown has paragraphs, headings, lists, bold, italic, code, links and line breaks)`;
     }
   }
   flushP();

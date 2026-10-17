@@ -31,9 +31,18 @@ test('editor HTML becomes Markdown', () => {
 });
 
 test('editor HTML outside the Markdown vocabulary is rejected with a message', () => {
-  assert.match(String(htmlToBlocks('<ul><li>a</li></ul>')), /not supported/);
+  assert.match(String(htmlToBlocks('<table></table>')), /not supported/);
   const r = validateBlocks([{ type: 'paragraph', html: '<blockquote>q</blockquote>' }]);
   assert.equal(r.ok, false);
   assert.match(JSON.stringify(r), /not supported on the site/);
   assert.equal(validateBlocks([{ type: 'paragraph', html: '<p data-indent="2">x</p>' }]).ok, false);
+});
+
+test('lists: Markdown lists are list blocks and round-trip; editor list HTML becomes a Markdown list', () => {
+  const md = 'Intro.\n\n- one **bold**\n- two [l](/x)\n\n1. a\n2. b\n';
+  const blocks = markdownToBlocks(md);
+  assert.deepEqual(blocks.map((b) => b.type), ['paragraph', 'list', 'list']);
+  assert.equal(blocksToMarkdown(blocks), md);
+  assert.equal(blocksToMarkdown([{ type: 'paragraph', html: '<ul><li>x</li><li>y <em>z</em></li></ul>' }]), '- x\n- y *z*\n');
+  assert.equal(validateBlocks([{ type: 'list', ordered: false, items: [[{ text: 'a' }]] }]).ok, true);
 });

@@ -338,6 +338,8 @@ jobs:
           SUPPORT_URL=${{ vars.SUPPORT_URL }}
           GA_PROPERTY_ID=${{ vars.GA_PROPERTY_ID }}
           VAULT_SITE_APP_INSTALLATION_ID=${{ vars.SERVICE == 'vault-publisher-staging' && '172505117' || '172505182' }}
+          SITE_COMMIT_AUTHOR_NAME=${{ vars.SERVICE == 'vault-publisher-staging' && 'vault-portal-staging[bot]' || 'vault-portal-production[bot]' }}
+          SITE_COMMIT_AUTHOR_EMAIL=${{ vars.SERVICE == 'vault-publisher-staging' && '344094146+vault-portal-staging[bot]@users.noreply.github.com' || '344094182+vault-portal-production[bot]@users.noreply.github.com' }}
           VAULT_SITE_APP_BOT_LOGIN=${{ vars.SERVICE == 'vault-publisher-staging' && 'vault-portal-staging[bot]' || 'vault-portal-production[bot]' }}
           SITE_REBUILD_ENVIRONMENT=${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
         secrets: |-

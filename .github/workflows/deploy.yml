@@ -191,11 +191,13 @@ jobs:
         cloudflare/site/check.sh | tail -40
 
     # The build, for the publish job: exactly what was checked above.
+    # Tarred because some page folders have a ":" in their name (game-cards/category/Dev:+Field+Day+Lab), which the
+    # artifact format refuses; the hosting needs that spelling, so the build is kept as it is.
+    - run: tar -C site/public -cf site-build.tar .
     - uses: actions/upload-artifact@v7
       with:
         name: site-${{ github.run_id }}
-        path: site/public
-        include-hidden-files: true
+        path: site-build.tar
         if-no-files-found: error
         retention-days: 1
 
@@ -412,7 +414,8 @@ jobs:
     - uses: actions/download-artifact@v8
       with:
         name: site-${{ github.run_id }}
-        path: site/public
+        path: .
+    - run: mkdir -p site/public && tar -C site/public -xf site-build.tar
     - run: npm ci --prefix cloudflare/site
 
     # The site goes out after the portal, so the two change within the same minute. A deploy replaces the Worker's

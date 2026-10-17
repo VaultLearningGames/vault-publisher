@@ -420,6 +420,9 @@ button[aria-busy=true] { opacity: .6; cursor: progress; }
 td.nowrap, .nowrap { white-space: nowrap; }
 table.site-games td.r { white-space: nowrap; }
 table.site-games .avail { cursor: help; }
+table.site-games .catalog-thumb { width: 64px; padding-right: 0; }
+.catalog-hero-thumb { width: 64px; height: 36px; object-fit: cover; border-radius: 4px; display: block; }
+.catalog-hero-placeholder { width: 64px; height: 36px; border-radius: 4px; display: block; background: #e5e7eb; }
 .feat-toggle { display: flex; flex-direction: column; gap: 3px; margin: 0; }
 .feat-toggle .err:empty { display: none; }
 table.site-games tr.is-feat:has(+ tr.feat-edit:not([hidden])) > td { border-bottom: 0; }

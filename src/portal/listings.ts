@@ -29,6 +29,20 @@ function minSizeField(f: ListingFields, editable: boolean): Html {
     <span class="hint">The smallest space (width × height, below Vault’s player bar) the game is playable in. On a smaller screen Play says what’s needed and offers to try anyway. Empty: the site’s default.${editable ? '' : ' Set by Vault; ask Vault to change it.'}</span></div>`;
 }
 
+// A hero image's address for the Game Catalog's thumbnail: an http(s) URL or a root-relative path, trimmed;
+// anything else (empty, "//host", javascript:, data:, a bare site path) is null, and the row gets a grey box.
+export function heroThumbSrc(value: string | null | undefined): string | null {
+  const v = typeof value === 'string' ? value.trim() : '';
+  return /^https?:\/\//.test(v) || (v.startsWith('/') && !v.startsWith('//')) ? v : null;
+}
+
+export function heroThumb(value: string | null | undefined): Html {
+  const src = heroThumbSrc(value);
+  return src
+    ? html`<img src="${src}" alt="" width="64" height="36" loading="lazy" decoding="async" class="catalog-hero-thumb">`
+    : html`<span class="catalog-hero-placeholder" aria-hidden="true"></span>`;
+}
+
 export interface ListingHelpers {
   db: Db;
   deps: PortalDeps;
@@ -225,7 +239,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const featBy = new Map(feat.games.map((e) => [e.slug, e]));
     const full = feat.games.length >= MAX_FEATURED;
     const FA = '/portal/api/vault/featured';
-    const COLS = 9;
+    const COLS = 10;
     const featCell = (l: ListingRow, e: FeaturedEntry | undefined) => {
       const title = l.draft.title || l.slug;
       const off = !l.published;
@@ -272,7 +286,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
       .sort((a, b) => compareByTestingStatus(a.status, b.status) || a.i - b.i)
       .map(({ l }) => {
         const e = featBy.get(l.slug);
-        return html`<tr id="game-${l.slug}" class="${e ? 'is-feat' : ''}"><td class="proj"><a href="${link(l)}"><b>${l.draft.title || l.slug}</b></a><span>${l.slug}</span></td>
+        return html`<tr id="game-${l.slug}" class="${e ? 'is-feat' : ''}"><td class="catalog-thumb">${heroThumb(l.draft.hero_image)}</td><td class="proj"><a href="${link(l)}"><b>${l.draft.title || l.slug}</b></a><span>${l.slug}</span></td>
           <td>${l.studio_name}</td><td>${P.state(l)}</td><td>${featCell(l, e)}</td><td>${P.hosting(l, gameOf(l))}</td>
           ${availabilityCells(run, l.slug)}<td class="small nowrap">${ago(l.updated_at)}</td></tr>${e ? featRow(l, e) : ''}`;
       });
@@ -281,7 +295,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const actions = html`<a class="btn" href="https://github.com/${h.deps.adminRepository}/actions/workflows/check-games.yml" target="_blank" rel="noopener">Run a check ↗</a><a class="btn" href="/v1/catalog" target="_blank">Catalog JSON ↗</a>`;
     const body = html`${head('Game Catalog', sub, actions)}
       ${queue.length ? html`<h2>Waiting for Vault (${queue.length})</h2><div class="grid">${queue}</div>` : html`<div class="card"><p class="muted">No site changes are waiting for review.</p></div>`}
-      <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th>Game</th><th>Studio</th><th>Site</th><th>Featured</th><th>Hosted by</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
+      <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th scope="col" class="catalog-thumb">Image</th><th>Game</th><th>Studio</th><th>Site</th><th>Featured</th><th>Hosted by</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
         <tbody>${rows.length ? rows : html`<tr><td colspan="${COLS}" class="muted">No games yet.</td></tr>`}</tbody></table></div>
       ${featuring ? '' : html`<p class="small muted">Only Vault release managers can change the featured games.</p>`}`;
     return h.page(c, 'Game Catalog', body, { active: 'vault-listings' });

@@ -8,12 +8,5 @@ cloudflare
 .git
 *.db*
 .env
-# The website: previews need its templates, content, data, stylesheets and scripts, not its images or a build.
-site/public
-site/resources
-site/static
-site/scripts
-site/data/catalog.json
-site/themes/*/static/sq/img
-site/themes/*/static/sq/fonts
-site/themes/*/static/*.ico
+# The old in-repo website (deprecated): the image carries vault-site instead (Dockerfile, stage "site").
+site

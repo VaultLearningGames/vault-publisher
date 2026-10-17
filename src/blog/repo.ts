@@ -1,6 +1,6 @@
 // The blog post's fields as the portal's editor and API work with them. Posts are Markdown files in the vault-site
 // repository (blog/siteRepo.ts; site-content/post-file.ts maps a file to these fields and back). The portal's old
-// blog tables (db.ts v17, v18) are left in place, unused.
+// blog tables (db.ts v17, v18) were exported once (scripts/export-blog.ts) and are retired (Db.retireBlogTables).
 import type { Block } from './blocks.ts';
 
 export type BlogStatus = 'published' | 'private';

@@ -41,8 +41,9 @@ export interface Config {
   // Where an unsaved listing preview opens, ADDRESS/_preview/TOKEN/ (listing-preview.ts): this portal, which renders
   // it itself, and any site that still renders its own. The first is the editor's main Preview button.
   previewSites: PreviewSite[];
-  // The website's source (Hugo: hugo.toml, content/, data/, themes/), carried in the image, and the Hugo binary: the
-  // portal renders listing previews from them (portal/site-preview.ts). The pages load their assets from siteUrl.
+  // SITE_DIR as set ('site' when it isn't). The previews' site source is found by site-dir.ts (resolveSiteDir: SITE_DIR,
+  // the enclosing vault-site checkout, or the image's /app/vault-site), not from this. hugoBin is the Hugo binary the
+  // portal renders previews with (portal/site-preview.ts). The pages load their assets from siteUrl.
   siteDir: string;
   hugoBin: string;
   // The portal's "Need support?" link: the invitation to the Slack workspace. '' hides the link.

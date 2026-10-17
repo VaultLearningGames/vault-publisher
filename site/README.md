@@ -1,5 +1,7 @@
 # The Vault website
 
+> **Deprecated:** the site now lives in [VaultLearningGames/vault-site](https://github.com/VaultLearningGames/vault-site); this copy is unused by the portal image and will be deleted.
+
 The public site, vaultlearninggames.org (staging: vaultlearninggames-staging.org): Hugo, theme
 [`vault-squarespace`](themes/vault-squarespace/README.md), a replica of the site as it was on Squarespace, with the
 same addresses. This folder is where the site is edited; it moved here from `VaultLearningGames/vault-hugo-rebuild`

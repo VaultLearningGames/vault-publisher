@@ -1,7 +1,7 @@
 // Previewing a listing's unsaved edits on the website. The editor's Preview button posts the form as it is; the
 // fields are cleaned up exactly as a save would (nothing is saved) and turned into the game object /v1/catalog would
 // publish. That is kept for PREVIEW_TTL_MS under a random token. The portal itself renders the page, with the
-// website's own templates (site-preview.ts runs Hugo on site/), at
+// website's own templates (site-preview.ts runs Hugo on the vault-site source, site-dir.ts), at
 //   GET /_preview/TOKEN/              what the editor's Preview button opens (PREVIEW_SITES points at this portal)
 //   GET /v1/listing-previews/TOKEN    the same page
 // A caller that asks /v1/listing-previews/TOKEN for JSON (Accept: application/json, and not text/html) gets the data

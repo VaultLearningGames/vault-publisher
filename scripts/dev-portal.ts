@@ -13,11 +13,20 @@ import { saveFeatured } from '../src/featured.ts';
 import { parsePreviewSites } from '../src/config.ts';
 import { buildCatalog } from '../src/catalog.ts';
 import { SitePreviewer } from '../src/portal/site-preview.ts';
+import { resolveSiteDir } from '../src/site-dir.ts';
 import { countLevels, parseRun, type GameCheck } from '../src/game-checks.ts';
 import { parseRun as parseSiteRun } from '../src/site-checks.ts';
 import { Analytics } from '../src/analytics/ga.ts';
 import { parseGaPropertyId } from '../src/config.ts';
 import { fakeGa } from './fake-ga.ts';
+
+// The site source previews render with: vault-site when it can be found, else the deprecated in-repo site/.
+function devSiteDir(): string {
+  try { return resolveSiteDir(); } catch (err) {
+    console.warn(`dev portal: ${(err as Error).message}; previews use the old in-repo site/`);
+    return new URL('../site/', import.meta.url).pathname;
+  }
+}
 
 class MemoryStorage implements Storage {
   objects = new Map<string, Uint8Array>();
@@ -151,11 +160,12 @@ const app = createApp({
   adminRepository: 'VaultLearningGames/vault-publisher', adminEnvironment: 'production',
   previewRetentionDays: 90, taskInvokerEmail: 'dev@example.org',
   siteUrl: SITE_URL,
-  // Preview opens on this dev portal, which renders it with ../site (Hugo must be installed); the page loads its
-  // CSS and images from SITE_URL.
+  // Preview opens on this dev portal, which renders it with vault-site (Hugo must be installed): SITE_DIR, or the
+  // vault-site checkout this repository is the portal/ submodule of, else the old in-repo site/ (src/site-dir.ts). The
+  // page loads its CSS and images from SITE_URL.
   previewSites: parsePreviewSites(process.env.PREVIEW_SITES ?? `Site=http://localhost:${PORT}`),
   sitePreview: new SitePreviewer({
-    siteDir: new URL('../site/', import.meta.url).pathname, siteUrl: SITE_URL, portalUrl: `http://localhost:${PORT}`,
+    siteDir: devSiteDir(), siteUrl: SITE_URL, portalUrl: `http://localhost:${PORT}`,
     catalog: () => buildCatalog(db, 'https://cdn.vaultlearninggames.org'),
   }),
   // Analytics: a made-up property, or the real one with GA_PROPERTY_ID (read with your gcloud application default

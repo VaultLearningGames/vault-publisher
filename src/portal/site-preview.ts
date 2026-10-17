@@ -1,5 +1,7 @@
 // Rendering a listing preview as the website would show it: Hugo, run in this process's container against the site
-// source (site/, carried in the image), with the published catalog and the previewed game put in its place.
+// source (the vault-site repository: the pinned copy in the image, or the checkout the portal is a submodule of; see
+// site-dir.ts), with the published catalog and the previewed game put in its place. Builds run in a temporary copy;
+// the site source itself is never written to.
 //
 // The page is then served from the portal (listing-preview.ts: GET /_preview/TOKEN/ and /v1/listing-previews/TOKEN),
 // not from the site, so:
@@ -14,6 +16,7 @@ import { spawn } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, relative, resolve, sep } from 'node:path';
+import { resolveSiteDir } from '../site-dir.ts';
 
 export const HUGO_TIMEOUT_MS = 25_000;
 export const CACHE_MS = 3 * 60_000;
@@ -126,8 +129,9 @@ export function mergeCatalog(catalog: CatalogLike, input: PreviewInput): Catalog
 }
 
 export interface SitePreviewOptions {
-  // The site source: hugo.toml, content/, data/, layouts/, themes/ and preview/hugo.preview.toml.
-  siteDir: string;
+  // The site source: hugo.toml, content/, data/, layouts/, themes/ and preview/hugo.preview.toml. Default:
+  // resolveSiteDir() (site-dir.ts).
+  siteDir?: string;
   // The public site (https://vaultlearninggames.org): Hugo's baseURL, and where the page's assets load from.
   siteUrl: string;
   // This portal: the site's forms post to it, as in the site build.
@@ -153,7 +157,7 @@ export class SitePreviewer {
       hugo: hugoRunner(), timeoutMs: HUGO_TIMEOUT_MS, maxBuilds: MAX_BUILDS, cacheMs: CACHE_MS, now: () => Date.now(),
       log: (line) => console.log(`preview: ${line}`),
       ...options,
-      siteDir: resolve(options.siteDir),
+      siteDir: resolve(options.siteDir ?? resolveSiteDir()),
       siteUrl: options.siteUrl.replace(/\/+$/, ''),
       portalUrl: options.portalUrl.replace(/\/+$/, ''),
     };

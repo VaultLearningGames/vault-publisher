@@ -1,0 +1,4 @@
+# The VaultLearningGames/vault-site commit the portal image renders previews with (Dockerfile, stage "site").
+# One ref on the first non-comment line: a commit SHA (all 40 characters fetch fastest) or a tag. To move it, see
+# "Updating the vault-site pin" in the README.
+ce6b26b

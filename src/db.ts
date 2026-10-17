@@ -556,6 +556,8 @@ export interface StaleBuild {
 }
 
 const now = () => new Date().toISOString();
+// The old blog tables (v17, v18), children first so an empty one can be dropped (Db.retireBlogTables).
+const BLOG_TABLES = ['blog_slug_moves', 'blog_slug_redirects', 'blog_post_tags', 'blog_tags', 'blog_posts'];
 const GAME_CHECKS_KEPT = 120;
 const SITE_CHECKS_KEPT = 60;
 
@@ -568,6 +570,31 @@ export class Db {
     // WAL is required by Litestream; busy_timeout covers Litestream's brief checkpoint locks.
     this.sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;');
     this.migrate();
+    this.retireBlogTables();
+  }
+
+  // The blog moved to Markdown in vault-site (src/blog/siteRepo.ts; the posts were exported by scripts/export-blog.ts),
+  // so the old blog tables (v17, v18) are retired: renamed to retired_<name>, data and all, which nothing reads but the
+  // export. Done here rather than as a numbered migration so the schema version stays where older images expect it;
+  // a rename keeps it reversible (ALTER TABLE retired_blog_posts RENAME TO blog_posts). Idempotent: a table already
+  // retired is left alone, and an empty one recreated beside its retired copy (a database replayed through v17) is
+  // dropped. Foreign keys between them follow the renames.
+  retireBlogTables(): void {
+    const exists = (t: string) => !!this.sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
+    const tables = BLOG_TABLES.filter((t) => exists(t));
+    if (!tables.length) return;
+    this.sqlite.exec('BEGIN');
+    try {
+      for (const t of tables) {
+        if (!exists(`retired_${t}`)) this.sqlite.exec(`ALTER TABLE ${t} RENAME TO retired_${t}`);
+        else if (!this.sqlite.prepare(`SELECT 1 FROM ${t} LIMIT 1`).get()) this.sqlite.exec(`DROP TABLE ${t}`);
+        else console.error(`db: ${t} has rows and retired_${t} exists too; both are left as they are`);
+      }
+      this.sqlite.exec('COMMIT');
+    } catch (err) {
+      this.sqlite.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   private migrate() {

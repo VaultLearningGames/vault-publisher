@@ -6,7 +6,7 @@ name: Deploy (portal and site)
 #   production  → production  vault-publisher          https://portal.vaultlearninggames.org
 #                             vault-site               https://vaultlearninggames.org
 # One run does both halves, from one commit: it builds the website (site/, Hugo) from that system's published
-# catalog, deploys the portal image (which carries site/ and Hugo, for listing previews) to Cloud Run, and publishes
+# catalog, deploys the portal image (which carries vault-site at vault-site.ref and Hugo, for previews) to Cloud Run, and publishes
 # the built website to the system's site Worker on Cloudflare (static hosting: cloudflare/site/wrangler.jsonc). So a
 # preview always renders with the templates of the site that is live.
 # Each GitHub environment ("staging", "production") holds that system's variables; Secret Manager secrets are

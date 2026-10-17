@@ -463,7 +463,8 @@ longer where the site is edited or deployed from. Details of the theme: [site/RE
 * **Game pages come from the portal**, not from files: `npm run site:catalog` saves this system's `GET /v1/catalog`
   to `site/data/catalog.json` (not in git), and `site/content/games/_content.gotmpl` turns each listing into a page.
 * **The blog is Markdown in `VaultLearningGames/vault-site`** (`content/blog/<slug>/index.md`), which the portal's blog
-  editor commits to (docs/setup.md, "The blog"). vault-site's own workflow builds and publishes it. The portal has no
+  editor commits to as `vault-portal-bot`, on the system's branch (`staging` or `production`; docs/setup.md, "The
+  blog"; docs/vault-site.md, "Who does what"). vault-site's own workflow builds and publishes it. The portal has no
   `/v1/blog` any more, so `npm run site:catalog` leaves this copy's blog empty.
 * **Build:** `VAULT_PORTAL=https://portal.vaultlearninggames-staging.org npm run site:build` → `site/public`
   (catalog, `hugo`, `site/scripts/squarespace-paths.mjs` for the `/game-cards/category|tag/…` addresses, then

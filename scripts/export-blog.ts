@@ -16,6 +16,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { parseArgs } from 'node:util';
 import { exportBlog, type ExportTarget } from '../src/blog/export.ts';
 import { createSiteContentClient, DEFAULT_BLOG_DIR } from '../src/site-content/index.ts';
+import { scriptPortalUser, withPortalUserTrailer } from '../src/site-repo/config.ts';
 
 const { values } = parseArgs({
   options: { out: { type: 'string' }, github: { type: 'boolean' }, yes: { type: 'boolean' }, db: { type: 'string' }, 'blog-dir': { type: 'string' } },
@@ -43,7 +44,7 @@ if (values.out) {
   const client = createSiteContentClient();
   target = {
     read: async (slug) => (await client.getPost(slug))?.raw ?? null,
-    async create(slug, raw) { await client.putPost(slug, raw, { sha: null, message: `blog: export ${slug} from the portal database` }); },
+    async create(slug, raw) { await client.putPost(slug, raw, { sha: null, message: withPortalUserTrailer(`blog: export ${slug} from the portal database`, scriptPortalUser()) }); },
   };
 }
 

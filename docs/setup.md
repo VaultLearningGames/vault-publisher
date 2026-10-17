@@ -650,8 +650,10 @@ needs no new credential and is at most one schedule interval late.
 
 ### The blog: posts as Markdown in vault-site
 
-Blog posts live in `VaultLearningGames/vault-site` as `content/blog/<slug>/index.md` on `main`, read and written by
-the portal's blog editor through GitHub's API (`src/site-content/`, `src/blog/siteRepo.ts`). Save, Publish,
+Blog posts live in `VaultLearningGames/vault-site` as `content/blog/<slug>/index.md` on the system's branch (the
+staging portal: `staging`; the production portal: `production`), read and written by the portal's blog editor through
+GitHub's API (`src/site-content/`, `src/blog/siteRepo.ts`, `src/site-repo/`). Every commit is made by the
+`vault-portal-bot` user and ends with a `Portal-User: <login>` trailer naming the editor. Save, Publish,
 Unpublish, a slug rename (new folder, `/blog/<old>/` added to `aliases`, the post's CDN images moved to
 `site/<new slug>/`) and Delete are each one commit; the file's SHA as loaded is the conflict check (409). Autosaves
 are not commits: they are kept in the portal's database (`blog_scratch`) until the next Save. Each commit to vault-site
@@ -662,11 +664,17 @@ connected):
 
 | Variable | Default | |
 |---|---|---|
-| `VAULT_SITE_GITHUB_TOKEN` | (none: required) | a fine-grained token for vault-site with *Contents: Read and write* only |
+| `VAULT_SITE_GITHUB_TOKEN` | (none: required) | `vault-portal-bot`'s fine-grained token for vault-site only: *Contents: Read and write*, *Metadata: Read*; one per system |
 | `VAULT_SITE_REPO` | `VaultLearningGames/vault-site` | |
-| `VAULT_SITE_BRANCH` | `main` | the branch posts are read from and committed to |
+| `VAULT_SITE_BRANCH` | `production` when `SITE_REBUILD_ENVIRONMENT` is `production`, else `staging` | the branch posts are read from and committed to; a commit there deploys that site |
 | `VAULT_SITE_BLOG_DIR` | `content/blog` | |
 | `VAULT_SITE_API_BASE` | `https://api.github.com` | |
+| `SITE_COMMIT_AUTHOR_NAME` | `vault-portal-bot` | the commits' author and committer |
+| `SITE_COMMIT_AUTHOR_EMAIL` | `vault-portal-bot@users.noreply.github.com` | |
+| `SITE_PUBLISHING_ENABLED` | on | `false` (or `0`, `no`, `off`) refuses every write to vault-site at once (503 `publishing_disabled`); reads still work |
+
+The one-time setup only people can do (the bot user, its tokens, branch protection) is in
+[ops-checklist.md](ops-checklist.md).
 
 ### The deploy bar
 
@@ -681,6 +689,9 @@ else. Settings:
 | `DEPLOY_STATUS_GITHUB_TOKEN` | (none: no bar) | the token above; empty or unset turns the bar off |
 | `DEPLOY_STATUS_STAGING_BRANCH` | `main` | the branch whose runs are the staging portal's deploys |
 | `DEPLOY_STATUS_PRODUCTION_BRANCH` | `production` | the branch whose runs are the production portal's deploys |
+
+vault-site's *Deploy (site)* runs are read on the branch the portal commits to there (`VAULT_SITE_BRANCH`, else
+`staging` or `production`), not on these.
 
 Which system a portal is: staging when its `PORTAL_URL` is a staging address (the one that shows the staging banner),
 production when it isn't and `SITE_REBUILD_ENVIRONMENT` (set by `deploy.yml`) is `production`; anything else (a local

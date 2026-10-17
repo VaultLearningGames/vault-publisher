@@ -28,6 +28,7 @@ import { buildImageKey, contentHash, imageUrl, sniffImageType } from '../src/blo
 import { SiteBlogRepo } from '../src/blog/siteRepo.ts';
 import { uniqueSlug } from '../src/blog/slug.ts';
 import { createSiteContentClient, DEFAULT_BLOG_DIR, parsePostFile } from '../src/site-content/index.ts';
+import { scriptPortalUser, withPortalUserTrailer } from '../src/site-repo/config.ts';
 import { createR2Storage, objectExists } from '../src/storage.ts';
 
 const { values, positionals } = parseArgs({
@@ -142,7 +143,7 @@ async function apply() {
   }
 
   const keep = (values.keep ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  const message = (verb: string, slug: string) => `blog: ${verb} ${slug} (the Squarespace blog import)`;
+  const message = (verb: string, slug: string) => withPortalUserTrailer(`blog: ${verb} ${slug} (the Squarespace blog import)`, scriptPortalUser());
   let target: ImportTarget;
   if (values.out) {
     const blogDir = resolve(values.out, values['blog-dir'] ?? DEFAULT_BLOG_DIR);

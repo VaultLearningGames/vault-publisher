@@ -6,6 +6,28 @@ deploy, is a git submodule of it at `portal/`. A vault-site commit runs vault-si
 publish only); a commit here runs this repository's tests and portal deploy. The portal image carries vault-site at the
 commit in `vault-site.ref` (README, [Previews and vault-site](../README.md#previews-and-vault-site)).
 
+## Who does what
+
+| | vault-site | the portal (this repository) |
+|---|---|---|
+| Owns | Hugo source, content, theme, its deploy workflow | the admin app and its own deploy |
+| Source of truth for site content | its files (blog posts: `content/blog/<slug>/index.md`; drafts: `draft: true`) | nothing: it keeps no copy |
+| Builds and publishes the site | *Deploy (site)*, on every push to `staging` (vaultlearninggames-staging.org) or `production` | never |
+| Changes the site | people, by commits and PRs | only by commits as `vault-portal-bot` (`src/site-repo/`, `src/site-content/`) |
+
+- The staging portal commits to vault-site's `staging` branch, the production portal to `production`
+  (`VAULT_SITE_BRANCH` overrides). A commit is the deploy: nobody has to publish anything, and the portal calls no
+  deploy API.
+- Every portal commit is authored and committed by `vault-portal-bot` and its message ends with a
+  `Portal-User: <GitHub login>` trailer, so `git log --format='%an %(trailers:key=Portal-User)'` says who did what.
+- The portal touches only `content/`, `data/`, `static/` and `assets/` (`src/site-repo/paths.ts`), never templates,
+  configuration or workflows.
+- `SITE_PUBLISHING_ENABLED=false` stops every portal write at once.
+- Site code (templates, styles) reaches production by a human-approved PR from `staging` to `production` in
+  vault-site; a new portal version reaches production by this repository's own human-gated deploy.
+
+The one-time setup (the bot user, its tokens, the branches and their protection): [ops-checklist.md](ops-checklist.md).
+
 ## The companion change in vault-site
 
 Made in vault-site, not here (this repository's change can't push to it):
@@ -41,8 +63,10 @@ both:
 
 From `portal/`, the portal finds this site as its parent folder and renders previews with it (portal/src/site-dir.ts).
 
-Blog posts are `content/blog/<slug>/index.md`; the portal's blog editor commits them here. A commit here builds and
-publishes the site (staging first; production when promoted); it doesn't deploy the portal.
+Blog posts are `content/blog/<slug>/index.md`; the portal's blog editor commits them here as vault-portal-bot (the
+staging portal to `staging`, the production portal to `production`). A push to either branch builds and publishes that
+site; it doesn't deploy the portal. Before merging a `staging` → `production` PR, remove or leave out test-only content
+created on staging.
 
 ## Updating the submodule and the portal's pin
 

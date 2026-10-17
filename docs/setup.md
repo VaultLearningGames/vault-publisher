@@ -667,6 +667,20 @@ then add `SITE_REBUILD_TOKEN=${{ vars.SERVICE }}-site-rebuild-token:latest` to t
 in `deploy.yml` (a secret that doesn't exist yet fails the deploy, so it isn't there until both systems have one).
 Without it the rebuild is off: Republish answers 409 and the blog changes with the next site build.
 
+### Blog posts as Markdown in vault-site (not used yet)
+
+With the repository split, posts move to `VaultLearningGames/vault-site` as `content/blog/<slug>/index.md`, read and
+written through GitHub's API (`src/site-content/`). Nothing in the portal uses it yet. Its settings, read when it is
+first used:
+
+| Variable | Default | |
+|---|---|---|
+| `VAULT_SITE_GITHUB_TOKEN` | (none: required) | a fine-grained token for vault-site with *Contents: Read and write* only |
+| `VAULT_SITE_REPO` | `VaultLearningGames/vault-site` | |
+| `VAULT_SITE_BRANCH` | `main` | the branch posts are read from and committed to |
+| `VAULT_SITE_BLOG_DIR` | `content/blog` | |
+| `VAULT_SITE_API_BASE` | `https://api.github.com` | |
+
 ## 9. Pilot
 
 Add the caller workflow from the README to a branch of `fielddaylab/wake`, push, and open

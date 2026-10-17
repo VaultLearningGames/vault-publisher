@@ -71,6 +71,12 @@ const app = createApp({
     baseUrl: config.portalUrl,
     vaultAdmins: config.vaultAdmins,
     supportUrl: config.supportUrl,
+    deployStatus: {
+      token: config.deployStatusGithubToken,
+      environment: config.deployEnvironment,
+      stagingBranch: config.deployStatusStagingBranch,
+      productionBranch: config.deployStatusProductionBranch,
+    },
   },
   previewRetentionDays: config.previewRetentionDays,
   siteUrl: config.siteUrl,

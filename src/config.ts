@@ -52,6 +52,13 @@ export interface Config {
   // zone (the property's days). No id: the pages say analytics isn't connected. See docs/analytics.md.
   gaPropertyId?: string;
   gaTimeZone: string;
+  // The deploy bar (src/deploy-status.ts): a GitHub token that can read Actions runs of vault-publisher and vault-site
+  // (Actions: read). None: no bar. Which system this is: the staging banner's PORTAL_URL, or deployEnvironment
+  // (SITE_REBUILD_ENVIRONMENT, set by deploy.yml) "production". The branches each system deploys from.
+  deployStatusGithubToken?: string;
+  deployEnvironment?: string;
+  deployStatusStagingBranch?: string;
+  deployStatusProductionBranch?: string;
 }
 
 // Where "Need support?" sends people, and the channel they're told to join there.
@@ -141,5 +148,9 @@ export function loadConfig(): Config {
     supportUrl: parseSupportUrl(process.env.SUPPORT_URL),
     gaPropertyId: parseGaPropertyId(process.env.GA_PROPERTY_ID),
     gaTimeZone: process.env.GA_TIMEZONE?.trim() || 'America/Chicago',
+    deployStatusGithubToken: process.env.DEPLOY_STATUS_GITHUB_TOKEN?.trim() || undefined,
+    deployEnvironment: process.env.SITE_REBUILD_ENVIRONMENT?.trim() || undefined,
+    deployStatusStagingBranch: process.env.DEPLOY_STATUS_STAGING_BRANCH?.trim() || undefined,
+    deployStatusProductionBranch: process.env.DEPLOY_STATUS_PRODUCTION_BRANCH?.trim() || undefined,
   };
 }

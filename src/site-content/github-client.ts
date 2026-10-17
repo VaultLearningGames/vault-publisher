@@ -13,6 +13,7 @@
 import { Buffer } from 'node:buffer';
 import { sitePublishingEnabled } from '../site-repo/config.ts';
 import { checkSiteContentConfig, readSiteContentConfig, type SiteContentConfig } from './config.ts';
+import { createInstallationTokenSource } from './app-auth.ts';
 import { SaveConflictError, SiteContentConfigError, SiteContentError } from './errors.ts';
 
 export interface PostRef { slug: string; path: string; sha: string }
@@ -57,9 +58,13 @@ const obj = (v: unknown): Json => (v && typeof v === 'object' && !Array.isArray(
 export function createSiteContentClient(opts: SiteContentClientOptions = {}): SiteContentClient {
   let cfg: SiteContentConfig | undefined;
   const conf = () => (cfg ??= opts.config ? checkSiteContentConfig(opts.config) : readSiteContentConfig(opts.env));
+  let appToken: (() => Promise<string>) | undefined;
+  let lastToken = '';
   const redact = (s: string) => {
+    let out = s;
+    if (lastToken) out = out.split(lastToken).join('[redacted]');
     const t = cfg?.token;
-    return t ? s.split(t).join('[redacted]') : s;
+    return t ? out.split(t).join('[redacted]') : out;
   };
 
   async function request(method: string, path: string, body?: unknown): Promise<Res> {
@@ -67,10 +72,15 @@ export function createSiteContentClient(opts: SiteContentClientOptions = {}): Si
     const doFetch = opts.fetch ?? globalThis.fetch;
     let res: Response;
     try {
+      let token = c.token;
+      if (c.app) {
+        appToken ??= createInstallationTokenSource(c.app, c.apiBase, doFetch);
+        token = lastToken = await appToken();
+      }
       res = await doFetch(`${c.apiBase}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${c.token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': API_VERSION, 'User-Agent': USER_AGENT,
+          Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': API_VERSION, 'User-Agent': USER_AGENT,
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         body: body === undefined ? undefined : JSON.stringify(body),

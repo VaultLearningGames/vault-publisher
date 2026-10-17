@@ -343,7 +343,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   // Pages: signed out -> sign-in, non-admins -> the portal's "No access" page, like the other Vault pages.
   const NOT_ADMIN = 'Only Vault admins can manage the blog.';
   const notFoundPage = (c: Context) =>
-    h.page(c, 'Not found', html`${head('Not found', 'No such blog post.')}<p><a href="/portal/blog">Back to the blog</a></p>`, { status: 404 });
+    h.page(c, 'Not found', html`${head('Not found', 'No such blog post.')}<p><a href="/portal/blog">Back to the blog</a></p>`, { status: 404, active: 'blog' });
   const errorPage = (c: Context, err: unknown) => {
     const msg = err instanceof SiteContentConfigError ? 'The portal isn’t connected to the website repository here (VAULT_SITE_GITHUB_TOKEN).'
       : err instanceof FrontMatterError ? `This post’s front matter can’t be read: ${err.message}. Fix the file in the vault-site repository.`
@@ -386,20 +386,22 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     let posts;
     try { posts = await repo.listPosts(); } catch (err) { return errorPage(c, err); }
     posts.sort((a, b) => (b.date ?? '9999').localeCompare(a.date ?? '9999') || a.slug.localeCompare(b.slug));
-    const status = (p: { draft: boolean; private: boolean; date: string | null }) =>
-      (p.private ? pill('off', 'private') : !p.draft && p.date ? pill('ok', 'published') : pill('wait', 'draft'));
+    const status = (p: { draft: boolean; private: boolean; date: string | null }) => {
+      const s = postStatus(p);
+      return s === 'Published' ? pill('ok', s) : s === 'Unlisted' ? pill('off', s) : pill('wait', s);
+    };
     const fresh = scratch.newPosts().filter((s) => !posts.some((p) => p.slug === s.slug));
     const rows = [
-      ...fresh.map((s) => html`<tr><td class="proj"><b>${typeof s.data.title === 'string' && s.data.title ? s.data.title : '(untitled)'}</b><span class="mono">${s.slug}</span></td>
+      ...fresh.map((s) => html`<tr><td class="proj"><b>${typeof s.data.title === 'string' && s.data.title ? s.data.title : s.slug}</b><span class="mono">${s.slug}</span></td>
         <td>${pill('wait', 'not saved yet')}</td><td>—</td><td>${typeof s.data.author === 'string' && s.data.author ? s.data.author : '—'}</td>
         <td class="r"><a class="btn sm" href="/portal/blog/edit/${s.slug}">Edit</a></td></tr>`),
-      ...posts.map((p) => html`<tr><td class="proj"><b>${p.title || '(untitled)'}</b><span class="mono">${p.slug}</span>${p.parseError ? html` <span class="err">front matter can’t be read</span>` : ''}</td>
-        <td>${status(p)}${scratch.has(p.slug) ? html` ${pill('wait', 'autosaved')}` : ''}</td><td>${p.date ? p.date.slice(0, 10) : '—'}</td><td>${p.author || '—'}</td>
+      ...posts.map((p) => html`<tr><td class="proj"><b>${p.title || p.slug}</b><span class="mono">${p.slug}</span>${p.parseError ? html` <span class="err">front matter can’t be read</span>` : ''}</td>
+        <td>${status(p)}${scratch.has(p.slug) ? html` ${pill('wait', 'autosaved')}` : ''}</td><td>${listDate(p.date)}</td><td>${p.author || '—'}</td>
         <td class="r">${p.parseError ? '' : html`<a class="btn sm" href="/portal/blog/edit/${p.slug}">Edit</a>`}</td></tr>`),
     ];
     const body = html`${head('Blog', 'Every post on the Vault blog, from the website repository: drafts, published and private ones. Saving commits to the site; the site rebuilds itself.', html`<a class="btn pri" href="/portal/blog/new">New post</a>`)}
       ${rows.length
-        ? html`<div class="tbl-wrap"><table><thead><tr><th>Title</th><th>Status</th><th>Published</th><th>Author</th><th class="r"></th></tr></thead><tbody>${rows}</tbody></table></div>`
+        ? html`<div class="tbl-wrap"><table><thead><tr><th>Title</th><th>Status</th><th>Date</th><th>Author</th><th class="r"></th></tr></thead><tbody>${rows}</tbody></table></div>`
         : html`<p class="muted">No posts yet.</p>`}`;
     return h.page(c, 'Blog', body, { active: 'blog' });
   });
@@ -432,7 +434,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
       <link rel="stylesheet" href="/assets/portal-blog-editor.css?v=${editorVersion}">
       <div id="blog-editor" data-slug="${slug}" data-site-url="${h.deps.siteUrl ?? 'https://vaultlearninggames.org'}"></div>
       <script type="application/json" id="blog-post-data">${raw(data)}</script>
-      <script type="module" src="/assets/portal-blog-editor.js?v=${editorVersion}"></script>`);
+      <script type="module" src="/assets/portal-blog-editor.js?v=${editorVersion}"></script>`, { active: 'blog' });
   });
 
   // Autosave: scratch storage only.
@@ -528,6 +530,25 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const names = await guarded(() => repo.searchTags((c.req.query('q') ?? '').trim().slice(0, 50), 10));
     return c.json({ tags: names.map((name) => ({ slug: slugify(name), name })) });
   });
+}
+
+// A post's status on the posts list, by the editor's rules: a draft (draft: true, or no date) isn't on the site at all;
+// otherwise a private post has a page but is in no list, tag page or feed (Unlisted).
+export function postStatus(p: { draft: boolean; private: boolean; date: string | null }): 'Draft' | 'Published' | 'Unlisted' {
+  if (p.draft || !p.date) return 'Draft';
+  return p.private ? 'Unlisted' : 'Published';
+}
+
+// A front matter date as YYYY-MM-DD for the posts list; '—' when it is missing or isn't a date.
+export function listDate(date: string | null | undefined): string {
+  if (!date) return '—';
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(date.trim());
+  if (m) {
+    const t = Date.parse(`${m[1]}T00:00:00Z`);
+    return !Number.isNaN(t) && new Date(t).toISOString().startsWith(m[1]) ? m[1] : '—';
+  }
+  const t = Date.parse(date);
+  return Number.isNaN(t) ? '—' : new Date(t).toISOString().slice(0, 10);
 }
 
 // "  My  Post!! " -> "my-post": lowercase a-z, 0-9 and single hyphens, at most EDITOR_MAX_SLUG characters.

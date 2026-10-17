@@ -1,6 +1,9 @@
 // Where the blog's Markdown lives: the vault-site repository on GitHub. Read from the environment when a client is
 // first used, never at import, so the portal boots (and its tests run) without any of these set.
-//   VAULT_SITE_GITHUB_TOKEN  a token that may read and write the repository's contents (required, at call time)
+//   VAULT_SITE_GITHUB_TOKEN  a token that may read and write the repository's contents (or use the GitHub App below)
+//   VAULT_SITE_APP_ID, VAULT_SITE_APP_INSTALLATION_ID, VAULT_SITE_APP_PRIVATE_KEY
+//                            a GitHub App's credentials (preferred): short-lived installation tokens are minted
+//                            from the key; commits show as <app>[bot]. The key is PEM text (\n escapes accepted).
 //   VAULT_SITE_REPO          owner/name (default VaultLearningGames/vault-site)
 //   VAULT_SITE_BRANCH        the branch posts are read from and committed to (default: this system's, "staging" or
 //                            "production"; site-repo/config.ts siteBranchFor). A commit there deploys the site.
@@ -12,8 +15,11 @@ import { commitIdentity, isBranchName, siteBranchFor, STAGING_SITE_BRANCH, type 
 import { SiteRepoConfigError } from '../site-repo/types.ts';
 import { SiteContentConfigError } from './errors.ts';
 
+export interface AppCredentials { appId: string; installationId: string; privateKey: string }
+
 export interface SiteContentConfig {
   token: string;
+  app?: AppCredentials;
   repo: string;
   branch: string;
   blogDir: string;
@@ -36,6 +42,11 @@ export function readSiteContentConfig(env: Record<string, string | undefined> = 
   }
   return checkSiteContentConfig({
     token: env.VAULT_SITE_GITHUB_TOKEN?.trim() ?? '',
+    app: env.VAULT_SITE_APP_ID?.trim() ? {
+      appId: env.VAULT_SITE_APP_ID.trim(),
+      installationId: env.VAULT_SITE_APP_INSTALLATION_ID?.trim() ?? '',
+      privateKey: (env.VAULT_SITE_APP_PRIVATE_KEY ?? '').replace(/\\n/g, '\n').trim(),
+    } : undefined,
     repo: env.VAULT_SITE_REPO?.trim() || DEFAULT_REPO,
     branch: siteBranchFor(env),
     author,
@@ -45,7 +56,9 @@ export function readSiteContentConfig(env: Record<string, string | undefined> = 
 }
 
 export function checkSiteContentConfig(c: Partial<SiteContentConfig>): SiteContentConfig {
-  if (!c.token) throw new SiteContentConfigError('VAULT_SITE_GITHUB_TOKEN is not set: the portal cannot read or write the website repository.');
+  if (c.app && !(c.app.appId && c.app.installationId && c.app.privateKey))
+    throw new SiteContentConfigError('VAULT_SITE_APP_ID needs VAULT_SITE_APP_INSTALLATION_ID and VAULT_SITE_APP_PRIVATE_KEY too.');
+  if (!c.token && !c.app) throw new SiteContentConfigError('Neither VAULT_SITE_APP_ID (GitHub App) nor VAULT_SITE_GITHUB_TOKEN is set: the portal cannot read or write the website repository.');
   const repo = c.repo || DEFAULT_REPO;
   if (!REPO_RE.test(repo)) throw new SiteContentConfigError(`VAULT_SITE_REPO must be owner/name, not "${repo}".`);
   const branch = c.branch || DEFAULT_BRANCH;
@@ -57,5 +70,5 @@ export function checkSiteContentConfig(c: Partial<SiteContentConfig>): SiteConte
   let u: URL;
   try { u = new URL(apiBase); } catch { throw new SiteContentConfigError(`VAULT_SITE_API_BASE "${apiBase}" is not a URL.`); }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new SiteContentConfigError(`VAULT_SITE_API_BASE "${apiBase}" is not an http(s) URL.`);
-  return { token: c.token, repo, branch, blogDir, apiBase, author: c.author ?? DEFAULT_COMMIT_AUTHOR };
+  return { token: c.token ?? '', app: c.app, repo, branch, blogDir, apiBase, author: c.author ?? DEFAULT_COMMIT_AUTHOR };
 }

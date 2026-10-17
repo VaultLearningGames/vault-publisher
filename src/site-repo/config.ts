@@ -9,6 +9,7 @@
 //   SITE_COMMIT_AUTHOR_NAME   the commits' author and committer (default vault-portal-bot)
 //   SITE_COMMIT_AUTHOR_EMAIL  (default vault-portal-bot@users.noreply.github.com)
 //   SITE_PUBLISHING_ENABLED   false (or 0, no, off) refuses every write to vault-site at once; read on every write
+import { userInfo } from 'node:os';
 import { SiteRepoConfigError } from './types.ts';
 
 type Env = Record<string, string | undefined>;
@@ -64,6 +65,16 @@ export function withPortalUserTrailer(message: string, portalUser: string): stri
   if (!user) throw new SiteRepoConfigError('A commit to the website repository needs the portal user who made it.');
   const body = message.replace(/\s+$/, '').replace(/\n+Portal-User: [^\n]*$/, '');
   return `${body}\n\nPortal-User: ${user}\n`;
+}
+
+// The Portal-User of a commit a script makes (scripts/export-blog.ts, import-squarespace-blog.ts): PORTAL_USER, else
+// script:<the operating-system user>.
+export function scriptPortalUser(env: Env = process.env): string {
+  const set = env.PORTAL_USER?.trim();
+  if (set) return set;
+  let who = env.USER || env.USERNAME || '';
+  try { who ||= userInfo().username; } catch { /* no user database */ }
+  return `script:${who || 'unknown'}`;
 }
 
 export function readSiteRepoConfig(env: Env = process.env): SiteRepoConfig {

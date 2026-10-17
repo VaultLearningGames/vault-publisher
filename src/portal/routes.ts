@@ -139,7 +139,8 @@ function deployBar(): Html | '' {
   const known = deployStatus.peek();
   return html`<div class="deploy-bar" id="deploy-bar" role="status" aria-live="polite" data-src="${DEPLOY_STATUS_PATH}"${known?.deploys.length ? html` data-state="${JSON.stringify(known)}"` : ''} hidden></div>`;
 }
-interface Nav { user: User; studio?: Studio; memberships: (Membership & { studio_slug: string; studio_name: string })[]; allStudios: Studio[] }
+// blog: whether the Blog link shows (Vault admins and Blog maintainers).
+interface Nav { user: User; studio?: Studio; memberships: (Membership & { studio_slug: string; studio_name: string })[]; allStudios: Studio[]; blog?: boolean }
 function layout(title: string, nav: Nav | null, body: Html | string, active = ''): string {
   const u = nav?.user;
   const staff = u && u.vault_role !== 'none';
@@ -169,7 +170,10 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
           <a href="/vault/studios" class="${active === 'vault-studios' ? 'on' : ''}">Studios</a>
           <a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>
           <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>
-          ${u!.vault_role === 'admin' ? html`<a href="/portal/blog" class="${active === 'blog' ? 'on' : ''}">Blog</a>` : ''}` : ''}
+          ${nav!.blog ? html`<a href="/portal/blog" class="${active === 'blog' ? 'on' : ''}">Blog</a>` : ''}` : ''}
+        ${!staff && nav?.blog ? html`
+          <div class="nav-sep">Vault</div>
+          <a href="/portal/blog" class="${active === 'blog' ? 'on' : ''}">Blog</a>` : ''}
       </nav>
       <div class="side-foot">
         ${supportUrl ? html`<p class="support">${supportLink('Need support?')} <span>Join our Slack, then the <b>${SUPPORT_CHANNEL}</b> channel.</span></p>` : ''}
@@ -249,7 +253,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const canManageMembers = (u: User, s: Studio) => isVaultAdmin(u) || roleIn(u, s) === 'admin';
   // Deleting a game from Vault: its studio's admins and Vault staff.
   const canDeleteGame = (u: User, s: Studio) => isStaff(u) || roleIn(u, s) === 'admin';
-  const navFor = (u: User, studio?: Studio): Nav => ({ user: u, studio, memberships: db.membershipsForLogin(u.login), allStudios: db.studios() });
+  const navFor = (u: User, studio?: Studio): Nav => ({ user: u, studio, memberships: db.membershipsForLogin(u.login), allStudios: db.studios(),
+    blog: isVaultAdmin(u) || db.hasVaultPermission(u.login, 'blog.maintain') });
   const actor = (u: User) => `user:${u.login}`;
   // Site listings (listings.ts): shown with each game, since a game is its listing and/or its CDN game.
   const listingHelpers = { db, deps, page: (c: Context, t: string, b: Html, o?: { studio?: Studio; active?: string; status?: number }) => page(c, t, b, o),

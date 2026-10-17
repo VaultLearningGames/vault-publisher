@@ -251,6 +251,8 @@ export function writeSettingsCollapsed(storage, collapsed) {
   let items = deserializeBlocks(post.blocks);
   const els = new Map(); // block key -> its element
   let saving = false;
+  // A Blog maintainer edits posts but doesn't publish, unpublish or delete them (or change when or whether they show).
+  const canPublish = root.dataset.canPublish !== '0';
 
   const h = (tag, attrs, ...kids) => {
     const el = document.createElement(tag);
@@ -332,6 +334,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
   const tagCount = h('span', { class: 'muted' });
 
   const stateLine = h('p', { class: 'be-state', role: 'status' });
+  if (!canPublish) statusSwitch.disabled = dateInput.disabled = true;
 
   const panel = h('aside', { class: 'card be-settings', id: 'be-settings', 'aria-label': 'Post settings' },
     h('h2', null, 'Settings'),
@@ -376,7 +379,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
 
   root.append(
     layout,
-    h('div', { class: 'be-bar' }, saveBtn, previewBtn, publishBtn, unpublishBtn, deleteBtn, status, settingsToggle),
+    h('div', { class: 'be-bar' }, saveBtn, previewBtn, canPublish ? [publishBtn, unpublishBtn, deleteBtn] : null, status, settingsToggle),
     err, announce, previewDlg,
   );
 
@@ -486,7 +489,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
   function showState() {
     const url = `${siteUrl}/blog/${postSlug}/`;
     stateLine.replaceChildren();
-    unpublishBtn.hidden = !publishedAt || !sha;
+    unpublishBtn.hidden = !canPublish || !publishedAt || !sha;
     if (!sha) { stateLine.append(h('span', { class: 'pill p-off' }, 'New'), ' Not in the website repository until you save it.'); publishBtn.textContent = 'Publish'; return; }
     if (!publishedAt) { stateLine.append(h('span', { class: 'pill p-off' }, 'Draft'), ' Not on the blog yet.'); publishBtn.textContent = 'Publish'; return; }
     const when = new Date(publishedAt);

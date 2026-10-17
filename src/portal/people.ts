@@ -4,7 +4,7 @@
 // "invited", and the membership takes effect the first time they sign in with GitHub.
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
-import { REPOSITORY_ID, REPOSITORY_NAME, studioWebsite, StudioNotEmptyError, type Db, type Studio, type StudioRole, type StudioSource, type User, type VaultRole } from '../db.ts';
+import { REPOSITORY_ID, REPOSITORY_NAME, studioWebsite, StudioNotEmptyError, type Db, type Studio, type StudioRole, type StudioSource, type User, type VaultRole, PERMISSION_LABEL } from '../db.ts';
 import { slugify } from '../listings-import.ts';
 import { isSlug } from '../paths.ts';
 import { html, type Html } from './html.ts';
@@ -231,8 +231,16 @@ export function registerPeople(app: Hono, h: Helpers) {
       byLogin.set(k, [...(byLogin.get(k) ?? []), m]);
     }
     const vaultInvites = new Map(db.vaultInvites().map((v) => [v.github_login.toLowerCase(), v]));
-    const invitedLogins = [...new Set([...byLogin.keys(), ...vaultInvites.keys()].filter((k) => !known.has(k)))]
-      .map((k) => byLogin.get(k)?.[0].github_login ?? vaultInvites.get(k)!.github_login);
+    const blogMaintainers = new Map(db.vaultPermissions().filter((p) => p.permission === 'blog.maintain').map((p) => [p.github_login.toLowerCase(), p.github_login]));
+    const invitedLogins = [...new Set([...byLogin.keys(), ...vaultInvites.keys(), ...blogMaintainers.keys()].filter((k) => !known.has(k)))]
+      .map((k) => byLogin.get(k)?.[0].github_login ?? vaultInvites.get(k)?.github_login ?? blogMaintainers.get(k)!);
+    // The Blog maintainer permission (blog.maintain): a switch for Vault admins, else Yes or —.
+    const blogCell = (login: string) => {
+      const on = blogMaintainers.has(login.toLowerCase());
+      return admin
+        ? html`<form data-api="/portal/api/vault/permissions" data-autosubmit><input type="hidden" name="login" value="${login}"><input type="hidden" name="permission" value="blog.maintain"><label class="check"><input type="checkbox" name="on" ${on ? 'checked' : ''} aria-label="${PERMISSION_LABEL['blog.maintain']}: ${login}"> ${PERMISSION_LABEL['blog.maintain']}</label>${errSlot}</form>`
+        : on ? PERMISSION_LABEL['blog.maintain'] : html`<span class="muted">—</span>`;
+    };
     const studiosCell = (login: string) => {
       const ms = byLogin.get(login.toLowerCase()) ?? [];
       if (!ms.length) return html`<span class="muted">—</span>`;
@@ -245,14 +253,14 @@ export function registerPeople(app: Hono, h: Helpers) {
     const rows = [
       ...users.map((x) => html`<tr><td class="proj"><b>${x.login}</b><span>${x.name ?? ''}</span></td><td>${studiosCell(x.login)}</td>
         <td>${admin && x.id !== u.id ? html`<form data-api="/portal/api/vault/users/${x.id}/role" data-autosubmit><select name="role" aria-label="Vault role for ${x.login}">${vaultOptions(x.vault_role)}</select>${errSlot}</form>` : VAULT_LABEL[x.vault_role]}</td>
-        <td class="small">${ago(x.last_login_at)}</td></tr>`),
+        <td class="small">${blogCell(x.login)}</td><td class="small">${ago(x.last_login_at)}</td></tr>`),
       // Invited people: the Vault role waiting for their first sign-in, changed and removed like anyone else's.
       ...invitedLogins.map((login) => {
         const waiting = vaultInvites.get(login.toLowerCase())?.vault_role ?? 'none';
         const note = waiting === 'none' ? '' : html` <span class="muted">(at first sign-in)</span>`;
         return html`<tr><td class="proj"><b>${login}</b><span>${pill('wait', 'Invited')}</span></td><td>${studiosCell(login)}</td>
         <td class="small">${admin ? html`<form data-api="/portal/api/vault/invites" data-autosubmit data-then="reload"><input type="hidden" name="login" value="${login}"><select name="role" aria-label="Vault role for ${login}, from their first sign-in">${vaultOptions(waiting)}</select>${errSlot}</form>${note}`
-          : waiting === 'none' ? html`<span class="muted">—</span>` : html`${VAULT_LABEL[waiting]}${note}`}</td><td class="small muted">Never</td></tr>`;
+          : waiting === 'none' ? html`<span class="muted">—</span>` : html`${VAULT_LABEL[waiting]}${note}`}</td><td class="small">${blogCell(login)}</td><td class="small muted">Never</td></tr>`;
       }),
     ];
     const studios = db.studios();
@@ -262,10 +270,11 @@ export function registerPeople(app: Hono, h: Helpers) {
           <label class="field"><span class="lab">Studio</span><select name="studio"><option value="">No studio</option>${studios.map((s) => html`<option value="${s.slug}">${s.name}</option>`)}</select></label>
           <label class="field"><span class="lab">Studio role</span>${roleSelect('role', 'maintainer', 'Studio role')}</label>
           <label class="field"><span class="lab">Vault role</span><select name="vaultRole" aria-label="Vault role">${(['none', 'release_manager', 'admin'] as VaultRole[]).map((r) => html`<option value="${r}">${r === 'none' ? 'No Vault role' : VAULT_LABEL[r]}</option>`)}</select></label>
+          <label class="check"><input type="checkbox" name="blogMaintainer"> ${PERMISSION_LABEL['blog.maintain']}</label>
           <button class="btn pri">Add</button>${errSlot}</form>
           <p class="small muted">Give them a studio, a Vault role, or both. People who haven’t signed in yet show as invited, and get their Vault role when they first sign in with that GitHub account. Nothing is emailed.</p></div>` : ''}
-      <div class="tbl-wrap"><table><thead><tr><th>GitHub user</th><th>Studios</th><th>Vault role</th><th>Last sign-in</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <p class="small muted">Release managers release, promote and roll back. Vault admins also manage people, studios and every studio’s members. ${h.vaultAdmins.length ? `Always admins: ${h.vaultAdmins.join(', ')}.` : ''}</p>`;
+      <div class="tbl-wrap"><table><thead><tr><th>GitHub user</th><th>Studios</th><th>Vault role</th><th>Permissions</th><th>Last sign-in</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="small muted">Release managers release, promote and roll back. Vault admins also manage people, studios and every studio’s members, and the blog. Blog maintainers edit any blog post (with or without a Vault role), but don’t create, delete, publish or unpublish posts. ${h.vaultAdmins.length ? `Always admins: ${h.vaultAdmins.join(', ')}.` : ''}</p>`;
     return h.page(c, 'People', body, { active: 'people' });
   });
 
@@ -279,7 +288,11 @@ export function registerPeople(app: Hono, h: Helpers) {
     const vaultRole = (b.vaultRole ?? 'none') as VaultRole;
     if (!['none', 'release_manager', 'admin'].includes(vaultRole)) fail(400, 'Choose a Vault role.');
     const s = b.studio ? studioOf(b.studio, u) : null;
-    if (!s && vaultRole === 'none') fail(400, 'Choose a studio, a Vault role, or both.');
+    const blogMaintainer = b.blogMaintainer === true || b.blogMaintainer === 'on' || b.blogMaintainer === '1';
+    if (!s && vaultRole === 'none' && !blogMaintainer) fail(400, 'Choose a studio, a Vault role, or both.');
+    if (blogMaintainer && db.setVaultPermission(login, 'blog.maintain', true, h.actor(u))) {
+      db.audit(h.actor(u), 'vault.permission', login, { permission: 'blog.maintain', on: true });
+    }
     if (vaultRole !== 'none') {
       const target = db.userByLogin(login);
       if (target?.id === u.id) fail(400, 'You can’t change your own Vault role.');
@@ -307,6 +320,21 @@ export function registerPeople(app: Hono, h: Helpers) {
     if (!['none', 'release_manager', 'admin'].includes(role as string)) fail(400, 'Choose a role.');
     db.setVaultRole(target.id, role as VaultRole);
     db.audit(h.actor(u), 'vault.role', target.login, { role, from: target.vault_role });
+    return c.json({ ok: true });
+  });
+
+  // Vault admins: give or take away a Vault permission (db.ts VAULT_PERMISSIONS), by GitHub login, signed in or not.
+  // Body: { login, permission: 'blog.maintain', on }.
+  app.post('/portal/api/vault/permissions', async (c) => {
+    const u = h.apiUser(c);
+    if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can change Vault permissions.');
+    const b = await jsonBody(c);
+    const login = loginOf(b.login);
+    if (b.permission !== 'blog.maintain') fail(400, 'Choose a permission.');
+    if (typeof b.on !== 'boolean') fail(400, 'on must be true or false.');
+    if (db.setVaultPermission(login, b.permission, b.on, h.actor(u))) {
+      db.audit(h.actor(u), 'vault.permission', login, { permission: b.permission, on: b.on });
+    }
     return c.json({ ok: true });
   });
 

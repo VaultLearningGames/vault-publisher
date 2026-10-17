@@ -1,4 +1,4 @@
-// Uploading a blog image from the post editor (Vault admins only; 401 signed out, 403 otherwise):
+// Uploading a blog image from the post editor (Vault admins and Blog maintainers; 401 signed out, 403 otherwise):
 //   POST /portal/api/blog/:slug/images   multipart/form-data, the file in field "file"
 //     -> 200 { key, url, contentType, bytes, created }
 // The browser crops, resizes and compresses the image first (portal-blog-image-editor.js); this checks what arrives
@@ -12,6 +12,7 @@ import { IMAGE_CACHE } from '../assets.ts';
 import { buildImageKey, contentHash, imageUrl, sniffImageType } from '../blog/imageKey.ts';
 import { isBlogSlug } from '../blog/slug.ts';
 import { objectExists } from '../storage.ts';
+import type { User } from '../db.ts';
 import type { ListingHelpers } from './listings.ts';
 
 export const MAX_BLOG_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -19,11 +20,12 @@ export const MAX_BLOG_IMAGE_BYTES = 10 * 1024 * 1024;
 const MULTIPART_OVERHEAD = 64 * 1024;
 
 // `postExists`: whether a post is at the slug (in the website repository, or a new post's autosave).
-export function registerBlogImages(app: Hono, h: ListingHelpers, o: { postExists: (slug: string) => Promise<boolean> }) {
+// `canUpload`: who may upload (Vault admins when not given).
+export function registerBlogImages(app: Hono, h: ListingHelpers, o: { postExists: (slug: string) => Promise<boolean>; canUpload?: (u: User) => boolean }) {
 
   app.post('/portal/api/blog/:slug/images', async (c) => {
     const u = h.apiUser(c);
-    if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can manage the blog.');
+    if (!(o.canUpload ?? h.isVaultAdmin)(u)) fail(403, 'Only Vault admins and Blog maintainers can manage the blog.');
     const slug = c.req.param('slug');
     if (!isBlogSlug(slug)) fail(400, 'Invalid blog post slug.');
     if (!(await o.postExists(slug).catch(() => true))) fail(404, 'No such blog post.');

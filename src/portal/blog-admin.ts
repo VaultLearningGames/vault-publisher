@@ -3,7 +3,10 @@
 // commit there, and the site's own workflow rebuilds and publishes the site on it; the portal builds nothing.
 // Autosaves are not commits: they go to the portal's scratch storage (blog/scratch.ts) until the next Save.
 // A post's blob SHA, as loaded, is the conflict check: a write naming another SHA gets 409 { error: 'conflict' }.
-// Vault admins only; everyone else gets 403 (401 when signed out).
+// Vault admins do everything. Blog maintainers (the Vault permission blog.maintain, db.ts) edit any post: they list,
+// open, autosave, preview and Save existing posts (a rename too), and upload images, but get 403 creating, deleting,
+// publishing or unpublishing one, and on a Save that changes its publish date or its visibility. Everyone else gets
+// 403 on every route here (401 when signed out).
 //   GET    /portal/api/blog/posts                 -> { posts: [{ slug, sha, title, date, draft, private, tags, author, image }] } (image: a thumbnail, or null)
 //   GET    /portal/api/blog/posts/:slug           -> { post }
 //   POST   /portal/api/blog/posts                 a new post (committed) -> 201 { post }
@@ -183,11 +186,30 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   app.get('/assets/portal-blog-image-editor.js', (c) => c.body(imageJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
   app.get('/assets/portal-blog-editor-commands.js', (c) => c.body(commandsJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
   app.get('/assets/portal-blog-editor.css', (c) => c.body(editorCss, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
-  registerBlogImages(app, h, { postExists: async (slug) => scratch.has(slug) || (await repo.listPosts()).some((p) => p.slug === slug) });
+  const maintains = (u: User) => h.isVaultAdmin(u) || h.db.hasVaultPermission(u.login, 'blog.maintain');
+  registerBlogImages(app, h, {
+    postExists: async (slug) => scratch.has(slug) || (await repo.listPosts()).some((p) => p.slug === slug),
+    canUpload: maintains,
+  });
+  // Creating, deleting, publishing and unpublishing: Vault admins.
   const admin = (c: Context): User => {
     const u = h.apiUser(c);
-    if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can manage the blog.');
+    if (!h.isVaultAdmin(u)) fail(403, maintains(u) ? 'Only Vault admins can create, delete, publish or unpublish blog posts.' : NOT_ADMIN);
     return u;
+  };
+  // Editing posts: Vault admins and Blog maintainers.
+  const editor = (c: Context): User => {
+    const u = h.apiUser(c);
+    if (!maintains(u)) fail(403, NOT_ADMIN);
+    return u;
+  };
+  // A Blog maintainer's Save keeps the post's publish date and visibility (changing them publishes or unpublishes it).
+  const keepsPublishing = (u: User, base: BlogPostInput, input: BlogPostInput) => {
+    if (h.isVaultAdmin(u)) return;
+    const same = (a: string | null, b: string | null) => (a === null || b === null ? a === b : Date.parse(a) === Date.parse(b));
+    if (!same(base.published_at, input.published_at) || base.status !== input.status) {
+      fail(403, 'Only Vault admins can publish or unpublish posts, or change their publish date or visibility.');
+    }
   };
   const slugOf = (c: Context): string => {
     const s = c.req.param('slug') ?? '';
@@ -285,19 +307,20 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   };
 
   // ---------- the API ----------
+  const NOT_ADMIN = 'Only Vault admins and Blog maintainers can manage the blog.';
   app.get('/portal/api/blog/posts', async (c) => {
-    admin(c);
+    editor(c);
     return c.json({ posts: await guarded(() => repo.listPosts()) });
   });
 
   app.get('/portal/api/blog/slugify', async (c) => {
-    admin(c);
+    editor(c);
     const taken = await guarded(takenSlugs);
     return c.json({ slug: freeSlugFrom(taken)(slugify(c.req.query('title') ?? '')) });
   });
 
   app.get('/portal/api/blog/posts/:slug', async (c) => {
-    admin(c);
+    editor(c);
     const post = await guarded(() => repo.getPost(slugOf(c)));
     if (!post) fail(404, 'No such blog post.');
     return c.json({ post: fromRepo(post) });
@@ -313,7 +336,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   });
 
   const apiUpdate = async (c: Context) => {
-    const u = admin(c);
+    const u = editor(c);
     const slug = slugOf(c);
     const body = await jsonBody(c);
     const sha = shaOf(body.sha, true)!;
@@ -322,6 +345,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     if (!base) fail(404, 'No such blog post.');
     if (base.sha !== sha) throw jsonError(409, { error: 'conflict', message: SAVE_CONFLICT_MESSAGE, currentSha: base.sha });
     const input = parseInput(body, base.input, () => slug);
+    keepsPublishing(u, base.input, input);
     return c.json(await guarded(() => commit(u, slug, sha, input)));
   };
   app.put('/portal/api/blog/posts/:slug', apiUpdate);
@@ -345,7 +369,6 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
 
   // ---------- the editor ----------
   // Pages: signed out -> sign-in, non-admins -> the portal's "No access" page, like the other Vault pages.
-  const NOT_ADMIN = 'Only Vault admins can manage the blog.';
   const notFoundPage = (c: Context) =>
     h.page(c, 'Not found', html`${head('Not found', 'No such blog post.')}<p><a href="/portal/blog">Back to the blog</a></p>`, { status: 404, active: 'blog' });
   const errorPage = (c: Context, err: unknown) => {
@@ -386,7 +409,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   // Every post, newest first, with a link to its editor; new posts that only have an autosave come first.
   app.get('/portal/blog', async (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
-    if (!h.isVaultAdmin(u)) return h.denied(c, NOT_ADMIN);
+    if (!maintains(u)) return h.denied(c, NOT_ADMIN);
     let posts;
     try { posts = await repo.listPosts(); } catch (err) { return errorPage(c, err); }
     posts.sort((a, b) => (b.date ?? '9999').localeCompare(a.date ?? '9999') || a.slug.localeCompare(b.slug));
@@ -403,7 +426,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
         <td>${status(p)}${scratch.has(p.slug) ? html` ${pill('wait', 'autosaved')}` : ''}</td><td>${listDate(p.date)}</td><td>${p.author || '—'}</td>
         <td class="r">${p.parseError ? '' : html`<a class="btn sm" href="/portal/blog/edit/${p.slug}">Edit</a>`}</td></tr>`),
     ];
-    const body = html`${head('Blog', 'Every post on the Vault blog, from the website repository: drafts, published and private ones. Saving commits to the site; the site rebuilds itself.', html`<a class="btn pri" href="/portal/blog/new">New post</a>`)}
+    const body = html`${head('Blog', 'Every post on the Vault blog, from the website repository: drafts, published and private ones. Saving commits to the site; the site rebuilds itself.', h.isVaultAdmin(u) ? html`<a class="btn pri" href="/portal/blog/new">New post</a>` : '')}
       ${rows.length
         ? html`<div class="tbl-wrap"><table><thead><tr><th>Title</th><th>Status</th><th>Date</th><th>Author</th><th class="r"></th></tr></thead><tbody>${rows}</tbody></table></div>`
         : html`<p class="muted">No posts yet.</p>`}`;
@@ -413,7 +436,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   // A new post exists only as an autosave until its first Save commits it.
   app.get('/portal/blog/new', async (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
-    if (!h.isVaultAdmin(u)) return h.denied(c, NOT_ADMIN);
+    if (!h.isVaultAdmin(u)) return h.denied(c, maintains(u) ? 'Only Vault admins can create blog posts.' : NOT_ADMIN);
     let taken;
     try { taken = await takenSlugs(); } catch (err) { return errorPage(c, err); }
     const slug = freeSlugFrom(taken)('untitled');
@@ -424,12 +447,14 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
 
   app.get('/portal/blog/edit/:slug', async (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
-    if (!h.isVaultAdmin(u)) return h.denied(c, NOT_ADMIN);
+    if (!maintains(u)) return h.denied(c, NOT_ADMIN);
     const slug = c.req.param('slug') ?? '';
     if (!isBlogSlug(slug)) return notFoundPage(c);
     let post;
     try { post = await editorPost(slug); } catch (err) { return errorPage(c, err); }
     if (!post) return notFoundPage(c);
+    // A new post (not committed yet) is a Vault admin's to create.
+    if (!post.committed && !h.isVaultAdmin(u)) return h.denied(c, 'Only Vault admins can create blog posts.');
     // '<' as <, so nothing in the post can close the script element.
     const data = JSON.stringify(post).replace(/</g, '\\u003c');
     const sub = !post.committed ? 'New post: not in the website repository until you save it'
@@ -452,18 +477,20 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     }
     return h.page(c, `Edit: ${post.title || 'Untitled'}`, html`${head('Edit post', sub)}
       <link rel="stylesheet" href="/assets/portal-blog-editor.css?v=${editorVersion}">
-      <div class="be-shell">${postsPane(pane, slug)}
-      <div id="blog-editor" data-slug="${slug}" data-site-url="${h.deps.siteUrl ?? 'https://vaultlearninggames.org'}"></div></div>
+      <div class="be-shell">${postsPane(pane, slug, h.isVaultAdmin(u))}
+      <div id="blog-editor" data-slug="${slug}" data-site-url="${h.deps.siteUrl ?? 'https://vaultlearninggames.org'}"${h.isVaultAdmin(u) ? '' : raw(' data-can-publish="0"')}></div></div>
       <script type="application/json" id="blog-post-data">${raw(data)}</script>
       <script type="module" src="/assets/portal-blog-editor.js?v=${editorVersion}"></script>`, { active: 'blog' });
   });
 
   // Autosave: scratch storage only.
   app.put('/portal/blog/:slug/autosave', async (c) => {
-    const u = admin(c);
+    const u = editor(c);
     const slug = slugOf(c);
     const body = await jsonBody(c);
     const sha = shaOf(body.sha, false);
+    // A new post's autosave is the new post, which only a Vault admin creates.
+    if (sha === null && !h.isVaultAdmin(u)) fail(403, 'Only Vault admins can create blog posts.');
     const existing = scratch.get(slug);
     // A post that is neither committed nor started as a new post isn't autosaved into being.
     if (sha === null && !existing) fail(404, 'No such blog post.');
@@ -473,7 +500,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   });
 
   app.delete('/portal/blog/:slug/autosave', (c) => {
-    admin(c);
+    editor(c);
     const slug = slugOf(c);
     const s = scratch.get(slug);
     // A new post's autosave is the post; it is only removed by deleting the post.
@@ -483,14 +510,16 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
 
   // Save and Publish: one commit each.
   const save = (publish: boolean) => async (c: Context) => {
-    const u = admin(c);
+    const u = publish ? admin(c) : editor(c);
     const slug = slugOf(c);
     const body = await jsonBody(c);
     if (!('sha' in body)) fail(400, 'sha (the post’s SHA as loaded, or null for a new post) is required.', { field: 'sha' });
     const sha = shaOf(body.sha, false);
+    if (sha === null && !h.isVaultAdmin(u)) fail(403, 'Only Vault admins can create blog posts.');
     const base = await baseOf(slug);
     if (base.sha !== sha) throw jsonError(409, { error: 'conflict', message: SAVE_CONFLICT_MESSAGE, currentSha: base.sha });
     const input = parseInput(editorBody(body), base.input, () => slug, false);
+    if (!publish) keepsPublishing(u, base.input, input);
     if (publish && !input.published_at) input.published_at = new Date().toISOString();
     const verb = publish ? 'publish' : undefined;
     return c.json(await guarded(() => commit(u, slug, sha, input, verb)));
@@ -517,7 +546,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
 
   // The unsaved post as the site builds it: the file it would commit, rendered by Hugo on the site source.
   app.post('/portal/blog/:slug/preview', async (c) => {
-    admin(c);
+    editor(c);
     const slug = slugOf(c);
     const body = await jsonBody(c);
     const previewer = h.deps.sitePreview;
@@ -537,7 +566,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   });
 
   app.get('/portal/blog/slug-check', async (c) => {
-    admin(c);
+    editor(c);
     const slug = editorSlug(c.req.query('slug') ?? '');
     const current = c.req.query('current') ?? '';
     if (!slug || !isBlogSlug(slug)) return c.json({ slug, available: false });
@@ -547,7 +576,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   });
 
   app.get('/portal/blog/tags', async (c) => {
-    admin(c);
+    editor(c);
     const names = await guarded(() => repo.searchTags((c.req.query('q') ?? '').trim().slice(0, 50), 10));
     return c.json({ tags: names.map((name) => ({ slug: slugify(name), name })) });
   });
@@ -560,8 +589,8 @@ export interface PaneItem { slug: string; title: string; status: 'New' | 'Draft'
 
 // The editor's left pane: every post, scrollable, each with a thumbnail (its image when that is a safe address, else
 // the title's first letter), title, status and date; the one being edited is marked aria-current. Selecting one opens
-// it in the editor. `items` null: the list couldn't be read.
-export function postsPane(items: PaneItem[] | null, current: string): Html {
+// it in the editor. `items` null: the list couldn't be read. `canCreate`: show the New post button (Vault admins).
+export function postsPane(items: PaneItem[] | null, current: string, canCreate = true): Html {
   const kind = { New: 'wait', Draft: 'wait', Published: 'ok', Unlisted: 'off' } as const;
   const thumb = (p: PaneItem) => p.image && isSafeImageSrc(p.image)
     ? html`<img class="be-thumb" src="${p.image}" alt="" loading="lazy" decoding="async">`
@@ -573,7 +602,7 @@ export function postsPane(items: PaneItem[] | null, current: string): Html {
         ${thumb(p)}<span class="be-post-text"><span class="be-post-title">${p.title}</span>
         <span class="be-post-meta">${pill(kind[p.status], p.status)} ${p.date ? listDate(p.date) : ''}</span></span></a></li>`)}</ul>`;
   return html`<nav class="card be-posts" aria-label="Blog posts">
-    <div class="be-posts-head"><h2>Posts</h2><a class="btn sm pri" href="/portal/blog/new">New post</a></div>
+    <div class="be-posts-head"><h2>Posts</h2>${canCreate ? html`<a class="btn sm pri" href="/portal/blog/new">New post</a>` : ''}</div>
     ${list}</nav>`;
 }
 

@@ -483,6 +483,11 @@ export interface Release {
 }
 
 export type VaultRole = 'none' | 'release_manager' | 'admin';
+// Vault permissions given on their own, beside the Vault role (Db.ensureVaultPermissions). blog.maintain ("Blog
+// maintainer"): edits any blog post, but doesn't create, delete, publish or unpublish one (portal/blog-admin.ts).
+export const VAULT_PERMISSIONS = ['blog.maintain'] as const;
+export type VaultPermission = (typeof VAULT_PERMISSIONS)[number];
+export const PERMISSION_LABEL: Record<VaultPermission, string> = { 'blog.maintain': 'Blog maintainer' };
 export type StudioRole = 'viewer' | 'maintainer' | 'admin';
 
 export interface User {
@@ -571,6 +576,20 @@ export class Db {
     this.sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;');
     this.migrate();
     this.retireBlogTables();
+    this.ensureVaultPermissions();
+  }
+
+  // Vault permissions by GitHub login (so they can be given before someone first signs in), beside the Vault role.
+  // Created here rather than as a numbered migration so the schema version stays where older images expect it (as
+  // retireBlogTables); IF NOT EXISTS makes it a no-op once there, and an older image simply ignores the table.
+  ensureVaultPermissions(): void {
+    this.sqlite.exec(`CREATE TABLE IF NOT EXISTS vault_permissions (
+      github_login TEXT NOT NULL COLLATE NOCASE,
+      permission   TEXT NOT NULL CHECK (permission IN ('blog.maintain')),
+      added_by     TEXT NOT NULL,
+      created_at   TEXT NOT NULL,
+      PRIMARY KEY (github_login, permission)
+    )`);
   }
 
   // The blog moved to Markdown in vault-site (src/blog/siteRepo.ts; the posts were exported by scripts/export-blog.ts),
@@ -1024,6 +1043,21 @@ export class Db {
     else this.sqlite.prepare(`INSERT INTO vault_invites (github_login, vault_role, added_by, created_at) VALUES (?, ?, ?, ?)
                               ON CONFLICT (github_login) DO UPDATE SET vault_role = excluded.vault_role, added_by = excluded.added_by`)
       .run(login, role, by, now());
+  }
+  // Vault permissions (VAULT_PERMISSIONS), by login: everyone's, or whether one login has one.
+  vaultPermissions(): { github_login: string; permission: VaultPermission; added_by: string; created_at: string }[] {
+    return this.sqlite.prepare('SELECT * FROM vault_permissions ORDER BY github_login COLLATE NOCASE, permission').all() as unknown as
+      { github_login: string; permission: VaultPermission; added_by: string; created_at: string }[];
+  }
+  hasVaultPermission(login: string, permission: VaultPermission): boolean {
+    return !!this.sqlite.prepare('SELECT 1 FROM vault_permissions WHERE github_login = ? AND permission = ?').get(login, permission);
+  }
+  // Gives or takes away a permission; returns whether that changed anything.
+  setVaultPermission(login: string, permission: VaultPermission, on: boolean, by: string): boolean {
+    const r = on
+      ? this.sqlite.prepare('INSERT OR IGNORE INTO vault_permissions (github_login, permission, added_by, created_at) VALUES (?, ?, ?, ?)').run(login, permission, by, now())
+      : this.sqlite.prepare('DELETE FROM vault_permissions WHERE github_login = ? AND permission = ?').run(login, permission);
+    return Number(r.changes) > 0;
   }
   // Removes and returns the Vault role waiting for this login, if any.
   takeVaultInvite(login: string): VaultRole | undefined {

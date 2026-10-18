@@ -640,9 +640,8 @@ back in a rollback).
 
 ### Rebuilding the site when listings change
 
-Publishing a listing changes `/v1/catalog`, not the site: someone runs *Deploy (portal and site)* with *Rebuild the
-site only* (README, [The website](../README.md#the-website)). Not built yet: the portal starting that run itself.
-Two ways it could: (a) the portal calls GitHub's `workflow_dispatch` for `deploy.yml` (`site_only=true`) a couple of
+Publishing a listing changes `/v1/catalog`, not the site: someone runs vault-site's *Deploy (site)* (README, [The website](../README.md#the-website)). Not built yet: the portal starting that run itself.
+Two ways it could: (a) the portal calls GitHub's `workflow_dispatch` for vault-site's `deploy.yml` a couple of
 minutes after the last publish, unpublish or featured change, which needs a GitHub credential with *Actions: write*
 on this repository in Secret Manager; or (b) a scheduled workflow that compares the catalog with the one the
 published site was built from (a hash published as a file of the site) and rebuilds only when they differ, which
@@ -679,7 +678,7 @@ The one-time setup only people can do (the bot user, its tokens, branch protecti
 ### The deploy bar
 
 Every portal page shows a bar while a deploy of that system runs (README, [The deploy bar](../README.md#the-deploy-bar)).
-The portal reads the runs of *Deploy (portal and site)* (this repository) and *Deploy (site)* (vault-site) from GitHub
+The portal reads the runs of *Deploy (portal)* (this repository) and *Deploy (site)* (vault-site) from GitHub
 Actions. `VAULT_SITE_GITHUB_TOKEN` can't (it is *Contents* only), so the bar has its own token: a fine-grained token
 on the VaultLearningGames organization with **Actions: Read-only** on `vault-publisher` and `vault-site` and nothing
 else. Settings:

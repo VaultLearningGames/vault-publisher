@@ -1,5 +1,5 @@
 // The deploy bar: whether a deploy of this system is running, read from GitHub Actions. Two workflows deploy it: this
-// repository's "Deploy (portal and site)" and vault-site's "Deploy (site)". A run counts for this system when it is on
+// repository's "Deploy (portal)" and vault-site's "Deploy (site)". A run counts for this system when it is on
 // the system's branch: here main is staging and production is production; in vault-site the portal's commits go to
 // staging or production (site-repo/config.ts), so its runs are read on that branch. The portal asks GitHub at most once per
 // CACHE_MS, whatever the number of pages open; without DEPLOY_STATUS_GITHUB_TOKEN nothing here runs.
@@ -11,7 +11,7 @@ export type DeployEnvironment = 'staging' | 'production';
 
 export interface DeployWorkflow { kind: DeployKind; repo: string; workflow: string; fallbackSeconds: number }
 export const DEPLOY_WORKFLOWS: readonly DeployWorkflow[] = [
-  { kind: 'portal', repo: 'VaultLearningGames/vault-publisher', workflow: 'Deploy (portal and site)', fallbackSeconds: 180 },
+  { kind: 'portal', repo: 'VaultLearningGames/vault-publisher', workflow: 'Deploy (portal)', fallbackSeconds: 180 },
   { kind: 'site', repo: 'VaultLearningGames/vault-site', workflow: 'Deploy (site)', fallbackSeconds: 120 },
 ];
 export const DEFAULT_STAGING_BRANCH = 'main';

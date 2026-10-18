@@ -471,20 +471,19 @@ longer where the site is edited or deployed from. Details of the theme: [site/RE
   `scripts/site-hosting.ts` for the hosting's `_headers` and `_redirects`).
   `npm run site:dev` serves it on http://localhost:1313. Game images are on the Vault CDN; `site/` holds only the
   theme's own files (17 MB, mostly the Squarespace snapshot images) and `static/files/keys-to-the-vault.pdf`.
-* **Deploy:** the [deploy workflow](.github/workflows/deploy.yml) does it with the portal, from the same commit: build
-  the site from that system's catalog (the forms post to that system's portal, through the
-  `HUGOxPARAMSxFORMSx…` overrides), check the build under the hosting's own runtime (`cloudflare/site/check.sh`),
-  deploy the portal image (which carries the pinned vault-site and Hugo for previews: [Previews and vault-site](#previews-and-vault-site)), then `wrangler deploy` publishes the build
-  to the system's Worker as static files: `main` → `vault-site-staging`, `production` → `vault-site`
-  (`cloudflare/site/wrangler.jsonc`). Cloudflare serves the files itself, with the build's `404.html` for a missing
+* **Deploy:** the website is built and published ONLY by VaultLearningGames/vault-site (its *Deploy (site)* workflow:
+  push to its `staging` / `production` branch, or Run workflow), to `vault-site-staging` / `vault-site`. This
+  repository's [deploy workflow](.github/workflows/deploy.yml) deploys the portal image only (which carries the pinned
+  vault-site and Hugo for previews: [Previews and vault-site](#previews-and-vault-site)) and never publishes to a site
+  Worker. The flow is portal → commit to vault-site → vault-site build → Cloudflare. The build (forms post to that system's
+  portal through the `HUGOxPARAMSxFORMSx…` overrides) is checked under the hosting's own runtime (`cloudflare/site/check.sh`) Cloudflare serves the files itself, with the build's `404.html` for a missing
   address; the build's `_headers` and `_redirects` (`src/site-hosting.ts`) carry the cache lifetimes, `noindex`,
   CORS and redirects. Hostnames are attached to a Worker once, by an admin
   ([docs/setup.md](docs/setup.md#the-website-on-cloudflare-static-hosting)).
 * **Check a build locally:** `npm run site:build`, `npm ci --prefix cloudflare/site` (once), `npm run site:check`.
 * **When listings change** (published, edited, taken off the site, featured) the site must be rebuilt, though no
-  code changed: **Actions → Deploy (portal and site) → Run workflow**, choose the system and tick *Rebuild the site
-  only*, or `gh workflow run deploy.yml -f environment=staging -f site_only=true`. It builds and publishes the site
-  and doesn't touch the portal.
+  code changed: **vault-site → Actions → Deploy (site) → Run workflow**, choose the system, or
+  `gh workflow run deploy.yml -R VaultLearningGames/vault-site -f environment=staging`.
 * **Addresses built in scripts** must be absolute (`absURL`): a preview is served from the portal, and only addresses
   in HTML attributes and CSS `url()` are rewritten to the site.
 
@@ -521,7 +520,7 @@ temporary copy; the site source is never written to.
 
 ## The deploy bar
 
-While a deploy of this system runs (*Deploy (portal and site)* here, or *Deploy (site)* in vault-site), every portal
+While a deploy of this system runs (*Deploy (portal)* here, or *Deploy (site)* in vault-site), every portal
 page shows a slim bar under the staging banner: "Deploying: about N min left" and a progress bar, the expected time
 being the median of that workflow's last 5 successful runs (3 min portal, 2 min site when there are none). Past it,
 "taking longer than usual"; a run that fails says "Deploy failed" with a link to it for 10 minutes. A run counts when

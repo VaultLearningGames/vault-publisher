@@ -174,7 +174,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
         ${staff ? html`
           <div class="nav-sep">Vault</div>
           <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
-          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Game Catalog</a>
+          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Games</a>
           <a href="/vault/site-checks" class="${active === 'site-checks' ? 'on' : ''}">Site checks</a>
           <a href="/vault/analytics" class="${active === 'analytics' ? 'on' : ''}">Analytics</a>
           <a href="/vault/studios" class="${active === 'vault-studios' ? 'on' : ''}">Studios</a>

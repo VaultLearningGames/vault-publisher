@@ -277,7 +277,7 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   draft, so it reaches the site through the same review. The site must handle both site paths and absolute https URLs
   for `hero_image`, `thumb_image` and `screenshots`. `_vault-assets/` belongs to Vault: switching releases and rollback
   leave it alone, and a build containing a top-level `_vault-assets/` folder can't be released.
-* Vault publishes them from **Vault → Game Catalog**, sends them back with a note, or takes the game off the site.
+* Vault publishes them from **Vault → Games**, sends them back with a note, or takes the game off the site.
 * Vault staff's editor has one **Save and Publish Changes** button (saves the draft and publishes it); studio members
   have **Save and Submit for Review**: every studio save goes to Vault for review.
 * **Preview** shows the editor's unsaved edits as the website would: the form is cleaned up as a save would (nothing
@@ -311,11 +311,11 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   carries the studio's website as `url`, and `studios` lists every studio with a game on the site or named as a
   maker of one (`slug`, `name`, `url`) so the site can link maker names. Studio admins set the website on their
   **Members** page.
-* **Vault → Game Catalog** is one table of every site listing: its site status, where it plays from, whether it's
-  featured, and whether it still loads.
-  * **Availability** columns show the latest daily check by `check-games.yml` (see
-    [docs/setup.md](docs/setup.md#operating-notes)): result (hover for why), response time, and when (linking the
-    GitHub run). Each game's page shows its latest result too.
+* **Vault → Games** is one table of every site listing: where it plays from, whether it's featured, and whether it
+  still loads. **Add Game** (top right) adds a draft listing in any studio without leaving the page.
+  * **Testing Status** shows the latest daily check by `check-games.yml` (see
+    [docs/setup.md](docs/setup.md#operating-notes)): the result (hover for why). Each game's page shows its latest
+    result too.
   * **Featured** is a checkbox for the home page's Featured Games section (at most 9). Release managers tick it; a
     featured game then gets a sequence number (the home page shows them in ascending sequence, ties by title), an
     optional home-page description (short Markdown) and an optional image. Unticking keeps the description and image

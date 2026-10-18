@@ -211,11 +211,11 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
   // Listings live on each game's page now.
   app.get('/s/:studio/listings', (c) => c.redirect(`/s/${c.req.param('studio')}`));
   app.get('/s/:studio/listings/:slug', (c) => c.redirect(`/s/${c.req.param('studio')}/g/${c.req.param('slug')}`));
-  // Featured games and game availability are columns of the Game Catalog now.
+  // Featured games and game availability are columns of Vault → Games now.
   app.get('/vault/featured', (c) => c.redirect('/vault/listings'));
   app.get('/vault/availability', (c) => c.redirect('/vault/listings'));
 
-  // ---------- Vault → Game Catalog: review queue, every game on the site (featured, availability) ----------
+  // ---------- Vault → Games: review queue, every game on the site (featured, availability) ----------
   app.get('/vault/listings', (c) => {
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isStaff(u)) return h.denied(c, 'Only Vault staff can see this page.');
@@ -239,7 +239,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const featBy = new Map(feat.games.map((e) => [e.slug, e]));
     const full = feat.games.length >= MAX_FEATURED;
     const FA = '/portal/api/vault/featured';
-    const COLS = 10;
+    const COLS = 7;
     const featCell = (l: ListingRow, e: FeaturedEntry | undefined) => {
       const title = l.draft.title || l.slug;
       const off = !l.published;
@@ -287,18 +287,28 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
       .map(({ l }) => {
         const e = featBy.get(l.slug);
         return html`<tr id="game-${l.slug}" class="${e ? 'is-feat' : ''}"><td class="catalog-thumb">${heroThumb(l.draft.hero_image)}</td><td class="proj"><a href="${link(l)}"><b>${l.draft.title || l.slug}</b></a><span>${l.slug}</span></td>
-          <td>${l.studio_name}</td><td>${P.state(l)}</td><td>${featCell(l, e)}</td><td>${P.hosting(l, gameOf(l))}</td>
+          <td>${l.studio_name}</td><td>${featCell(l, e)}</td><td>${P.hosting(l, gameOf(l))}</td>
           ${availabilityCells(run, l.slug)}<td class="small nowrap">${ago(l.updated_at)}</td></tr>${e ? featRow(l, e) : ''}`;
       });
     const checked = run ? html` Availability from the latest daily check, ${ago(run.checked_at)}: ${run.fail_count} failing, ${run.warn_count} worth a look (hover a result for why).` : ' No availability checks yet.';
     const sub = html`${count((l) => !!l.published)} of ${all.length} games are on the site; ${count(onCdn)} play from the Vault CDN. ${feat.games.length} of at most ${MAX_FEATURED} are featured on the home page, in ascending sequence (ties by title). Rows are in Testing Status order — Failure first, then Needs Review, then Passing — and within each group, featured games keep that order, then the rest by page address.${checked} The site is built from /v1/catalog.`;
-    const actions = html`<a class="btn" href="https://github.com/${h.deps.adminRepository}/actions/workflows/check-games.yml" target="_blank" rel="noopener">Run a check ↗</a><a class="btn" href="/v1/catalog" target="_blank">Catalog JSON ↗</a>`;
-    const body = html`${head('Game Catalog', sub, actions)}
+    const actions = html`<a class="btn" href="https://github.com/${h.deps.adminRepository}/actions/workflows/check-games.yml" target="_blank" rel="noopener">Run a check ↗</a><a class="btn" href="/v1/catalog" target="_blank">Catalog JSON ↗</a><button type="button" class="btn pri" data-open="add-game">Add Game</button>`;
+    // Add Game: a new site listing (draft) in any studio, the same as a studio's "Put it on the site".
+    const studios = db.studios().sort((a, b) => a.name.localeCompare(b.name));
+    const addGame = html`<dialog id="add-game"><form data-api="/portal/api/vault/listings" class="dlg" data-then="reload">
+        <h2>Add Game</h2>
+        <p class="small">Adds a draft listing for the site. Its studio’s members can edit it; it shows on the site once Vault publishes it.</p>
+        <label class="field"><span class="lab">Title</span><input name="title" required autocomplete="off"></label>
+        <label class="field"><span class="lab">Page address</span><input name="slug" required pattern="[a-z0-9][a-z0-9-]*" autocomplete="off" spellcheck="false"><span class="hint">vaultlearninggames.org/games/<i>address</i>/: lowercase letters, numbers and dashes.</span></label>
+        <label class="field"><span class="lab">Studio</span><select name="studio" required><option value="">Choose a studio…</option>${studios.map((s) => html`<option value="${s.slug}">${s.name}</option>`)}</select></label>
+        <div class="dlg-foot"><span class="err" role="status" aria-live="polite"></span><button type="button" class="btn" data-close>Cancel</button><button class="btn pri">Add Game</button></div>
+      </form></dialog>`;
+    const body = html`${head('Games', sub, actions)}
       ${queue.length ? html`<h2>Waiting for Vault (${queue.length})</h2><div class="grid">${queue}</div>` : html`<div class="card"><p class="muted">No site changes are waiting for review.</p></div>`}
-      <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th scope="col" class="catalog-thumb">Image</th><th>Game</th><th>Studio</th><th>Site</th><th>Featured</th><th>Hosted by</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
+      <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th scope="col" class="catalog-thumb">Image</th><th>Game</th><th>Studio</th><th>Featured</th><th>Hosted by</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
         <tbody>${rows.length ? rows : html`<tr><td colspan="${COLS}" class="muted">No games yet.</td></tr>`}</tbody></table></div>
-      ${featuring ? '' : html`<p class="small muted">Only Vault release managers can change the featured games.</p>`}`;
-    return h.page(c, 'Game Catalog', body, { active: 'vault-listings' });
+      ${featuring ? '' : html`<p class="small muted">Only Vault release managers can change the featured games.</p>`}${addGame}`;
+    return h.page(c, 'Games', body, { active: 'vault-listings' });
   });
 
   // ---------- API ----------
@@ -309,11 +319,8 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     if (!l || l.studio_id !== s.id) fail(404, 'unknown listing');
     return { s, l };
   }
-  app.post('/portal/api/s/:studio/listings', async (c) => {
-    const u = h.apiUser(c);
-    const s = db.studioBySlug(c.req.param('studio'));
-    if (!s || !P.canEdit(u, s)) fail(403, 'Only studio maintainers, admins and Vault staff can add games to the site.');
-    const b = await jsonBody(c);
+  // A new listing (a draft, optionally linked to one of the studio's CDN games).
+  function createListing(u: User, s: Studio, b: Record<string, unknown>) {
     const slug = String(b.slug ?? '').trim().toLowerCase();
     if (!isListingSlug(slug)) fail(400, 'The page address can use lowercase letters, numbers and dashes.');
     if (db.listing(slug)) fail(409, `vaultlearninggames.org/games/${slug}/ is already taken.`);
@@ -327,7 +334,23 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const l = db.createListing(s.id, slug, draft, h.actor(u));
     if (game) db.linkListing(l.id, game.id);
     db.audit(h.actor(u), 'listing.create', `${s.slug}:${slug}`, game ? { game: game.slug } : undefined);
-    return c.json({ ok: true, url: `/s/${s.slug}/g/${slug}` });
+    return { slug, url: `/s/${s.slug}/g/${slug}` };
+  }
+  app.post('/portal/api/s/:studio/listings', async (c) => {
+    const u = h.apiUser(c);
+    const s = db.studioBySlug(c.req.param('studio'));
+    if (!s || !P.canEdit(u, s)) fail(403, 'Only studio maintainers, admins and Vault staff can add games to the site.');
+    return c.json({ ok: true, url: createListing(u, s, await jsonBody(c)).url });
+  });
+  // Vault → Games' "Add Game": the same, with the studio in the body. Vault staff only, like the page.
+  app.post('/portal/api/vault/listings', async (c) => {
+    const u = h.apiUser(c);
+    if (!h.isStaff(u)) fail(403, 'Only Vault staff can add games here.');
+    const b = await jsonBody(c);
+    const s = db.studioBySlug(String(b.studio ?? ''));
+    if (!s) fail(400, 'Choose a studio.');
+    const made = createListing(u, s, b);
+    return c.json({ ok: true, ...made }, 201);
   });
 
   app.post('/portal/api/s/:studio/listings/:slug', async (c) => {

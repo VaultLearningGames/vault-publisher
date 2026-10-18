@@ -13,3 +13,6 @@ export function currentStyle(area: HTMLElement): 'p' | 'h2' | 'h3' | 'h4' | 'blo
 export function setStyle(area: HTMLElement, tag: string): boolean;
 export function indent(area: HTMLElement, delta: number): boolean;
 export function active(): Record<'bold' | 'italic' | 'underline' | 'strike', boolean>;
+export function rangeIn(area: HTMLElement, sel?: Selection | null): Range | null;
+export function styleTags(style: string | null | undefined): ('strong' | 'em' | 'u' | 's')[];
+export function htmlOf(area: HTMLElement): string;

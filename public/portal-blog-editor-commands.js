@@ -29,6 +29,52 @@ export const insertText = (text) => document.execCommand('insertText', false, te
 export const createLink = (href) => document.execCommand('createLink', false, href);
 export const unlink = () => document.execCommand('unlink', false);
 
+// The selection's range clipped to `area` (a contenteditable), or null when neither end of it is in `area`. A selection
+// dragged out of the section keeps only its part inside, so a style never reaches past the section.
+export function rangeIn(area, sel = getSelection()) {
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  const inStart = area.contains(r.startContainer), inEnd = area.contains(r.endContainer);
+  if (!inStart && !inEnd) return null;
+  const c = r.cloneRange();
+  if (!inStart) c.setStart(area, 0);
+  if (!inEnd) c.setEnd(area, area.childNodes.length);
+  return c;
+}
+
+// The parts of an inline CSS style the browser may write instead of a tag, as the tags the sanitizer keeps.
+export function styleTags(style) {
+  const s = String(style || '').toLowerCase();
+  const prop = (name) => (new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]*)`).exec(s) || [])[1]?.trim() || '';
+  const weight = prop('font-weight');
+  const deco = `${prop('text-decoration')} ${prop('text-decoration-line')}`;
+  const tags = [];
+  if (weight === 'bold' || weight === 'bolder' || Number(weight) >= 600) tags.push('strong');
+  if (/^(italic|oblique)/.test(prop('font-style'))) tags.push('em');
+  if (/\bunderline\b/.test(deco)) tags.push('u');
+  if (/\bline-through\b/.test(deco)) tags.push('s');
+  return tags;
+}
+
+// The section's HTML to save. Even with styleWithCSS off the browser sometimes writes a style as a <span style=...>
+// (merging blocks, styling text next to styled text); the sanitizer drops style attributes, so such a span becomes the
+// tags it stands for (strong, em, u, s) and spans and fonts are unwrapped. The section itself is left as it is.
+export function htmlOf(area) {
+  const root = area.cloneNode(true);
+  // Innermost first, so replacing one never detaches another still to do.
+  for (const el of [...root.querySelectorAll('span, font')].reverse()) {
+    let inner = el.ownerDocument.createDocumentFragment();
+    inner.append(...el.childNodes);
+    for (const tag of styleTags(el.getAttribute('style')).reverse()) {
+      const w = el.ownerDocument.createElement(tag);
+      w.append(inner);
+      inner = w;
+    }
+    el.replaceWith(inner);
+  }
+  return root.innerHTML;
+}
+
 // The block element around the caret inside `area` (a contenteditable), or null.
 export function currentBlock(area) {
   const s = getSelection();

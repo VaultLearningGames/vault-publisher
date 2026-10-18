@@ -407,7 +407,8 @@ export function markdownToBlocks(md: string): Block[] {
 
 // ---------- the editor's HTML as blocks ----------
 // The site renders Markdown and its own shortcodes only (raw HTML is off), so the editor's paragraph HTML is written
-// as Markdown: p, h2-h4, br, strong/b, em/i, code and a. Anything else (lists, quotes, u, s, span, indent) is
+// as Markdown: p, h2-h4, br, strong/b, em/i, code, a and lists. A span (the sanitizer leaves it no attributes, so it
+// carries nothing; browsers add them while editing) keeps only its content. Anything else (quotes, u, s, indent) is
 // returned as an error string, so a save fails with a message rather than writing what the site would drop.
 export function htmlToBlocks(html: string): Block[] | string {
   const out: Block[] = [];
@@ -451,6 +452,7 @@ export function htmlToBlocks(html: string): Block[] | string {
       case 'strong': case 'b': marks.bold += close ? -1 : 1; break;
       case 'em': case 'i': marks.italic += close ? -1 : 1; break;
       case 'code': marks.code += close ? -1 : 1; break;
+      case 'span': break;
       case 'ul': case 'ol':
         if (close) { if (list) { out.push({ type: 'list', ordered: list.ordered, items: list.items }); list = null; } }
         else { flushP(); list = { ordered: name === 'ol', items: [] }; }

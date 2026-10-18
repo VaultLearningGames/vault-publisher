@@ -885,7 +885,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   function paragraphEditor(item) {
     const area = h('div', { class: 'be-p', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Text' });
     area.innerHTML = item.html;
-    const update = () => { item.html = area.innerHTML; changed(); };
+    const update = () => { item.html = commands.htmlOf(area); changed(); };
     area.addEventListener('input', () => { linkErr.textContent = ''; update(); });
     area.addEventListener('keydown', (e) => {
       if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey && commands.currentBlock(area)?.tagName === 'LI') { e.preventDefault(); act(() => commands.indent(area, e.shiftKey ? -1 : 1)); return; }
@@ -903,9 +903,20 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       e.preventDefault();
       commands.insertText(text);
     });
+    // The section's selection, kept for when focus is elsewhere (the Style picker, the link box). It follows every
+    // selection change in the section, however it was made (a drag that ends outside it, Shift+arrows, select all), so a
+    // command never goes to an earlier selection.
     let range = null;
-    const keep = () => { const s = getSelection(); if (s.rangeCount && area.contains(s.anchorNode)) range = s.getRangeAt(0).cloneRange(); };
-    const restore = () => { area.focus(); if (range) { const s = getSelection(); s.removeAllRanges(); s.addRange(range); } };
+    const keep = () => { const r = commands.rangeIn(area); if (r) range = r; };
+    let connected = false;
+    const onSelection = () => {
+      if (!area.isConnected) { if (connected) document.removeEventListener('selectionchange', onSelection); return; }
+      connected = true;
+      keep(); refresh();
+    };
+    document.addEventListener('selectionchange', onSelection);
+    // The live selection when it's in the section (clipped to it), else the kept one, back in the section.
+    const restore = () => { keep(); area.focus(); if (range) { const s = getSelection(); s.removeAllRanges(); s.addRange(range); } };
     // Runs a command on the kept selection, then saves the change and refreshes the bar.
     function act(fn) { restore(); fn(); update(); keep(); refresh(); }
     const cmd = (name) => act(() => commands.run(name));

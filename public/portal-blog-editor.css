@@ -53,7 +53,8 @@
 #blog-editor:has(.be-layout) { max-width: 1240px; }
 .be-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
 .be-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.be-settings { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+/* No height cap or overflow: the page is the only scroll container, and the tag suggestions aren't clipped. */
+.be-settings { display: flex; flex-direction: column; gap: 12px; }
 .be-actions { display: flex; gap: 8px; }
 .be-state-field { border: 0; margin: 0; padding: 0 0 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
 .be-state-field legend { padding: 0; margin-bottom: 6px; }
@@ -92,7 +93,7 @@
 .be-preview-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .be-preview-frame { flex: 1; border: 0; width: 100%; background: #fff; }
 
-@media (max-width: 960px) { .be-layout { grid-template-columns: 1fr; } .be-settings { position: static; max-height: none; } }
+@media (max-width: 960px) { .be-layout { grid-template-columns: 1fr; } }
 /* image upload and the image editor (portal-blog-image-editor.js) */
 /* The image block: layout choice, the images (thumbnail, fields, reorder/remove), the drop zone. */
 .be-gallery { flex-direction: column; align-items: stretch; }

@@ -74,9 +74,14 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .deploy-row.failed { background: var(--bad-soft); }
 .deploy-row.failed b { color: var(--bad); }
 .deploy-row .deploy-x { margin-left: auto; background: none; border: 0; color: var(--ink-2); cursor: pointer; font: inherit; padding: 0 4px; }
-body.staging .shell { min-height: auto; }
+body.staging .shell, .shell:not(.solo) { min-height: auto; }
 .shell.solo { grid-template-columns: 1fr; }
-.side { background: var(--sunk); border-right: 1px solid var(--line); padding: 18px 14px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+/* The sidebar ends at the bottom of the viewport, so the signed-in user always shows without scrolling the page:
+   --side-offset (portal.js) is how far down the screen it starts while the banners above it are still in view; the
+   nav scrolls inside it when it doesn't fit. dvh where supported, so a phone's URL bar can't clip it. */
+.side { background: var(--sunk); border-right: 1px solid var(--line); padding: 18px 14px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; align-self: start; height: calc(100vh - var(--side-offset, 0px)); height: calc(100dvh - var(--side-offset, 0px)); overflow-y: auto; }
+.side > * { flex-shrink: 0; }
+.side > .nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .brand { display: flex; align-items: center; align-self: flex-start; margin: 2px 4px 16px; padding: 8px 10px; border-radius: 8px; background: #0B0F13; }
 .brand .logo { display: block; height: 24px; width: auto; }
 .studio-sw { margin: 0 2px 14px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); display: flex; flex-direction: column; }
@@ -436,7 +441,7 @@ button[aria-busy=true] { opacity: .6; cursor: progress; }
   .shell .side .brand .logo { height: 18px; }
   .shell .side .studio-sw { margin: 0; padding: 4px 8px; flex-direction: row; gap: 6px; align-items: center; }
   .shell .side .studio-sw span { display: none; }
-  .shell .side .nav { display: flex; flex-wrap: wrap; gap: 2px; width: 100%; }
+  .shell .side .nav { display: flex; flex-wrap: wrap; gap: 2px; width: 100%; overflow: visible; }
   .shell .side .nav a { padding: 5px 8px; }
   .shell .side .nav-sep { display: none; }
   .shell .side .side-foot { margin: 0 0 0 auto; padding: 0; display: flex; gap: 8px; align-items: center; order: 1; }

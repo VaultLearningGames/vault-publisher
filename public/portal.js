@@ -528,3 +528,25 @@
   render();
   poll();
 })();
+
+// The sidebar fits the viewport (portal.css .side): while the staging banner or deploy bar above it is in view, it starts
+// that far down the screen, so it's that much shorter and the signed-in user at its foot stays on screen.
+(function () {
+  const shell = document.querySelector('.shell');
+  if (!shell || !shell.querySelector(':scope > .side')) return;
+  const root = document.documentElement;
+  let frame = 0;
+  function update() {
+    frame = 0;
+    const top = Math.max(0, Math.round(shell.getBoundingClientRect().top));
+    root.style.setProperty('--side-offset', top + 'px');
+  }
+  const queue = () => { if (!frame) frame = requestAnimationFrame(update); };
+  addEventListener('scroll', queue, { passive: true });
+  addEventListener('resize', queue);
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(queue);   // the banners wrap, and the deploy bar shows and hides
+    for (let el = shell.previousElementSibling; el; el = el.previousElementSibling) ro.observe(el);
+  }
+  update();
+})();

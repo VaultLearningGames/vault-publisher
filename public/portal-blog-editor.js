@@ -179,12 +179,19 @@ export function slugify(input) {
   return s.slice(0, MAX_SLUG).replace(/-+$/, '');
 }
 
-// The warning for a Save that renames a committed post (sha: its SHA as loaded, null for a new post), or '' when the
-// Save doesn't rename one. A rename moves the post's images to the new slug's folder on the CDN.
-export function slugChangeWarning(sha, savedSlug, slug, siteUrl = '') {
+// The old and new addresses for a Save that renames a committed post (sha: its SHA as loaded, null for a new post), or
+// null when the Save doesn't rename one. A rename moves the post's images to the new slug's folder on the CDN.
+export function slugChange(sha, savedSlug, slug, siteUrl = '') {
   const s = slugify(slug);
-  if (!sha || !s || s === savedSlug) return '';
-  return `Changing the URL slug moves this post from ${siteUrl}/blog/${savedSlug} to ${siteUrl}/blog/${s} and moves its images `
+  if (!sha || !s || s === savedSlug) return null;
+  return { from: `${siteUrl}/blog/${savedSlug}`, to: `${siteUrl}/blog/${s}` };
+}
+
+// The same rename as one sentence, or '' when the Save doesn't rename the post.
+export function slugChangeWarning(sha, savedSlug, slug, siteUrl = '') {
+  const c = slugChange(sha, savedSlug, slug, siteUrl);
+  if (!c) return '';
+  return `Changing the URL slug moves this post from ${c.from} to ${c.to} and moves its images `
     + 'to a new folder on the CDN. Old links will not work: links to the old address, or to the post’s images, may break.';
 }
 
@@ -314,7 +321,6 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     oninput: () => { slugAuto = false; setSlug(slugInput.value); } });
   const slugUrl = h('p', { class: 'muted be-url' });
   const slugMsg = h('p', { class: 'err be-slug-msg', 'aria-live': 'polite' });
-  const slugWarn = h('p', { class: 'be-slug-warn', 'aria-live': 'polite', hidden: true });
 
   // The featured image: a drop zone, a placeholder until there is one, then its preview with Adjust, Replace and Remove.
   // A picked, dropped or pasted image goes through the image editor at FEATURED_IMAGE_ASPECT. Adjust crops again from
@@ -392,7 +398,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     status, err,
     stateField,
     h('h2', null, 'Settings'),
-    field('slug', 'URL slug', slugInput, slugUrl, slugMsg, slugWarn),
+    field('slug', 'URL slug', slugInput, slugUrl, slugMsg),
     field('img', 'Featured image', imgZone.root, imgMsg,
       h('p', { class: 'muted' }, 'Drop, paste or choose an image; it is cropped to 16:9. The public blog uses the title as its alt text.')),
     field('excerpt', 'Excerpt', excerptInput, h('p', { class: 'muted' }, 'Shown in the catalog and in link previews.')),
@@ -414,7 +420,9 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       h('div', { class: 'card be-body' }, inserter(0), list)),
     panel);
 
-  root.append(layout, announce, previewDlg);
+  const slugDlg = h('dialog', { class: 'be-slug-dlg', 'aria-labelledby': 'be-slug-dlg-h' });
+
+  root.append(layout, announce, previewDlg, slugDlg);
 
   // ----- state -----
   const fullBody = (loadedSha) => ({ ...saveBody(titleInput.value, items, loadedSha), ...settingsBody(settings) });
@@ -451,7 +459,6 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     const s = slugify(value);
     slugUrl.textContent = `${siteUrl}/blog/${s || '…'}`;
     slugMsg.textContent = value.trim() && !s ? 'The slug needs letters or digits.' : '';
-    showSlugWarning();
     clearTimeout(slugTimer);
     const seq = ++slugSeq;
     if (s) slugTimer = setTimeout(() => checkSlug(s, seq), 300);
@@ -464,15 +471,8 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       if (seq !== slugSeq || !res.ok) return;
       settings.slugTaken = !data.available;
       slugMsg.textContent = data.available ? '' : `Another post already uses /blog/${data.slug}. Choose a different slug; until then the post keeps its current URL.`;
-      showSlugWarning();
       changed();
     } catch (_) { /* offline: the save will say so */ }
-  }
-  // Under the slug while the next Save would rename the post (not while the new slug is taken: that Save keeps it).
-  function showSlugWarning() {
-    const text = settings.slugTaken ? '' : slugChangeWarning(sha, savedSlug, settings.slug, siteUrl);
-    slugWarn.textContent = text;
-    slugWarn.hidden = !text;
   }
   slugUrl.textContent = `${siteUrl}/blog/${slugify(settings.slug) || '…'}`;
 
@@ -1022,7 +1022,6 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       root.dataset.slug = p.slug;
       history.replaceState(null, '', `/portal/blog/edit/${encodeURIComponent(p.slug)}`);
     }
-    showSlugWarning();
   }
 
   // Saves the post: a commit to the website repository. Resolves to whether it saved.
@@ -1032,10 +1031,35 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     const body = fullBody(sha);
     if (!body.title) { showError('The title must not be empty.'); titleInput.focus(); return Promise.resolve(false); }
     // A rename: the user confirms first that old links will not work. Cancelled, nothing is sent.
-    const warning = body.slug ? slugChangeWarning(sha, postSlug, body.slug, siteUrl) : '';
-    if (warning && !confirm(`${warning}\n\nSave with the new slug?`)) { status.textContent = 'Not saved'; return Promise.resolve(false); }
-    current = doSave(body, publishing).finally(() => { current = null; });
+    const rename = body.slug ? slugChange(sha, postSlug, body.slug, siteUrl) : null;
+    const go = rename
+      ? confirmSlugChange(rename.from, rename.to).then((ok) => {
+        if (!ok) { status.textContent = 'Not saved'; return false; }
+        return doSave(body, publishing);
+      })
+      : doSave(body, publishing);
+    current = go.finally(() => { current = null; });
     return current;
+  }
+  // The rename confirmation: a modal with the old and new addresses. Resolves to whether the user chose to save.
+  function confirmSlugChange(from, to) {
+    return new Promise((resolve) => {
+      const yes = h('button', { type: 'button', class: 'btn pri', onclick: () => slugDlg.close('save') }, 'Save with new slug');
+      const no = h('button', { type: 'button', class: 'btn', onclick: () => slugDlg.close('cancel') }, 'Cancel');
+      slugDlg.replaceChildren(h('div', { class: 'dlg' },
+        h('h2', { id: 'be-slug-dlg-h' }, 'Change URL slug?'),
+        h('p', null, 'This moves the post from'),
+        h('code', { class: 'be-slug-url' }, from),
+        h('p', null, 'to'),
+        h('code', { class: 'be-slug-url' }, to),
+        h('p', null, 'and moves its images to a new folder on the CDN.'),
+        h('p', { class: 'be-slug-dlg-warn' }, 'Old links will not work: links to the old address, or to the post’s images, may break.'),
+        h('div', { class: 'dlg-foot' }, no, yes)));
+      slugDlg.returnValue = '';
+      slugDlg.addEventListener('close', () => resolve(slugDlg.returnValue === 'save'), { once: true });
+      slugDlg.showModal();
+      no.focus();
+    });
   }
   async function doSave(body, publishing) {
     const sent = JSON.stringify({ ...body, sha: null });

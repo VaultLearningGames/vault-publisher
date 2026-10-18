@@ -71,8 +71,13 @@
 .be-settings .field input, .be-settings .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); color: var(--ink); font: inherit; width: 100%; box-sizing: border-box; }
 .be-settings .field p { margin: 2px 0 0; font-size: 12px; }
 .be-url { word-break: break-all; font-family: var(--mono, monospace); }
-.be-settings .field .be-slug-warn { margin-top: 6px; padding: 6px 8px; line-height: 1.4; background: var(--wait-soft); border-left: 3px solid var(--wait); border-radius: 6px; }
-.be-slug-warn[hidden] { display: none; }
+/* The rename confirmation (Save after changing a committed post's slug). */
+.be-slug-dlg { width: min(520px, calc(100vw - 32px)); max-width: 520px; box-shadow: 0 18px 48px rgba(10, 16, 22, .22); }
+.be-slug-dlg .dlg { gap: 8px; line-height: 1.45; }
+.be-slug-dlg .dlg h2 { margin-bottom: 4px; }
+.be-slug-dlg .be-slug-url { display: block; font: 12.5px/1.45 var(--mono); padding: 6px 9px; background: var(--sunk); border: 1px solid var(--line-2); border-radius: 6px; overflow-wrap: anywhere; }
+.be-slug-dlg .be-slug-dlg-warn { margin-top: 4px; padding: 8px 10px; background: var(--wait-soft); border-left: 3px solid var(--wait); border-radius: 0 6px 6px 0; }
+.be-slug-dlg .dlg-foot { margin-top: 8px; }
 .be-chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 6px 0 0; padding: 0; }
 .be-chips:empty { display: none; }
 .be-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 12.5px; background: var(--paper); }

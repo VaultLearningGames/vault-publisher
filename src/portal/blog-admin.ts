@@ -33,10 +33,12 @@
 //   DELETE /portal/blog/:slug               { sha } -> { ok } (a new post: just its autosave)
 //   POST   /portal/blog/:slug/preview       the unsaved post built by the site (Hugo); saves nothing
 //   GET    /portal/blog/slug-check?slug=&current= -> { slug, available } (slug normalized)
-//   GET    /portal/blog/tags?q=             -> { tags } up to 10 existing tags whose name starts with q
+//   GET    /portal/blog/tags?q=&limit=      -> { tags: [{ name, count, slug }] } existing tags containing q (any case), with
+//                                           how many posts (drafts too) use each; most used first; limit 20 (1-100)
 //   GET    /assets/portal-blog-editor.js|.css  the editor's script (an ES module) and styles
 //   GET    /assets/portal-blog-image-editor.js  the image editor (crop, zoom, resize, compress, alt text) and drop zone the editor imports
 //   GET    /assets/portal-blog-image-block.js  the image block's shape (normalizeImageBlock), shared with the server
+//   GET    /assets/portal-blog-tags.js      tag normalization and ranking, shared with the server
 //   GET    /assets/portal-blog-editor-commands.js  the editor's formatting commands (all its execCommand calls)
 // A draft is a post with no publish date (draft: true in its front matter): the site doesn't publish it.
 // Errors: 409 { error: 'conflict', currentSha } (the file changed since it was loaded), 409 { error: 'slug_taken' },
@@ -60,13 +62,13 @@ import {
   applyPostInput, FrontMatterError, parsePostFile, postInputFromFile, SaveConflictError, SAVE_CONFLICT_MESSAGE, serializePostFile, SiteContentConfigError, SiteContentError,
 } from '../site-content/index.ts';
 import { withPortalUserTrailer } from '../site-repo/config.ts';
+import { sanitizeTags, tagLimit } from '../../public/portal-blog-tags.js';
 import { registerBlogImages } from './blog-images.ts';
 import { head, pill } from './routes.ts';
 import { html, raw, type Html } from './html.ts';
 import type { ListingHelpers } from './listings.ts';
 
 const FIELDS = ['slug', 'title', 'blocks', 'excerpt', 'featured_image', 'author', 'status', 'published_at', 'tags'];
-const MAX_TAGS = 20;
 // Slugs set from the editor are normalized ("My  Post!" -> "my-post") and at most this long.
 export const EDITOR_MAX_SLUG = 80;
 // Keys of a loaded post the editor may send back unchanged; they are not editable. `sha` is read separately.
@@ -127,19 +129,12 @@ function parseInput(b: Record<string, unknown>, base: BlogPostInput | undefined,
     else publishedAt = new Date(b.published_at).toISOString();
   }
 
+  // Tags are sanitized, not refused: normalized (portal-blog-tags.js), unusable ones and repeats dropped, at most
+  // MAX_TAGS. The post's current tags are kept as they are.
   let tags: string[] | undefined;
   if (b.tags !== undefined) {
     if (!Array.isArray(b.tags)) errors.push('tags must be an array of names');
-    else if (b.tags.length > MAX_TAGS) errors.push(`a post may have at most ${MAX_TAGS} tags`);
-    else {
-      const seen = new Set<string>();
-      tags = [];
-      b.tags.forEach((t, i) => {
-        if (typeof t !== 'string' || !t.trim() || t.trim().length > 50 || hasCtl(t) || !slugify(t)) { errors.push(`tags[${i}] must be a name of 1-50 characters with letters or digits`); return; }
-        const s = slugify(t);
-        if (!seen.has(s)) { seen.add(s); tags!.push(t.trim()); }
-      });
-    }
+    else tags = sanitizeTags(b.tags, base?.tags);
   }
 
   let slug: string | undefined;
@@ -206,13 +201,14 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   // The editor's script and styles, read once at startup and versioned by content like the portal's own assets.
   const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
   const editorJs = asset('portal-blog-editor.js'), editorCss = asset('portal-blog-editor.css'), imageJs = asset('portal-blog-image-editor.js');
-  const commandsJs = asset('portal-blog-editor-commands.js'), imageBlockJs = asset('portal-blog-image-block.js');
-  const editorVersion = createHash('sha256').update(editorJs).update(editorCss).update(imageJs).update(commandsJs).update(imageBlockJs).digest('hex').slice(0, 10);
+  const commandsJs = asset('portal-blog-editor-commands.js'), imageBlockJs = asset('portal-blog-image-block.js'), tagsJs = asset('portal-blog-tags.js');
+  const editorVersion = createHash('sha256').update(editorJs).update(editorCss).update(imageJs).update(commandsJs).update(imageBlockJs).update(tagsJs).digest('hex').slice(0, 10);
   const immutable = 'public, max-age=31536000, immutable';
   app.get('/assets/portal-blog-editor.js', (c) => c.body(editorJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': immutable }));
   // The editor imports it by this unversioned address, so browsers revalidate it rather than keep it for good.
   app.get('/assets/portal-blog-image-editor.js', (c) => c.body(imageJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
   app.get('/assets/portal-blog-image-block.js', (c) => c.body(imageBlockJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
+  app.get('/assets/portal-blog-tags.js', (c) => c.body(tagsJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
   app.get('/assets/portal-blog-editor-commands.js', (c) => c.body(commandsJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
   app.get('/assets/portal-blog-editor.css', (c) => c.body(editorCss, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
   const maintains = (u: User) => h.isVaultAdmin(u) || h.db.hasVaultPermission(u.login, 'blog.maintain');
@@ -621,8 +617,8 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
 
   app.get('/portal/blog/tags', async (c) => {
     editor(c);
-    const names = await guarded(() => repo.searchTags((c.req.query('q') ?? '').trim().slice(0, 50), 10));
-    return c.json({ tags: names.map((name) => ({ slug: slugify(name), name })) });
+    const tags = await guarded(() => repo.searchTags((c.req.query('q') ?? '').trim().slice(0, 100), tagLimit(c.req.query('limit'))));
+    return c.json({ tags: tags.map((t) => ({ name: t.name, count: t.count, slug: slugify(t.name) })) });
   });
 }
 

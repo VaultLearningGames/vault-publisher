@@ -27,6 +27,7 @@
 import { fetchImageBlob, imageDropzone, imagesDropTarget, openImageEditor } from './portal-blog-image-editor.js';
 import { LAYOUTS, LAYOUT_LABELS, MAX_DESCRIPTION, MAX_TITLE, newImageId, normalizeImageBlock } from './portal-blog-image-block.js';
 import * as commands from './portal-blog-editor-commands.js';
+import { addTag, MAX_TAGS, MAX_TAG_LENGTH, normalizeTag, tagKey } from './portal-blog-tags.js';
 
 export const BLOCK_TYPES = ['heading', 'paragraph', 'image', 'divider'];
 // The featured image's shape (width / height) and widest size, as the image editor crops and resizes it.
@@ -152,8 +153,7 @@ export function isLinkHref(href) {
 
 // ---------- settings ----------
 export const MAX_SLUG = 80; // EDITOR_MAX_SLUG in src/portal/blog-admin.ts
-export const MAX_TAGS = 20;
-export const MAX_TAG_LENGTH = 50;
+export { addTag, MAX_TAGS, MAX_TAG_LENGTH, normalizeTag }; // portal-blog-tags.js, shared with the server
 
 // "Héllo, World! 2026" -> "hello-world-2026", as the server normalizes editor slugs (src/blog/slug.ts + editorSlug).
 export function slugify(input) {
@@ -184,22 +184,15 @@ export function isAutoSlug(slug, title, publishedAt) {
   return !s || s === slugify(title) || /^untitled(-\d+)?$/.test(s);
 }
 
-// A tag name as the server stores it: trimmed, inner whitespace collapsed; '' when it isn't a usable name.
-export function normalizeTag(name) {
-  const t = String(name || '').replace(/\s+/g, ' ').trim();
-  if (!t || t.length > MAX_TAG_LENGTH || /[\u0000-\u001f\u007f]/.test(t) || !slugify(t)) return '';
-  return t;
-}
-
-// The tag list with `name` added: { tags, error }. Duplicates (same slug, so "Math" = "math") are not added again.
-export function addTag(tags, name) {
-  const list = (tags || []).slice();
-  const t = normalizeTag(name);
-  if (!t) return { tags: list, error: String(name || '').trim() ? `A tag is 1-${MAX_TAG_LENGTH} characters with letters or digits.` : '' };
-  if (list.some((x) => slugify(x) === slugify(t))) return { tags: list, error: '' };
-  if (list.length >= MAX_TAGS) return { tags: list, error: `A post may have at most ${MAX_TAGS} tags.` };
-  list.push(t);
-  return { tags: list, error: '' };
+// The tag picker's options: existing tags (suggestions, [{ name, count }]) not on the post yet, then "Add new tag" for
+// what was typed when it is a usable tag no existing one matches (case-insensitively). [{ name, count?, isNew }]
+export function tagOptions(suggestions, typed, current) {
+  const have = new Set((current || []).map(tagKey));
+  const out = (suggestions || []).filter((t) => t && typeof t.name === 'string' && !have.has(tagKey(t.name)))
+    .map((t) => ({ name: t.name, count: Number(t.count) || 0, isNew: false }));
+  const t = normalizeTag(String(typed ?? ''));
+  if (t !== null && !have.has(tagKey(t)) && !(suggestions || []).some((x) => x && tagKey(String(x.name)) === tagKey(t))) out.push({ name: t, isNew: true });
+  return out;
 }
 
 // An ISO date-time <-> the value of a datetime-local input, in the browser's time zone.
@@ -356,8 +349,10 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   const dateInput = h('input', { type: 'datetime-local', id: fieldId('date'), value: toLocalInput(settings.published_at),
     onchange: () => { settings.published_at = fromLocalInput(dateInput.value); changed(); } });
 
-  const tagInput = h('input', { type: 'text', id: fieldId('tags'), maxlength: String(MAX_TAG_LENGTH), list: fieldId('tag-options'), autocomplete: 'off', placeholder: 'Type a tag, Enter to add' });
-  const tagOptions = h('datalist', { id: fieldId('tag-options') });
+  const tagInput = h('input', { type: 'text', id: fieldId('tags'), maxlength: String(MAX_TAG_LENGTH + 5), autocomplete: 'off', placeholder: 'Search tags or add a new one',
+    role: 'combobox', 'aria-autocomplete': 'list', 'aria-expanded': 'false', 'aria-controls': fieldId('tag-options') });
+  const tagList = h('ul', { class: 'be-tag-list', id: fieldId('tag-options'), role: 'listbox', 'aria-label': 'Tag suggestions', hidden: true });
+  const tagCombo = h('div', { class: 'be-tag-combo' }, tagInput, tagList);
   const tagChips = h('ul', { class: 'be-chips', 'aria-label': 'Tags' });
   const tagMsg = h('p', { class: 'err', 'aria-live': 'polite' });
   const tagCount = h('span', { class: 'muted' });
@@ -391,7 +386,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     field('excerpt', 'Excerpt', excerptInput, h('p', { class: 'muted' }, 'Shown in the catalog and in link previews.')),
     field('author', 'Author', authorInput),
     field('date', 'Published date', dateInput, h('p', { class: 'muted' }, 'Empty until the post is published. A date in the future schedules it.')),
-    field('tags', h('span', null, 'Tags ', tagCount), tagInput, tagOptions, tagChips, tagMsg),
+    field('tags', h('span', null, 'Tags ', tagCount), tagCombo, tagChips, tagMsg),
     canPublish ? h('div', { class: 'be-danger-zone' }, deleteBtn) : null,
   );
 
@@ -477,37 +472,86 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     tagCount.textContent = `(${settings.tags.length}/${MAX_TAGS})`;
     tagInput.disabled = settings.tags.length >= MAX_TAGS;
   }
-  function commitTag() {
-    const r = addTag(settings.tags, tagInput.value);
+  // Adds `name` (what was typed, or a picked option) as a chip; an existing tag's spelling wins over what was typed.
+  function commitTag(name = tagInput.value) {
+    const typed = normalizeTag(String(name));
+    const existing = typed === null ? null : tagSuggestions.find((t) => tagKey(t.name) === tagKey(typed));
+    const r = addTag(settings.tags, existing ? existing.name : name);
     tagMsg.textContent = r.error;
     if (r.error) return;
-    if (r.tags.length !== settings.tags.length) { settings.tags = r.tags; say(`Tag ${tagInput.value.trim()} added.`); }
+    if (r.tags.length !== settings.tags.length) { settings.tags = r.tags; say(`Tag ${r.tags[r.tags.length - 1]} added.`); changed(); }
     tagInput.value = '';
     renderTags();
-    changed();
+    loadTagSuggestions();
   }
-  let tagTimer = null, tagSeq = 0;
-  tagInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitTag(); }
-    else if (e.key === 'Backspace' && !tagInput.value && settings.tags.length) { settings.tags = settings.tags.slice(0, -1); renderTags(); changed(); }
-  });
-  tagInput.addEventListener('input', (e) => {
-    // Picking a suggestion from the datalist arrives as an input without a key press.
-    if (!e.inputType || e.inputType === 'insertReplacementText') { const v = tagInput.value; if ([...tagOptions.options].some((o) => o.value === v)) { commitTag(); return; } }
+  // The suggestions for what is typed (existing tags from GET /portal/blog/tags), and the option list under the input.
+  // When the request fails there are no suggestions; typing a tag and pressing Enter still adds it.
+  let tagTimer = null, tagSeq = 0, tagSuggestions = [], tagItems = [], tagActive = -1;
+  function closeTagList() {
+    tagList.hidden = true;
+    tagInput.setAttribute('aria-expanded', 'false');
+    tagInput.removeAttribute('aria-activedescendant');
+    tagActive = -1;
+  }
+  function renderTagList() {
+    tagItems = tagOptions(tagSuggestions, tagInput.value, settings.tags);
+    if (tagActive >= tagItems.length) tagActive = tagItems.length - 1;
+    tagList.replaceChildren(...tagItems.map((o, i) => h('li', {
+      id: fieldId(`tag-opt-${i}`), role: 'option', class: `be-tag-opt${o.isNew ? ' be-tag-new' : ''}`, 'aria-selected': i === tagActive ? 'true' : 'false',
+      // mousedown, not click: the input keeps focus, so its blur doesn't add what was typed first.
+      onmousedown: (e) => { e.preventDefault(); commitTag(o.name); },
+      onmousemove: () => { if (tagActive !== i) { tagActive = i; renderTagList(); } },
+    }, o.isNew ? [h('span', null, 'Add new tag “'), h('b', null, o.name), h('span', null, '”')]
+      : [h('span', null, o.name), h('span', { class: 'be-tag-n muted' }, `${o.count} ${o.count === 1 ? 'post' : 'posts'}`)])));
+    const open = document.activeElement === tagInput && tagItems.length > 0;
+    tagList.hidden = !open;
+    tagInput.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && tagActive >= 0) {
+      tagInput.setAttribute('aria-activedescendant', fieldId(`tag-opt-${tagActive}`));
+      tagList.children[tagActive]?.scrollIntoView?.({ block: 'nearest' });
+    } else tagInput.removeAttribute('aria-activedescendant');
+  }
+  function loadTagSuggestions() {
     clearTimeout(tagTimer);
     const q = tagInput.value.trim(), seq = ++tagSeq;
-    if (!q) { tagOptions.replaceChildren(); return; }
     tagTimer = setTimeout(async () => {
+      let tags = [];
       try {
-        const res = await fetch(`/portal/blog/tags?q=${encodeURIComponent(q)}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'vault-portal' } });
-        const data = await res.json();
-        if (seq !== tagSeq || !res.ok) return;
-        const have = new Set(settings.tags.map(slugify));
-        tagOptions.replaceChildren(...(data.tags || []).filter((t) => !have.has(t.slug)).map((t) => h('option', { value: t.name })));
+        const res = await fetch(`/portal/blog/tags?q=${encodeURIComponent(q)}&limit=${MAX_TAGS}`, { credentials: 'same-origin', headers: { 'X-Requested-With': 'vault-portal' } });
+        if (res.ok) tags = (await res.json()).tags || [];
       } catch (_) { /* suggestions are optional */ }
-    }, 200);
+      if (seq !== tagSeq) return;
+      tagSuggestions = Array.isArray(tags) ? tags : [];
+      renderTagList();
+    }, 150);
+  }
+  tagInput.addEventListener('keydown', (e) => {
+    const open = !tagList.hidden && tagItems.length > 0;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!tagItems.length) return;
+      if (!open) { tagActive = e.key === 'ArrowDown' ? 0 : tagItems.length - 1; renderTagList(); return; }
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      tagActive = (tagActive + step + tagItems.length + 1) % (tagItems.length + 1);
+      if (tagActive === tagItems.length) tagActive = -1; // back to what was typed
+      renderTagList();
+    } else if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (open && tagActive >= 0) commitTag(tagItems[tagActive].name); else commitTag();
+    } else if (e.key === 'Escape') {
+      if (open) { e.preventDefault(); e.stopPropagation(); closeTagList(); }
+    } else if (e.key === 'Backspace' && !tagInput.value && settings.tags.length) {
+      settings.tags = settings.tags.slice(0, -1); tagMsg.textContent = ''; renderTags(); changed(); loadTagSuggestions();
+    }
   });
-  tagInput.addEventListener('blur', () => { if (tagInput.value.trim()) commitTag(); });
+  tagInput.addEventListener('input', () => {
+    tagMsg.textContent = '';
+    tagActive = -1;
+    renderTagList(); // "Add new tag" follows the typing at once; the suggestions follow when they arrive
+    loadTagSuggestions();
+  });
+  tagInput.addEventListener('focus', () => { tagActive = -1; renderTagList(); loadTagSuggestions(); });
+  tagInput.addEventListener('blur', () => { closeTagList(); if (tagInput.value.trim()) commitTag(); });
 
   // ----- where the post stands on the public blog: the State radios -----
   function showState() {

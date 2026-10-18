@@ -12,6 +12,7 @@
 // FrontMatterError (a file whose front matter can't be read, on load or update).
 import type { BlogPostInput } from './repo.ts';
 import { isBlogSlug } from './slug.ts';
+import { DEFAULT_TAG_LIMIT, rankTags, type TagCount } from '../../public/portal-blog-tags.js';
 import {
   applyPostInput, createPostListCache, createSiteContentClient, parsePostFile, postInputFromFile, SaveConflictError, serializePostFile,
   SiteContentError, type PostListCache, type PostListEntry, type SiteContentClient,
@@ -122,14 +123,10 @@ export class SiteBlogRepo {
     return r;
   }
 
-  // Every existing tag whose name starts with `prefix` (case-insensitively), from the posts' front matter.
-  async searchTags(prefix: string, limit = 10): Promise<string[]> {
-    const p = prefix.toLowerCase();
-    const seen = new Map<string, string>();
-    for (const e of await this.cache.list()) for (const t of e.frontMatter?.tags ?? []) {
-      if (t.toLowerCase().startsWith(p) && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
-    }
-    return [...seen.values()].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' })).slice(0, limit);
+  // Existing tags containing `q` (case-insensitively), from every post's front matter (drafts too), with how many
+  // posts use each: most used first, then by name (portal-blog-tags.js rankTags).
+  async searchTags(q: string, limit = DEFAULT_TAG_LIMIT): Promise<TagCount[]> {
+    return rankTags((await this.cache.list()).map((e) => e.frontMatter?.tags ?? []), q, limit);
   }
 }
 

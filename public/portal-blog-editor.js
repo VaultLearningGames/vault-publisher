@@ -225,7 +225,6 @@ export function settingsBody(s) {
     excerpt: String(s.excerpt || '').trim(),
     featured_image: String(s.featured_image || '').trim() || null,
     author: String(s.author || '').trim(),
-    status: s.status === 'private' ? 'private' : 'published',
     published_at: s.published_at || null,
     tags: (s.tags || []).slice(),
   };
@@ -298,7 +297,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   // ----- settings -----
   const settings = {
     slug: post.slug || '', slugTaken: false, excerpt: post.excerpt || '', featured_image: post.featured_image || '', author: post.author || '',
-    status: post.status === 'private' ? 'private' : 'published', published_at: post.published_at || null,
+    published_at: post.published_at || null,
     tags: (post.tags || []).map((t) => (typeof t === 'string' ? t : t.name)),
   };
   let publishedAt = post.published_at || null; // as saved on the server
@@ -354,11 +353,6 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   excerptInput.value = settings.excerpt;
   const authorInput = h('input', { type: 'text', id: fieldId('author'), maxlength: '200', value: settings.author, oninput: () => { settings.author = authorInput.value; changed(); } });
 
-  const statusSwitch = h('input', { type: 'checkbox', role: 'switch', id: fieldId('status'), checked: settings.status === 'published',
-    onchange: () => { settings.status = statusSwitch.checked ? 'published' : 'private'; statusText.textContent = statusLabel(); changed(); } });
-  const statusLabel = () => (settings.status === 'published' ? 'Published: listed in the catalog' : 'Private: not listed in the catalog');
-  const statusText = h('span', null, statusLabel());
-
   const dateInput = h('input', { type: 'datetime-local', id: fieldId('date'), value: toLocalInput(settings.published_at),
     onchange: () => { settings.published_at = fromLocalInput(dateInput.value); changed(); } });
 
@@ -384,7 +378,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     h('div', { class: 'be-seg', role: 'radiogroup', 'aria-label': 'State' },
       h('label', { for: fieldId('state-published') }, statePublished, h('span', null, 'Published')),
       h('label', { for: fieldId('state-hidden') }, stateHidden, h('span', null, 'Hidden'))));
-  if (!canPublish) statusSwitch.disabled = dateInput.disabled = true;
+  if (!canPublish) dateInput.disabled = true;
 
   const panel = h('aside', { class: 'card be-settings', id: 'be-settings', 'aria-label': 'Post settings' },
     h('div', { class: 'be-actions' }, saveBtn, previewBtn),
@@ -396,9 +390,6 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       h('p', { class: 'muted' }, 'Drop, paste or choose an image; it is cropped to 16:9. The public blog uses the title as its alt text.')),
     field('excerpt', 'Excerpt', excerptInput, h('p', { class: 'muted' }, 'Shown in the catalog and in link previews.')),
     field('author', 'Author', authorInput),
-    h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Visibility'),
-      h('label', { class: 'be-switch', for: fieldId('status') }, statusSwitch, statusText),
-      h('p', { class: 'muted' }, 'Private hides the post from the catalog only; it is not secure.')),
     field('date', 'Published date', dateInput, h('p', { class: 'muted' }, 'Empty until the post is published. A date in the future schedules it.')),
     field('tags', h('span', null, 'Tags ', tagCount), tagInput, tagOptions, tagChips, tagMsg),
     canPublish ? h('div', { class: 'be-danger-zone' }, deleteBtn) : null,

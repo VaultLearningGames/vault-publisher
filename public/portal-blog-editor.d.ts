@@ -25,7 +25,7 @@ export function isLinkHref(href: string): boolean;
 
 export interface EditorSettings {
   slug: string; slugTaken?: boolean; excerpt: string; featured_image: string; author: string;
-  status: 'published' | 'private'; published_at: string | null; tags: string[];
+  published_at: string | null; tags: string[];
 }
 export interface AutosaveState { dueAt: number | null; saving: boolean; stopped: boolean }
 export type AutosaveAction = { type: 'change'; at: number } | { type: 'start' } | { type: 'done'; ok?: boolean } | { type: 'stop' };
@@ -43,7 +43,7 @@ export function fromLocalInput(value: string): string | null;
 export function savedLabel(date: Date): string;
 export function settingsBody(s: EditorSettings): {
   slug?: string; excerpt: string; featured_image: string | null; author: string;
-  status: 'published' | 'private'; published_at: string | null; tags: string[];
+  published_at: string | null; tags: string[];
 };
 export function autosaveInit(): AutosaveState;
 export function autosaveStep(state: AutosaveState, action: AutosaveAction, delay?: number): AutosaveState;

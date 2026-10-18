@@ -72,8 +72,6 @@
 .be-url { word-break: break-all; font-family: var(--mono, monospace); }
 .be-settings .field .be-slug-warn { margin-top: 6px; padding: 6px 8px; line-height: 1.4; background: var(--wait-soft); border-left: 3px solid var(--wait); border-radius: 6px; }
 .be-slug-warn[hidden] { display: none; }
-.be-switch { display: inline-flex; align-items: center; gap: 8px; font-weight: 500 !important; cursor: pointer; }
-.be-switch input { width: auto !important; accent-color: var(--slate); }
 .be-chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 6px 0 0; padding: 0; }
 .be-chips:empty { display: none; }
 .be-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 12.5px; background: var(--paper); }

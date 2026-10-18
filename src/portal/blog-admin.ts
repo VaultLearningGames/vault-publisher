@@ -18,7 +18,8 @@
 //   POST   /portal/api/blog/:slug/images          an image upload (multipart "file") -> { key, url, ... } (blog-images.ts)
 // A slug change (rename) is one commit that moves the post's folder and adds /blog/<old>/ to its aliases; the post's
 // CDN images move to site/<new slug>/ around it (blog/imageMove.ts): 502 { error: 'image_move_failed' } or 409 when they
-// can't be moved, and then nothing changed. The response's "move" says what happened to them.
+// can't be moved, and then nothing changed. The response's "movedFiles" counts them and "move" says what happened to the
+// old objects. Links straight to the old image addresses stop working; the editor warns before a rename.
 // The editor (pages need a session; the JSON routes are API routes like the ones above):
 //   GET    /portal/blog                     every post in the repository, and new posts not committed yet
 //   GET    /portal/blog/new                 a new post (scratch only until its first Save), 302 -> /portal/blog/edit/<slug>
@@ -54,7 +55,7 @@ import { markDeployPending } from '../deploy-status.ts';
 import { judgePush, signatureValid } from '../site-content/webhook.ts';
 import { PostSlugTakenError, SiteBlogRepo, type RepoPost } from '../blog/siteRepo.ts';
 import { isBlogSlug, MAX_SLUG, slugify, uniqueSlug } from '../blog/slug.ts';
-import { copyImages, deleteOld, discardCopies, ImageMoveError, rewriteImageRefs, withImageLock } from '../blog/imageMove.ts';
+import { copyImages, deleteOld, discardCopies, ImageMoveError, referencedKeys, rewriteImageRefs, withImageLock } from '../blog/imageMove.ts';
 import {
   applyPostInput, FrontMatterError, parsePostFile, postInputFromFile, SaveConflictError, SAVE_CONFLICT_MESSAGE, serializePostFile, SiteContentConfigError, SiteContentError,
 } from '../site-content/index.ts';
@@ -302,13 +303,33 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     withPortalUserTrailer(`blog: ${verb} ${what}\n\nBy ${h.actor(u)} in the Vault Studio Portal.`, u.login);
 
   // A Save: create (sha null), update, or rename (a new slug), each one commit. Clears the post's autosave.
-  const commit = async (u: User, slug: string, sha: string | null, input: BlogPostInput, verb?: string): Promise<{ post: EditorPost; move?: unknown }> => {
-    if (sha === null) {
+  const commit = async (u: User, slug: string, sha: string | null, input: BlogPostInput, verb?: string): Promise<{ post: EditorPost; movedFiles?: number; move?: unknown }> => {
+    if (sha === null && input.slug === slug) {
       const r = await repo.savePost(input.slug, fields(input), null, commitMessage(verb ?? 'create', input.slug, u));
       scratch.delete(slug);
       h.db.audit(h.actor(u), 'blog.create', input.slug, { commit: r.commit });
       markDeployPending(h.db, 'blog.create');
       return { post: { ...input, sha: r.sha, aliases: [], committed: true } };
+    }
+    // A new post saved under another slug than its draft's: the images it uses are copied to the new slug's folder
+    // first (the draft's folder is left as it is), and removed again when the commit fails.
+    if (sha === null) {
+      return withImageLock(slug, async () => {
+        const storage = h.deps.production;
+        const copy = await copyImages(storage, slug, input.slug, referencedKeys(input, slug, h.deps.prodPublicUrl));
+        const moved = copy.keys.length ? rewriteImageRefs(input, copy, h.deps.prodPublicUrl) : input;
+        let r;
+        try {
+          r = await repo.savePost(moved.slug, fields(moved), null, commitMessage(verb ?? 'create', moved.slug, u));
+        } catch (err) {
+          await discardCopies(storage, copy);
+          throw err;
+        }
+        scratch.delete(slug);
+        h.db.audit(h.actor(u), 'blog.create', moved.slug, { commit: r.commit, ...(copy.keys.length ? { from: slug, copied: copy.keys.length } : {}) });
+        markDeployPending(h.db, 'blog.create');
+        return { post: { ...moved, sha: r.sha, aliases: [], committed: true } };
+      });
     }
     if (input.slug === slug) {
       const r = await repo.savePost(slug, fields(input), sha, commitMessage(verb ?? 'update', slug, u));
@@ -336,7 +357,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
       h.db.audit(h.actor(u), 'blog.rename', input.slug, { from: slug, commit: r.commit, ...(move ? { move } : {}) });
       markDeployPending(h.db, 'blog.rename');
       const after = await repo.getPost(input.slug).catch(() => null);
-      return { post: { ...moved, sha: r.sha, aliases: after?.aliases ?? [], committed: true }, ...(move ? { move } : {}) };
+      return { post: { ...moved, sha: r.sha, aliases: after?.aliases ?? [], committed: true }, movedFiles: copy.keys.length, ...(move ? { move } : {}) };
     });
   };
 

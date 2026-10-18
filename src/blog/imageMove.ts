@@ -8,6 +8,8 @@
 //   3. deleteOld: the old objects are deleted. If that fails the post is renamed already; the response says so and
 //      the old objects are left (they are harmless, and the next rename of the post doesn't depend on them).
 // References are rewritten whether root-relative (/site/<slug>/<file>) or on the CDN's public URL.
+// A new post's first Save under another slug than its draft's (untitled -> its title's) moves only the images the post
+// uses (referencedKeys) and keeps the old objects: a draft slug can be used again by the next new post.
 import { IMAGE_CACHE } from '../assets.ts';
 import type { Storage } from '../storage.ts';
 import { normalizeImageBlock, type Block } from './blocks.ts';
@@ -53,6 +55,35 @@ export function rewriteRef(src: string, oldSlug: string, newSlug: string, keys: 
   return src;
 }
 
+// The image addresses a post uses: its image blocks' (every image of a collection) and its featured image.
+function imageRefs(p: Pick<BlogPostInput, 'blocks' | 'featured_image'>): string[] {
+  const out: string[] = [];
+  for (const b of p.blocks) {
+    if (b.type !== 'image') continue;
+    if (b.images === undefined) out.push(b.src);
+    else for (const img of b.images) out.push(img.url);
+  }
+  if (p.featured_image !== null) out.push(p.featured_image);
+  return out;
+}
+
+// The object keys under site/<slug>/ that the post's images point at (root-relative or on `publicBase`).
+export function referencedKeys(p: Pick<BlogPostInput, 'blocks' | 'featured_image'>, slug: string, publicBase?: string): Set<string> {
+  const bases = ['/'];
+  const pub = (publicBase ?? '').replace(/\/+$/, '');
+  if (pub) bases.push(`${pub}/`);
+  const keys = new Set<string>();
+  for (const src of imageRefs(p)) {
+    for (const base of bases) {
+      const from = base + prefixOf(slug);
+      if (!src.startsWith(from)) continue;
+      const file = src.slice(from.length).replace(/[?#].*$/, '');
+      if (file && !file.includes('/')) keys.add(prefixOf(slug) + file);
+    }
+  }
+  return keys;
+}
+
 export function rewriteImageRefs<T extends Pick<BlogPostInput, 'blocks' | 'featured_image'>>(p: T, copy: ImageCopy, publicBase?: string): T {
   const keys = new Set(copy.keys);
   const map = (src: string) => rewriteRef(src, copy.oldSlug, copy.newSlug, keys, publicBase);
@@ -66,14 +97,15 @@ export function rewriteImageRefs<T extends Pick<BlogPostInput, 'blocks' | 'featu
   return { ...p, blocks, featured_image: p.featured_image === null ? null : map(p.featured_image) };
 }
 
-// Step 1. Without storage, or with nothing under site/<old>/, there is nothing to move (keys empty).
-export async function copyImages(storage: Storage | null, oldSlug: string, newSlug: string): Promise<ImageCopy> {
+// Step 1. Without storage, or with nothing under site/<old>/, there is nothing to move (keys empty). `only`: copy just
+// these keys (a new post's referencedKeys), not everything under site/<old>/.
+export async function copyImages(storage: Storage | null, oldSlug: string, newSlug: string, only?: ReadonlySet<string>): Promise<ImageCopy> {
   const copy: ImageCopy = { oldSlug, newSlug, keys: [], created: [] };
   if (!storage) return copy;
   const oldPrefix = prefixOf(oldSlug), newPrefix = prefixOf(newSlug);
   let objects;
   try {
-    objects = (await storage.list(oldPrefix)).filter((o) => o.key.startsWith(oldPrefix) && o.key.length > oldPrefix.length);
+    objects = (await storage.list(oldPrefix)).filter((o) => o.key.startsWith(oldPrefix) && o.key.length > oldPrefix.length && (!only || only.has(o.key)));
   } catch (err) {
     throw new ImageMoveError(502, 'image_move_failed', `Could not list the post’s images: ${message(err)}`);
   }

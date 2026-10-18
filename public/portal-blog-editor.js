@@ -167,6 +167,15 @@ export function slugify(input) {
   return s.slice(0, MAX_SLUG).replace(/-+$/, '');
 }
 
+// The warning for a Save that renames a committed post (sha: its SHA as loaded, null for a new post), or '' when the
+// Save doesn't rename one. A rename moves the post's images to the new slug's folder on the CDN.
+export function slugChangeWarning(sha, savedSlug, slug, siteUrl = '') {
+  const s = slugify(slug);
+  if (!sha || !s || s === savedSlug) return '';
+  return `Changing the URL slug moves this post from ${siteUrl}/blog/${savedSlug} to ${siteUrl}/blog/${s} and moves its images `
+    + 'to a new folder on the CDN. Old links will not work: links to the old address, or to the post’s images, may break.';
+}
+
 // Whether a loaded post's slug still follows its title, so typing a new title may change it: only for drafts (a
 // published post's URL is out there), and only when the slug is the title's or the "untitled" a new draft gets.
 export function isAutoSlug(slug, title, publishedAt) {
@@ -301,6 +310,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     oninput: () => { slugAuto = false; setSlug(slugInput.value); } });
   const slugUrl = h('p', { class: 'muted be-url' });
   const slugMsg = h('p', { class: 'err be-slug-msg', 'aria-live': 'polite' });
+  const slugWarn = h('p', { class: 'be-slug-warn', 'aria-live': 'polite', hidden: true });
 
   // The featured image: a drop zone, a placeholder until there is one, then its preview with Adjust, Replace and Remove.
   // A picked, dropped or pasted image goes through the image editor at FEATURED_IMAGE_ASPECT. Adjust crops again from
@@ -383,7 +393,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     status, err,
     stateField,
     h('h2', null, 'Settings'),
-    field('slug', 'URL slug', slugInput, slugUrl, slugMsg),
+    field('slug', 'URL slug', slugInput, slugUrl, slugMsg, slugWarn),
     field('img', 'Featured image', imgZone.root, imgMsg,
       h('p', { class: 'muted' }, 'Drop, paste or choose an image; it is cropped to 16:9. The public blog uses the title as its alt text.')),
     field('excerpt', 'Excerpt', excerptInput, h('p', { class: 'muted' }, 'Shown in the catalog and in link previews.')),
@@ -445,6 +455,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     const s = slugify(value);
     slugUrl.textContent = `${siteUrl}/blog/${s || '…'}`;
     slugMsg.textContent = value.trim() && !s ? 'The slug needs letters or digits.' : '';
+    showSlugWarning();
     clearTimeout(slugTimer);
     const seq = ++slugSeq;
     if (s) slugTimer = setTimeout(() => checkSlug(s, seq), 300);
@@ -457,8 +468,15 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       if (seq !== slugSeq || !res.ok) return;
       settings.slugTaken = !data.available;
       slugMsg.textContent = data.available ? '' : `Another post already uses /blog/${data.slug}. Choose a different slug; until then the post keeps its current URL.`;
+      showSlugWarning();
       changed();
     } catch (_) { /* offline: the save will say so */ }
+  }
+  // Under the slug while the next Save would rename the post (not while the new slug is taken: that Save keeps it).
+  function showSlugWarning() {
+    const text = settings.slugTaken ? '' : slugChangeWarning(sha, savedSlug, settings.slug, siteUrl);
+    slugWarn.textContent = text;
+    slugWarn.hidden = !text;
   }
   slugUrl.textContent = `${siteUrl}/blog/${slugify(settings.slug) || '…'}`;
 
@@ -929,6 +947,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       root.dataset.slug = p.slug;
       history.replaceState(null, '', `/portal/blog/edit/${encodeURIComponent(p.slug)}`);
     }
+    showSlugWarning();
   }
 
   // Saves the post: a commit to the website repository. Resolves to whether it saved.
@@ -937,6 +956,9 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     if (current) return current;
     const body = fullBody(sha);
     if (!body.title) { showError('The title must not be empty.'); titleInput.focus(); return Promise.resolve(false); }
+    // A rename: the user confirms first that old links will not work. Cancelled, nothing is sent.
+    const warning = body.slug ? slugChangeWarning(sha, postSlug, body.slug, siteUrl) : '';
+    if (warning && !confirm(`${warning}\n\nSave with the new slug?`)) { status.textContent = 'Not saved'; return Promise.resolve(false); }
     current = doSave(body, publishing).finally(() => { current = null; });
     return current;
   }
@@ -965,6 +987,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       }
       showError('');
       committed(data.post);
+      if (data.movedFiles) say(`The post was renamed; ${data.movedFiles} image${data.movedFiles === 1 ? '' : 's'} moved to its new address.`);
       if (data.move && data.move.status !== 'done') showError(`The post was renamed, but its old images couldn’t be removed from the CDN: ${data.move.error || 'unknown error'}.`);
       if (publishing) {
         settings.published_at = publishedAt;

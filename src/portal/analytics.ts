@@ -17,7 +17,7 @@ import { cityPoint } from '../analytics/cities.ts';
 import { COUNTRY_POINTS } from '../analytics/countries.ts';
 import { MAP_HEIGHT, MAP_WIDTH } from '../analytics/projection.ts';
 import { loadLegacy, pagePaths } from '../analytics/pages.ts';
-import { averageSeconds, longDate, PLAYS_SINCE, PRESETS, presetPeriods, spanLabel, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
+import { averageSeconds, longDate, PLAYS_SINCE, PRESETS, presetPeriods, spanLabel, type GamePages, type GamePlays, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
 import type { Studio, User } from '../db.ts';
 import { html, raw, type Html } from './html.ts';
 import type { ListingHelpers, ListingRow } from './listings.ts';
@@ -156,7 +156,8 @@ const firstError = (...rs: (Result<unknown> | null)[]) => rs.find((r): r is { ok
 // titleOf: a game's title, the link to its Analytics tab (if the viewer may see it) and, on the site view, its
 // studio's Analytics page.
 export interface GameTitle { title: string; href: string | null; studio?: { name: string; href: string } }
-interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; assets: Assets; titleOf(slug: string): GameTitle }
+// topUrl: where Load more asks for the next top games (the view's scope and range); none, no button.
+interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; topUrl?: string; assets: Assets; titleOf(slug: string): GameTitle }
 interface Assets { css: string; js: string; land: string }
 
 // The date range picker, laid out like Google Analytics': a button showing the range, which opens the presets (in GA's
@@ -220,6 +221,34 @@ export function playsNote(sel: Selection): Html | '' {
   const which = sel.current.start < PLAYS_SINCE ? 'so the Plays line starts there and play figures in this range cover only the days since'
     : `so ${sel.vs} has none to compare with`;
   return html`<p class="ga-warn" role="note"><b>Plays weren’t counted before ${longDate(PLAYS_SINCE)}</b>, when the site began sending play events, ${which}. Sessions and users go back further.</p>`;
+}
+
+// ---------- top games ----------
+// The first page of top games, and each Load more's page.
+export const TOP_PAGE = 10;
+export type TopGame = ({ by: 'plays' } & GamePlays) | ({ by: 'views' } & GamePages);
+// The view's whole ranked list of top games: by plays, or by page views when no game has plays (yet). Both lists are
+// ranked by their figure, most first, then by slug, so pages of them never skip or repeat a game. null: none shown
+// (a game's view, or nothing to rank).
+export function topGames(ov: Overview, scope: Scope): { by: 'plays' | 'views'; items: TopGame[] } | null {
+  if (scope.game) return null;
+  const p = ov.plays.ok ? ov.plays.value : null, tp = ov.topPages;
+  if (tp && (!p || !p.games.length)) return { by: 'views', items: tp.ok ? tp.value.map((g) => ({ by: 'views' as const, ...g })) : [] };
+  if (p) return { by: 'plays', items: p.timed ? p.games.map((g) => ({ by: 'plays' as const, ...g })) : [] };
+  return null;
+}
+export function topRow(g: TopGame, titleOf: (slug: string) => GameTitle): Html {
+  const t = titleOf(g.slug);
+  const name = html`<td class="proj">${t.href ? html`<a href="${t.href}"><b>${t.title}</b></a>` : html`<b>${t.title}</b>`}<span>${t.studio ? html`<a href="${t.studio.href}" title="The studio’s analytics">${t.studio.name}</a> · ` : ''}${g.slug}</span></td>`;
+  return g.by === 'views'
+    ? html`<tr data-slug="${g.slug}">${name}<td class="r num">${num(g.views)}</td><td class="r num">${num(g.clicks)}</td></tr>`
+    : html`<tr data-slug="${g.slug}">${name}<td class="r num">${num(g.plays)}</td><td class="r num">${duration(averageSeconds(g))}</td></tr>`;
+}
+// ?offset=&limit= of a Load more: whole numbers (limit kept to 1 to 100); anything else, the defaults (0 and a page).
+export function pageParams(offset: string | undefined, limit: string | undefined): { offset: number; limit: number } {
+  const int = (v: string | undefined) => (v !== undefined && /^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
+  const o = int(offset), l = int(limit);
+  return { offset: o ?? 0, limit: l === null ? TOP_PAGE : Math.max(1, Math.min(100, l)) };
 }
 
 export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
@@ -296,24 +325,23 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
     <div data-realtime="${o.realtimeUrl}">${realtimeBody(rt, { staff: o.staff, land: o.assets.land, game: !!o.scope.game })}</div></div>`;
 
   let top: Html | string = '';
-  const name = (slug: string) => {
-    const t = o.titleOf(slug);
-    return html`<td class="proj">${t.href ? html`<a href="${t.href}"><b>${t.title}</b></a>` : html`<b>${t.title}</b>`}<span>${t.studio ? html`<a href="${t.studio.href}" title="The studio’s analytics">${t.studio.name}</a> · ` : ''}${slug}</span></td>`;
-  };
+  const tg = topGames(ov, o.scope);
+  const rows = tg ? tg.items.slice(0, TOP_PAGE).map((g) => topRow(g, o.titleOf)) : [];
+  // More games than the first page: a Load more button, which asks topUrl for the next ones (analytics.js).
+  const more = tg && o.topUrl && tg.items.length > TOP_PAGE
+    ? html`<div class="ga-more"><button type="button" class="btn sm" data-more="${o.topUrl}" data-limit="${TOP_PAGE}">Load more</button><span class="small muted" role="status" aria-live="polite"></span></div>` : '';
   const tp = ov.topPages;
-  if (!o.scope.game && tp && (!p || !p.games.length)) {
+  if (tg?.by === 'views' && tp) {
     // No game has plays (yet): the games whose pages were viewed most.
-    const rows = tp.ok ? tp.value.slice(0, 10).map((g) => html`<tr>${name(g.slug)}<td class="r num">${num(g.views)}</td><td class="r num">${num(g.clicks)}</td></tr>`) : [];
     top = html`<div class="card ga-games"><h2>Top games <small>by page views, ${spanLabel(sel.current)}</small></h2>
       ${!tp.ok ? problem(tp.error, o.staff, 'the game pages')
-        : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Page views</th><th class="r" title="Outbound link clicks from the game’s page: the old site’s Play button linked out to the game">Play-button clicks</th></tr></thead><tbody>${rows}</tbody></table></div>
+        : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Page views</th><th class="r" title="Outbound link clicks from the game’s page: the old site’s Play button linked out to the game">Play-button clicks</th></tr></thead><tbody>${rows}</tbody></table></div>${more}
           <p class="small muted">No plays by game yet${p && !p.timed ? ' (Google Analytics doesn’t know the custom dimension game_slug yet)' : ''}, so these are views of each game’s page. Play-button clicks: outbound clicks from the game’s page.</p>`
         : html`<p class="small muted">No views of game pages in this range.</p>`}</div>`;
-  } else if (!o.scope.game && p) {
-    const rows = p.games.slice(0, 10).map((g) => html`<tr>${name(g.slug)}<td class="r num">${num(g.plays)}</td><td class="r num">${duration(averageSeconds(g))}</td></tr>`);
+  } else if (tg?.by === 'plays' && p) {
     top = html`<div class="card ga-games"><h2>Top games <small>by plays, ${spanLabel(sel.current)}</small></h2>
       ${!p.timed ? html`<p class="small muted">Games can be told apart once the custom dimension game_slug is registered in Google Analytics.</p>`
-        : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Plays</th><th class="r">Avg time</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Plays</th><th class="r">Avg time</th></tr></thead><tbody>${rows}</tbody></table></div>${more}`
         : html`<p class="small muted">No plays in this range yet.</p>`}</div>`;
   }
 
@@ -364,7 +392,10 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     const rtq = scope.game ? `?game=${encodeURIComponent(scope.game)}` : scope.studio ? `?studio=${encodeURIComponent(scope.studio)}` : '';
     const full = scope.game ? { ...scope, pages: cat[scope.game] ?? pagePaths(scope.game, legacy) } : scope;
     const [ov, rt] = await Promise.all([analytics.overview(analytics.selection(q), full, cat), analytics.realtime(scope)]);
-    return view(ov, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio) });
+    // Load more: the same scope and range as the page.
+    const tq = new URLSearchParams(Object.entries({ studio: scope.studio, ...q }).filter((e): e is [string, string] => e[1] !== undefined));
+    return view(ov, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`,
+      topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio) });
   }
 
   app.get('/vault/analytics', async (c) => {
@@ -402,6 +433,25 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     } else if (!h.isStaff(u)) return c.text('Only Vault staff can see this.', 403);
     const rt = await analytics.realtime(scope);
     return c.html(realtimeBody(rt, { staff: h.isStaff(u), land: assets.land, game: !!slug }).toString(), 200, { 'Cache-Control': 'no-store' });
+  });
+
+  // The top games' next page, for Load more (analytics.js): ?studio= (else the site), the page's range, and
+  // ?offset=&limit=. rows: the table's rows, ranked as on the page; total: all the ranked games; hasMore: more after these.
+  app.get('/portal/analytics/top-games', async (c) => {
+    const u = h.signedIn(c); if (u instanceof Response) return u;
+    const studio = c.req.query('studio');
+    let scope: Scope = {}, cat: Record<string, string[]>;
+    if (studio) {
+      const s = db.studioBySlug(studio);
+      if (!s || !canSeeStudio(u, s)) return c.text('Not found', 404);
+      ({ scope, catalog: cat } = studioScope(s));
+    } else if (!h.isStaff(u)) return c.text('Only Vault staff can see this.', 403);
+    else cat = catalog();
+    const { offset, limit } = pageParams(c.req.query('offset'), c.req.query('limit'));
+    const items = scope.studio && !scope.games!.length ? [] : topGames(await analytics.overview(analytics.selection(queryOf(c)), scope, cat), scope)?.items ?? [];
+    const page = items.slice(offset, offset + limit), ttl = titleOf(u, !scope.studio);
+    return c.json({ items: page.map((g) => ({ slug: g.slug, html: topRow(g, ttl).toString() })), offset, total: items.length, hasMore: offset + page.length < items.length },
+      200, { 'Cache-Control': 'no-store' });
   });
 
   return {

@@ -46,7 +46,7 @@ import type { Context, Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { fail, jsonBody } from '../app.ts';
 import type { User } from '../db.ts';
-import { validateBlocks, isSafeImageSrc, type Block } from '../blog/blocks.ts';
+import { emptyImageBlocks, validateBlocks, isSafeImageSrc, type Block } from '../blog/blocks.ts';
 import type { BlogPostInput, BlogStatus } from '../blog/repo.ts';
 import { BlogScratch } from '../blog/scratch.ts';
 import { markDeployPending } from '../deploy-status.ts';
@@ -150,6 +150,9 @@ function parseInput(b: Record<string, unknown>, base: BlogPostInput | undefined,
   const finalStatus = status ?? base?.status ?? 'published';
   let finalPublishedAt = publishedAt !== undefined ? publishedAt : base?.published_at ?? null;
   if (publishNow && finalStatus === 'published' && !finalPublishedAt) finalPublishedAt = new Date().toISOString();
+  // A draft may keep an image block with no images yet; a post going on the site may not.
+  const empty = finalPublishedAt ? emptyImageBlocks(blocks ?? base?.blocks ?? []) : [];
+  if (empty.length) fail(400, 'Invalid blog post.', { errors: empty.map((at) => `${at}: add at least one image, or remove the image block, before publishing`) });
   const finalTitle = title ?? base!.title;
   if (slug === undefined) slug = base ? base.slug : freeSlug(slugify(finalTitle));
 

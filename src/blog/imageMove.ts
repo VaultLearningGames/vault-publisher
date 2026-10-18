@@ -10,7 +10,7 @@
 // References are rewritten whether root-relative (/site/<slug>/<file>) or on the CDN's public URL.
 import { IMAGE_CACHE } from '../assets.ts';
 import type { Storage } from '../storage.ts';
-import type { Block } from './blocks.ts';
+import { normalizeImageBlock, type Block } from './blocks.ts';
 import { BLOG_IMAGE_DIR } from './imageKey.ts';
 import type { BlogPostInput } from './repo.ts';
 
@@ -56,7 +56,13 @@ export function rewriteRef(src: string, oldSlug: string, newSlug: string, keys: 
 export function rewriteImageRefs<T extends Pick<BlogPostInput, 'blocks' | 'featured_image'>>(p: T, copy: ImageCopy, publicBase?: string): T {
   const keys = new Set(copy.keys);
   const map = (src: string) => rewriteRef(src, copy.oldSlug, copy.newSlug, keys, publicBase);
-  const blocks = p.blocks.map((b): Block => (b.type === 'image' && map(b.src) !== b.src ? { ...b, src: map(b.src) } : b));
+  const blocks = p.blocks.map((b): Block => {
+    if (b.type !== 'image') return b;
+    if (b.images === undefined) return map(b.src) !== b.src ? { ...b, src: map(b.src) } : b;
+    // A collection: every image's url, then its mirror fields again.
+    if (!b.images.some((img) => map(img.url) !== img.url)) return b;
+    return normalizeImageBlock({ ...b, images: b.images.map((img) => ({ ...img, url: map(img.url) })) });
+  });
   return { ...p, blocks, featured_image: p.featured_image === null ? null : map(p.featured_image) };
 }
 

@@ -4,6 +4,12 @@
 //   divider     ---
 //   image       ![alt](src), or with a caption or an alignment Hugo's figure shortcode:
 //               {{< figure src="..." alt="..." caption="..." class="align-wide" >}}
+//   image       (a collection) one image shortcode per image, a blank line between them, each with gallery="<n>" (the
+//               same n for one block's images, different for the next block's) and its layout and fields:
+//               {{< image src="..." alt="..." caption="<visible title>" gallery="1" layout="grid" id="..." title="..."
+//               description="..." link="..." target="_blank" show_title="false" show_description="false" >}}
+//               (caption mirrors the visible title and description, so a site whose shortcode only knows src, alt,
+//               caption and align still shows every image; an empty collection is written as JSON, below)
 //   paragraph   spans as Markdown: **bold**, *italic*, `code`, [text](href); `<!---->` (an empty HTML comment, which
 //               renders as nothing) separates two spans that would otherwise run together
 //   paragraph   (editor HTML) the HTML as it is, when it starts with <p>, <ul> or <ol>; else after a
@@ -17,7 +23,8 @@
 // `<!-- vault:block {json} -->`, which reads back exactly but shows nothing on the page.
 // Markdown written by hand is read as well as this format allows (h1 and h5-h6 become h2 and h4, other syntax is text).
 import { isDeepStrictEqual } from 'node:util';
-import { MARKS, ALIGNS, type Align, type Block, type Mark, type Span } from '../blog/blocks.ts';
+import { MARKS, ALIGNS, normalizeImageBlock, type Align, type Block, type ImageBlock, type ImageItem, type Mark, type Span } from '../blog/blocks.ts';
+import { normalizeImageItem, visibleCaption } from '../../public/portal-blog-image-block.js';
 
 // ---------- writing ----------
 
@@ -93,7 +100,7 @@ function shortcodeValue(v: string): string | null {
   return null;
 }
 
-function imageMarkdown(b: Extract<Block, { type: 'image' }>): string | null {
+function imageMarkdown(b: Extract<Block, { type: 'image'; images?: undefined }>): string | null {
   if (b.caption === undefined && b.align === undefined) return `![${escapeText(b.alt, true)}](${escapeDest(b.src)})`;
   const params: string[] = [];
   for (const [k, v] of [['src', b.src], ['alt', b.alt], ['caption', b.caption], ['align', b.align]] as const) {
@@ -103,6 +110,30 @@ function imageMarkdown(b: Extract<Block, { type: 'image' }>): string | null {
     params.push(`${k}=${q}`);
   }
   return `{{< image ${params.join(' ')} >}}`;
+}
+
+// A collection's images as image shortcodes, a blank line between them; null when a value can't be written.
+function galleryMarkdown(b: ImageBlock, key: string): string | null {
+  if (!b.images.length) return null;
+  const out: string[] = [];
+  for (const img of b.images) {
+    const fields: [string, string | undefined][] = [
+      ['src', img.url], ['alt', img.alt], ['caption', visibleCaption(img) || undefined], ['align', b.align],
+      ['gallery', key], ['layout', b.layout], ['id', img.id], ['title', img.title || undefined],
+      ['description', img.description || undefined], ['link', img.link || undefined],
+      ['target', img.linkTarget === '_blank' ? '_blank' : undefined],
+      ['show_title', img.showTitle ? undefined : 'false'], ['show_description', img.showDescription ? undefined : 'false'],
+    ];
+    const params: string[] = [];
+    for (const [k, v] of fields) {
+      if (v === undefined) continue;
+      const q = shortcodeValue(v);
+      if (q === null) return null;
+      params.push(`${k}=${q}`);
+    }
+    out.push(`{{< image ${params.join(' ')} >}}`);
+  }
+  return out.join('\n\n');
 }
 
 function blockMarkdown(b: Block): string | null {
@@ -118,7 +149,7 @@ function blockMarkdown(b: Block): string | null {
       return lines.join('\n');
     }
     case 'divider': return '---';
-    case 'image': return imageMarkdown(b);
+    case 'image': return b.images === undefined ? imageMarkdown(b) : null;
     case 'paragraph':
       if (b.html !== undefined) return null; // converted to Markdown blocks first (htmlToBlocks), never written as HTML
       return paragraphMarkdown(b.children);
@@ -132,7 +163,14 @@ const jsonComment = (b: Block) => `<!-- vault:block ${JSON.stringify(b).replace(
 const canon = (v: unknown) => JSON.parse(JSON.stringify(v)) as unknown;
 
 // The Markdown of one block: its normal form when that reads back as the same block, else the JSON fallback.
-export function blockToMarkdown(b: Block): string {
+// `key` tells one image collection's shortcodes from the next one's (blocksToMarkdown numbers them).
+export function blockToMarkdown(b: Block, key = '1'): string {
+  if (b.type === 'image' && b.images !== undefined) {
+    b = normalizeImageBlock(b);
+    const md = galleryMarkdown(b, key);
+    if (md !== null && isDeepStrictEqual(canon(markdownToBlocks(md)), canon([b]))) return md;
+    return jsonComment(b);
+  }
   const md = blockMarkdown(b);
   if (md !== null && !/\n[ \t]*\n/.test(md) && md.trim() !== '' && isDeepStrictEqual(canon(markdownToBlocks(md)), canon([b]))) return md;
   return jsonComment(b);
@@ -147,7 +185,7 @@ export function blocksToMarkdown(blocks: Block[], eol: '\n' | '\r\n' = '\n'): st
     return r;
   });
   if (!blocks.length) return '';
-  return blocks.map(blockToMarkdown).join('\n\n').replace(/\n/g, eol) + eol;
+  return blocks.map((b, i) => blockToMarkdown(b, String(i + 1))).join('\n\n').replace(/\n/g, eol) + eol;
 }
 
 // ---------- reading ----------
@@ -330,12 +368,35 @@ function chunkBlock(chunk: string): Block {
   return { type: 'paragraph', children: parseInline(chunk) };
 }
 
+// One image of a collection (an image shortcode with a gallery parameter), or null for any other chunk.
+function galleryChunk(chunk: string): { key: string; layout: string; align?: string; item: ImageItem } | null {
+  const m = /^\{\{<\s*image\s([\s\S]*?)\s*\/?>\}\}$/.exec(chunk);
+  const p = m && shortcodeParams(m[1]);
+  if (!p || p.gallery === undefined || p.src === undefined) return null;
+  const item = normalizeImageItem({
+    id: p.id, url: p.src, alt: p.alt, title: p.title, description: p.description, link: p.link,
+    linkTarget: p.target, showTitle: p.show_title !== 'false', showDescription: p.show_description !== 'false',
+  });
+  return { key: p.gallery, layout: p.layout ?? '', align: p.align, item };
+}
+
 // A post body's blocks. Line endings may be LF or CRLF.
 export function markdownToBlocks(md: string): Block[] {
   const lines = md.replace(/\r\n/g, '\n').split('\n');
   const blocks: Block[] = [];
   let cur: string[] = [];
-  const flush = () => { if (cur.length) { blocks.push(chunkBlock(cur.join('\n'))); cur = []; } };
+  // The collection being read: consecutive image shortcodes with the same gallery key are its images.
+  let gallery: { key: string; layout: string; align?: string; items: ImageItem[]; at: number } | null = null;
+  const flush = () => {
+    if (!cur.length) return;
+    const chunk = cur.join('\n');
+    cur = [];
+    const g = galleryChunk(chunk);
+    if (g && gallery && gallery.key === g.key && gallery.at === blocks.length - 1) gallery.items.push(g.item);
+    else if (g) { gallery = { key: g.key, layout: g.layout, align: g.align, items: [g.item], at: blocks.length }; blocks.push(normalizeImageBlock({ images: [] })); }
+    else { gallery = null; blocks.push(chunkBlock(chunk)); return; }
+    blocks[gallery.at] = normalizeImageBlock({ layout: gallery.layout, align: gallery.align, images: gallery.items });
+  };
   for (const line of lines) {
     if (/^[ \t]*$/.test(line)) flush();
     else cur.push(line);

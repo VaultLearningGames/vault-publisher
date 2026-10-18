@@ -1,5 +1,9 @@
 // Block schema for blog post bodies. Pure functions: validateBlocks returns the normalized blocks or a list of errors.
 import { htmlToBlocks } from '../site-content/markdown-blocks.ts';
+import {
+  LAYOUTS, MAX_ALT, MAX_DESCRIPTION, MAX_IMAGES, MAX_TITLE, isImageLink, normalizeImageBlock, type ImageBlock,
+} from '../../public/portal-blog-image-block.js';
+export { normalizeImageBlock, type ImageBlock, type ImageItem } from '../../public/portal-blog-image-block.js';
 export const MAX_BLOCKS = 500;
 export const MARKS = ['bold', 'italic', 'code'] as const;
 export const ALIGNS = ['left', 'center', 'right', 'wide', 'full'] as const;
@@ -12,7 +16,9 @@ export type Block =
   | { type: 'heading'; level: 2 | 3 | 4; text: string }
   | { type: 'paragraph'; children: Span[]; html?: undefined }
   | { type: 'paragraph'; html: string; children?: undefined }
-  | { type: 'image'; src: string; alt: string; caption?: string; align?: Align }
+  // The older single image: still read from posts (normalizeImageBlock turns it into the collection shape below).
+  | { type: 'image'; src: string; alt: string; caption?: string; align?: Align; images?: undefined }
+  | ImageBlock
   | { type: 'list'; ordered: boolean; items: Span[][] }
   | { type: 'divider' };
 
@@ -192,18 +198,52 @@ function list(b: Record<string, unknown>, at: string, errors: string[]): Block |
   return typeof b.ordered === 'boolean' && items.length === b.items.length ? { type: 'list', ordered: b.ordered, items } : null;
 }
 
+const IMAGE_KEYS = ['id', 'url', 'alt', 'title', 'description', 'showTitle', 'showDescription', 'link', 'linkTarget'];
+
+// An image block, the older { src, alt, caption?, align? } or the collection { layout, align?, images }, checked and
+// returned in the collection shape (normalizeImageBlock), with src, alt and caption mirroring the first image. An
+// empty collection is allowed here (a draft keeps it); publishing checks emptyImageBlocks.
 function image(b: Record<string, unknown>, at: string, errors: string[]): Block | null {
-  unknownKeys(b, ['type', 'src', 'alt', 'caption', 'align'], at, errors);
-  if (typeof b.src !== 'string' || !isSafeImageSrc(b.src)) errors.push(`${at}.src must be an https URL or a path starting with /`);
-  if (typeof b.alt !== 'string') errors.push(`${at}.alt must be a string`);
-  else if (b.alt.length > 500 || hasCtl(b.alt)) errors.push(`${at}.alt must be at most 500 characters of plain text`);
-  if (b.caption !== undefined && (typeof b.caption !== 'string' || b.caption.length > 1000 || hasCtl(b.caption)))
-    errors.push(`${at}.caption must be at most 1000 characters of plain text`);
-  if (b.align !== undefined && !(ALIGNS as readonly unknown[]).includes(b.align)) errors.push(`${at}.align must be one of ${ALIGNS.join(', ')}`);
-  if (typeof b.src !== 'string' || typeof b.alt !== 'string') return null;
-  const out: Block = { type: 'image', src: b.src, alt: b.alt.trim() };
-  if (typeof b.caption === 'string' && b.caption.trim()) out.caption = b.caption.trim();
-  if (b.align !== undefined) out.align = b.align as Align;
+  if (b.align !== undefined && b.align !== '' && !(ALIGNS as readonly unknown[]).includes(b.align)) errors.push(`${at}.align must be one of ${ALIGNS.join(', ')}`);
+  if (b.images === undefined) {
+    unknownKeys(b, ['type', 'src', 'alt', 'caption', 'align', 'layout'], at, errors);
+    if (typeof b.src !== 'string' || !isSafeImageSrc(b.src)) errors.push(`${at}.src must be an https URL or a path starting with /`);
+    if (typeof b.alt !== 'string') errors.push(`${at}.alt must be a string`);
+    else if (b.alt.length > MAX_ALT || hasCtl(b.alt)) errors.push(`${at}.alt must be at most ${MAX_ALT} characters of plain text`);
+    if (b.caption !== undefined && (typeof b.caption !== 'string' || b.caption.length > 1000 || hasCtl(b.caption)))
+      errors.push(`${at}.caption must be at most 1000 characters of plain text`);
+    if (typeof b.src !== 'string' || typeof b.alt !== 'string') return null;
+    return normalizeImageBlock(b);
+  }
+  // The mirror fields (src, alt, caption) are accepted and rewritten from the first image.
+  unknownKeys(b, ['type', 'layout', 'align', 'images', 'src', 'alt', 'caption'], at, errors);
+  if (b.layout !== undefined && !(LAYOUTS as unknown[]).includes(b.layout)) errors.push(`${at}.layout must be one of ${LAYOUTS.join(', ')}`);
+  if (!Array.isArray(b.images)) { errors.push(`${at}.images must be an array`); return null; }
+  if (b.images.length > MAX_IMAGES) { errors.push(`${at}.images may have at most ${MAX_IMAGES} images`); return null; }
+  const before = errors.length;
+  b.images.forEach((img, j) => {
+    const iat = `${at}.images[${j}]`;
+    if (!isObj(img)) { errors.push(`${iat} must be an object`); return; }
+    unknownKeys(img, IMAGE_KEYS, iat, errors);
+    if (img.id !== undefined && (typeof img.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(img.id))) errors.push(`${iat}.id must be 1-64 letters, digits, - or _`);
+    if (typeof img.url !== 'string' || !isSafeImageSrc(img.url)) errors.push(`${iat}.url must be an https URL or a path starting with /`);
+    const text = (k: string, max: number) => {
+      const v = img[k];
+      if (v !== undefined && (typeof v !== 'string' || v.length > max || hasCtl(v))) errors.push(`${iat}.${k} must be at most ${max} characters of plain text`);
+    };
+    text('alt', MAX_ALT); text('title', MAX_TITLE); text('description', MAX_DESCRIPTION);
+    for (const k of ['showTitle', 'showDescription']) if (img[k] !== undefined && typeof img[k] !== 'boolean') errors.push(`${iat}.${k} must be true or false`);
+    if (img.link !== undefined && img.link !== '' && (typeof img.link !== 'string' || !isImageLink(img.link)))
+      errors.push(`${iat}.link must be an http(s) URL, a mailto: link, or a path starting with /`);
+    if (img.linkTarget !== undefined && img.linkTarget !== '_self' && img.linkTarget !== '_blank') errors.push(`${iat}.linkTarget must be "_self" or "_blank"`);
+  });
+  return errors.length > before ? null : normalizeImageBlock(b);
+}
+
+// Where (blocks[i]) an image block has no images: a draft may keep one, a published post may not.
+export function emptyImageBlocks(blocks: Block[]): string[] {
+  const out: string[] = [];
+  blocks.forEach((b, i) => { if (b.type === 'image' && b.images !== undefined && b.images.length === 0) out.push(`blocks[${i}]`); });
   return out;
 }
 

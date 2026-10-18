@@ -357,6 +357,13 @@ export interface Studio {
 
 export type StudioSource = 'file' | 'import' | 'portal';
 
+// A studio's own GitHub organization, or null when it has none (empty or blank). There is no fallback: a studio
+// without one never borrows another studio's organization.
+export function studioGithubOrg(s: { github_owner?: string | null } | null | undefined): string | null {
+  const org = typeof s?.github_owner === 'string' ? s.github_owner.trim() : '';
+  return org || null;
+}
+
 // A repository assigned to a studio: it publishes for that studio whatever organization owns it.
 export interface StudioRepository {
   repository_id: string;
@@ -646,7 +653,7 @@ export class Db {
     for (const s of studios) {
       const taken = bySlug.get(s.slug) as { github_owner_id: string } | undefined;
       if (taken && taken.github_owner_id !== s.github_owner_id) { skipped.push(s.slug); continue; }
-      upsert.run(s.slug, s.name, s.github_owner, s.github_owner_id, now(), source);
+      upsert.run(s.slug, s.name, studioGithubOrg(s) ?? '', s.github_owner_id, now(), source);
     }
     return { skipped };
   }
@@ -654,12 +661,12 @@ export class Db {
   // A studio a Vault admin creates in the portal. The caller checks that the slug and owner id are free.
   createStudio(s: Omit<Studio, 'id' | 'source'>): Studio {
     this.sqlite.prepare(`INSERT INTO studios (slug, name, github_owner, github_owner_id, website, created_at, source) VALUES (?, ?, ?, ?, ?, ?, 'portal')`)
-      .run(s.slug, s.name, s.github_owner, s.github_owner_id, s.website ?? null, now());
+      .run(s.slug, s.name, studioGithubOrg(s) ?? '', s.github_owner_id, s.website ?? null, now());
     return this.studioBySlug(s.slug)!;
   }
 
   updateStudio(id: number, s: Pick<Studio, 'name' | 'github_owner' | 'github_owner_id'>) {
-    this.sqlite.prepare('UPDATE studios SET name = ?, github_owner = ?, github_owner_id = ? WHERE id = ?').run(s.name, s.github_owner, s.github_owner_id, id);
+    this.sqlite.prepare('UPDATE studios SET name = ?, github_owner = ?, github_owner_id = ? WHERE id = ?').run(s.name, studioGithubOrg(s) ?? '', s.github_owner_id, id);
   }
 
   // Remove a studio by its own primary key, never by GitHub owner id: a studio that shares its owner id with

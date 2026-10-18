@@ -4,7 +4,7 @@
 // "invited", and the membership takes effect the first time they sign in with GitHub.
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
-import { REPOSITORY_ID, REPOSITORY_NAME, studioWebsite, StudioNotEmptyError, type Db, type Studio, type StudioRole, type StudioSource, type User, type VaultRole, PERMISSION_LABEL } from '../db.ts';
+import { REPOSITORY_ID, REPOSITORY_NAME, studioGithubOrg, studioWebsite, StudioNotEmptyError, type Db, type Studio, type StudioRole, type StudioSource, type User, type VaultRole, PERMISSION_LABEL } from '../db.ts';
 import { slugify } from '../listings-import.ts';
 import { isSlug } from '../paths.ts';
 import { html, type Html } from './html.ts';
@@ -365,15 +365,18 @@ export function registerPeople(app: Hono, h: Helpers) {
   });
 
   // ---------- Vault: studios ----------
-  const githubCell = (s: Studio) => s.github_owner
-    ? html`<a href="https://github.com/${s.github_owner}" target="_blank" rel="noopener">${s.github_owner}</a>`
-    : html`<span class="muted">none (Vault uploads its games)</span>`;
+  const githubCell = (s: Studio) => {
+    const org = studioGithubOrg(s);
+    return org
+      ? html`<a href="https://github.com/${org}" target="_blank" rel="noopener">${org}</a>`
+      : html`<span class="muted">No GitHub organization configured</span>`;
+  };
   const sourceCell = (s: Studio) => s.source ? pill(s.source === 'file' ? 'brass' : 'off', SOURCE_LABEL[s.source]) : html`<span class="muted">—</span>`;
   const studioFields = (s: Partial<Studio> | null, withSlug: boolean, locked = false) => html`<div class="fields">
       <label class="field"><span class="lab">Name</span><input name="name" required maxlength="${MAX_NAME}" value="${s?.name ?? ''}" ${locked ? 'readonly' : ''} autocomplete="off" placeholder="Learning Games Lab"></label>
       ${withSlug ? html`<label class="field"><span class="lab">Short name (web address)</span><input name="slug" required pattern="[a-z0-9]([a-z0-9\\-]{0,62}[a-z0-9])?" maxlength="64" autocomplete="off" placeholder="lgl"><span class="hint">Lowercase letters, numbers and dashes. Used in the portal and in its games’ CDN addresses; it can’t be changed later.</span></label>` : ''}
       <label class="field"><span class="lab">Website</span><input name="website" type="url" maxlength="300" value="${s?.website ?? ''}" placeholder="https://example.org" autocomplete="off"><span class="hint">Optional. The site links the studio’s name to it.</span></label>
-      <label class="field"><span class="lab">GitHub organization</span><input name="github" maxlength="60" value="${s?.github_owner ?? ''}" ${locked ? 'readonly' : ''} autocomplete="off" placeholder="fielddaylab"><span class="hint">Optional. Repositories in it can publish test versions to this studio. Leave it empty for a studio whose games Vault uploads.</span></label>
+      <label class="field"><span class="lab">GitHub organization</span><input name="github" maxlength="60" value="${studioGithubOrg(s) ?? ''}" ${locked ? 'readonly' : ''} autocomplete="off" placeholder="none"><span class="hint">Optional. Repositories in it can publish test versions to this studio. Leave it empty for a studio whose games Vault uploads.</span></label>
     </div>`;
 
   app.get('/vault/studios', (c) => {
@@ -405,7 +408,7 @@ export function registerPeople(app: Hono, h: Helpers) {
       <td class="small">${r.source === 'file' ? pill('brass', 'studios.json') : html`${who(r.created_by)} · ${r.created_at.slice(0, 10)}`}</td>
       <td class="r">${admin && r.source === 'portal' ? html`<form data-api="${api}/remove" data-then="reload" data-confirm="Stop ${r.repository} publishing for ${s.name}? The games it already published stay with ${s.name}."><input type="hidden" name="id" value="${r.repository_id}"><button class="btn sm">Remove</button>${errSlot}</form>` : ''}</td></tr>`);
     return html`<div class="card" id="repositories"><h2>Repositories that publish for this studio</h2>
-      <p class="small">A repository listed here publishes its test versions to ${s.name}, whatever GitHub organization it is in. ${s.github_owner ? html`Every other repository in <b>${s.github_owner}</b> publishes to ${s.name} too.` : html`${s.name} has no GitHub organization of its own, so only these repositories can publish to it.`}</p>
+      <p class="small">A repository listed here publishes its test versions to ${s.name}, whatever GitHub organization it is in. ${studioGithubOrg(s) ? html`Every other repository in <b>${studioGithubOrg(s)}</b> publishes to ${s.name} too.` : html`${s.name} has no GitHub organization of its own, so only these repositories can publish to it.`}</p>
       <div class="tbl-wrap"><table><thead><tr><th>Repository</th><th>Added</th><th></th></tr></thead><tbody>${rows.length ? rows : html`<tr><td colspan="3" class="muted">None.</td></tr>`}</tbody></table></div>
       ${admin ? html`<form data-api="${api}" data-then="reload" class="inline-form" style="margin-top:14px">
           <label class="field"><span class="lab">Repository</span><input name="repository" required maxlength="150" autocomplete="off" placeholder="VaultLearningGames/hosted-game"></label>
@@ -485,7 +488,7 @@ export function registerPeople(app: Hono, h: Helpers) {
       </div><div class="grid" style="align-content:start">
         <div class="card small"><h2>About</h2><table class="kv"><tbody>
           <tr><th>Created by</th><td>${sourceCell(s)}</td></tr>
-          <tr><th>GitHub</th><td>${githubCell(s)}${s.github_owner ? html`<br><span class="muted mono">owner id ${s.github_owner_id}</span>` : ''}</td></tr></tbody></table>
+          <tr><th>GitHub</th><td>${githubCell(s)}${studioGithubOrg(s) ? html`<br><span class="muted mono">owner id ${s.github_owner_id}</span>` : ''}</td></tr></tbody></table>
           <p class="muted">Changing the GitHub organization changes which repositories can publish to ${s.name}. A CDN game stays with the repository that first published it.</p></div>
       </div></div>`;
     return h.page(c, s.name, body, { active: 'vault-studios' });
@@ -537,7 +540,7 @@ export function registerPeople(app: Hono, h: Helpers) {
     const website = websiteOf(b.website);
     const github = githubOwnerOf(b.github);
     const changes: Record<string, { from: string | null; to: string | null }> = {};
-    if (name !== s.name || github.toLowerCase() !== s.github_owner.toLowerCase()) {
+    if (name !== s.name || github.toLowerCase() !== (studioGithubOrg(s) ?? '').toLowerCase()) {
       if (s.source === 'file') fail(409, `${s.name}’s name and GitHub organization come from studios.json; change them there.`);
       if (name !== s.name && db.studios().some((x) => x.id !== s.id && x.name.toLowerCase() === name.toLowerCase())) fail(409, `There’s already a studio named ${name}.`);
       const owner = await ownerFor(github, s.slug, s);

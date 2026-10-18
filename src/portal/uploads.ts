@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { fail, jsonBody, parseManifest } from '../app.ts';
-import type { Game, Studio, User } from '../db.ts';
+import { studioGithubOrg, type Game, type Studio, type User } from '../db.ts';
 import { isSlug } from '../paths.ts';
 import {
   checkMonitor, deleteMonitor, fileListUrl, gameFolderUrl, isChecking, monitorById, monitorForGame, MONITOR_ACTOR,
@@ -169,8 +169,9 @@ export function registerUploads(app: Hono, h: ListingHelpers) {
     // assigned to it (a game kept in someone else's organization).
     const assigned = db.studioRepositories(s.id).map((r) => r.repository);
     const repos = assigned.map((r, i) => html`${i ? ', ' : ''}<b>github.com/${r}</b>`);
-    const github = s.github_owner
-      ? html`Vault accepts uploads from repositories in <b>github.com/${s.github_owner}</b>${assigned.length ? html`, and from ${repos}` : ''}. The first repository to upload a game name owns that name.`
+    const org = studioGithubOrg(s);
+    const github = org
+      ? html`Vault accepts uploads from repositories in <b>github.com/${org}</b>${assigned.length ? html`, and from ${repos}` : ''}. The first repository to upload a game name owns that name.`
       : assigned.length ? html`Vault accepts uploads for this studio from ${repos}. To add another repository, ask Vault.`
       : html`<b>This studio has no GitHub organization or repository registered with Vault yet.</b> Ask Vault to add one before using GitHub, or use path 3 or 4, which don’t need it.`;
 

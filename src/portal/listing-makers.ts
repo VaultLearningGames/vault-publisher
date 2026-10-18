@@ -120,8 +120,8 @@ export function registerListingMakers(app: Hono, h: ListingHelpers) {
     const u = h.apiUser(c);
     const s = db.studioBySlug(c.req.param('studio'));
     const l = db.listing(c.req.param('slug'));
-    if (!s || !l || l.studio_id !== s.id || !(h.isStaff(u) || h.roleIn(u, s))) fail(404, 'unknown listing');
-    if (!P.canEdit(u, s)) fail(403, 'Only studio maintainers, admins and Vault staff can change who made a game.');
+    if (!s || !l || l.studio_id !== s.id || !(h.isStaff(u) || h.isMember(u, s))) fail(404, 'unknown listing');
+    if (!P.canEdit(u, s)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can change who made a game.');
     const b = await jsonBody(c);
     return c.json({ ok: true, ...addMaker(h, u, s, l, b.name, b.website) });
   });

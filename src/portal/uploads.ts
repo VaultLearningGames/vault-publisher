@@ -45,12 +45,12 @@ export function registerUploads(app: Hono, h: ListingHelpers) {
   app.get('/assets/setup.js', (c) => c.body(js, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': immutable }));
   app.get('/assets/setup.css', (c) => c.body(css, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
 
-  // Uploading a build or monitoring an address: studio maintainers and admins for their own studio, and Vault staff.
-  const canUpload = (u: User, s: Studio) => h.canRelease(u) || ['maintainer', 'admin'].includes(h.roleIn(u, s) ?? '');
+  // Uploading a build or monitoring an address: studio.edit in their own studio, and vault.content.edit.
+  const canUpload = (u: User, s: Studio) => h.vaultCan(u, 'vault.content.edit') || h.studioCan(u, s, 'studio.edit');
   function apiStudio(studioSlug: string, u: User): Studio {
     const s = db.studioBySlug(studioSlug);
-    if (!s || !(h.isStaff(u) || h.roleIn(u, s))) fail(404, 'unknown studio');
-    if (!canUpload(u, s)) fail(403, 'Only studio maintainers, studio admins and Vault staff can upload builds.');
+    if (!s || !(h.isStaff(u) || h.isMember(u, s))) fail(404, 'unknown studio');
+    if (!canUpload(u, s)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can upload builds.');
     return s;
   }
   // The studio's game with this name, created if it's new. A game made here has no repository yet (like one Vault
@@ -164,7 +164,7 @@ export function registerUploads(app: Hono, h: ListingHelpers) {
     const title = (n: number, text: string, tag: string) => html`<h2><span><b class="n">${n}</b>${text}</span><span class="tag">${tag}</span></h2>`;
     const next = (items: (Html | string)[]) => html`<div class="next"><h3>What happens next</h3><ul class="tight">${items.map((i) => html`<li>${i}</li>`)}</ul></div>`;
     const where = html`<span class="mono wrap">${host(builds)}/${s.slug}/<span data-game>my-game</span>/</span>`;
-    const membersOnly = html`<p class="fix">Only studio maintainers and studio admins can do this. Ask a studio admin on the <a href="/s/${s.slug}/members">Members</a> page.</p>`;
+    const membersOnly = html`<p class="fix">Only studio members with the Edit permission can do this. Ask someone who maintains your studio’s users on the <a href="/s/${s.slug}/members">Members</a> page.</p>`;
     // Who may upload for this studio from GitHub: its organization's repositories, and single repositories Vault has
     // assigned to it (a game kept in someone else's organization).
     const assigned = db.studioRepositories(s.id).map((r) => r.repository);
@@ -291,9 +291,9 @@ export function registerUploads(app: Hono, h: ListingHelpers) {
         <div class="card small"><h2>From test build to classrooms</h2><ol class="tight">
           <li>A build arrives by any of the four paths and shows on the game’s page as a <b>test build</b>.</li>
           <li>You and your testers play it at its test address.</li>
-          <li>A maintainer chooses <b>Request release</b> on it (path 2 does this for you).</li>
+          <li>A member who can request publish chooses <b>Request release</b> on it (path 2 does this for you).</li>
           <li>Vault plays that exact build and approves it, or sends it back with a note.</li>
-          <li>Approved builds are kept for good; maintainers can switch back to an earlier one at any time.</li></ol></div>
+          <li>Approved builds are kept for good; members who can request publish can switch back to an earlier one at any time.</li></ol></div>
         <div class="card small"><h2>What’s where</h2><ul class="tight">
           <li><b>Test server</b>: <span class="mono wrap">${host(builds)}/${s.slug}/GAME/BUILD/</span>. For your team and playtesters; search engines don’t index it.</li>
           <li><b>Classrooms</b>: <span class="mono wrap">${host(cdn)}/${s.slug}/GAME/</span>. Only builds Vault has approved.</li></ul></div>

@@ -60,7 +60,7 @@ describe('the Upload builds page', () => {
   test('viewers can read it but get no upload or monitor forms', async () => {
     const page = await (await h.as('vera', 'none', 'viewer').get('/s/fieldday/register')).text();
     assert.doesNotMatch(page, /id="zip-form"|data-api="\/portal\/api\/s\/fieldday\/monitors"/);
-    assert.match(page, /Only studio maintainers and studio admins can do this/);
+    assert.match(page, /Only studio members with the Edit permission can do this/);
     assert.equal((await h.as('sam').get('/s/fieldday/register')).status, 404);
   });
   test('its script and styles are served', async () => {

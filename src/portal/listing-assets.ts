@@ -25,7 +25,7 @@ export function registerListingAssetsApi(app: Hono, h: ListingHelpers) {
     const s = db.studioBySlug(c.req.param('studio'));
     const l = db.listing(c.req.param('slug'));
     if (!s || !l || l.studio_id !== s.id) fail(404, 'unknown listing');
-    if (!P.canEdit(u, s)) fail(403, 'Only studio maintainers, admins and Vault staff can change site listings.');
+    if (!P.canEdit(u, s)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can change site listings.');
     const target = FIELD[c.req.param('kind')];
     if (!target) fail(404, 'unknown image kind');
     if (target.kind === 'screenshot' && l.draft.screenshots.length >= 40) fail(400, 'A listing can have at most 40 screenshots.');

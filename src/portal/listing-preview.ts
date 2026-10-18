@@ -73,7 +73,7 @@ export function registerListingPreview(app: Hono, h: ListingHelpers, store = new
     const s = db.studioBySlug(c.req.param('studio'));
     const l = db.listing(c.req.param('slug'));
     if (!s || !l || l.studio_id !== s.id) fail(404, 'unknown listing');
-    if (!P.canEdit(u, s)) fail(403, 'Only studio maintainers, admins and Vault staff can preview site listings.');
+    if (!P.canEdit(u, s)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can preview site listings.');
     if (!sites.length) fail(503, 'No preview sites are configured here.');
     const cdnReady = !!(l.game_id && db.currentRelease(l.game_id));
     const draft = formToDraft(await jsonBody(c), l.draft, P.canPublish(u), cdnReady);
@@ -124,9 +124,9 @@ export function wantsJson(accept: string | undefined): boolean {
 
 // The editor's save controls. Vault (who may publish) saves and publishes in one step; studio members save the draft
 // and may submit it for review.
-export function saveControls(canPublish: boolean, l: ListingRow): Html {
+export function saveControls(canPublish: boolean, l: ListingRow, canSubmit = true): Html {
   if (canPublish) return html`<input type="hidden" name="publish" value="1"><button class="btn pri">Save and Publish Changes</button>`;
-  return html`<button class="btn pri">Save and Submit for Review</button>`;
+  return canSubmit ? html`<button class="btn pri">Save and Submit for Review</button>` : html`<button class="btn pri">Save draft</button>`;
 }
 
 // Preview buttons: the first site is "Preview", the others "Preview (Label)". None without preview sites.

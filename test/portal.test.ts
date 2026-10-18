@@ -5,6 +5,7 @@ import { createApp } from '../src/app.ts';
 import { parseSupportUrl } from '../src/config.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db, studioWebsite } from '../src/db.ts';
+import { STUDIO_PERMISSIONS, VAULT_PERMISSIONS, type VaultPermission } from '../src/permissions.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import { stagingProductionUrl } from '../src/portal/routes.ts';
 import { signSession } from '../src/portal/session.ts';
@@ -62,9 +63,11 @@ beforeEach(async () => {
   }
 });
 
-function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' = 'none', studioRole?: 'viewer' | 'maintainer' | 'admin') {
+// vaultRole: an old role (permissions.ts maps it) or the Vault permissions themselves.
+function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' | VaultPermission[] = 'none', studioRole?: 'viewer' | 'maintainer' | 'admin') {
   const u = db.upsertUser({ github_id: `id-${login}`, login, name: null, avatar_url: null });
-  db.setVaultRole(u.id, vaultRole);
+  if (Array.isArray(vaultRole)) db.setVaultPermissions(login, vaultRole, 'test');
+  else db.setVaultRole(u.id, vaultRole);
   if (studioRole) db.setMembership(db.studioBySlug('fieldday')!.id, login, studioRole, 'test');
   const cookie = `vault_session=${signSession(u.id, SECRET)}`;
   return {
@@ -351,22 +354,28 @@ describe('studios switching approved releases', () => {
 });
 
 describe('deleting a game', () => {
-  test('studio admins and Vault staff delete it after typing its name; files and records go, listings stay', async () => {
+  test('studio members who can edit, and Vault content editors, delete it after typing its name; files and records go, listings stay', async () => {
     const boss = as('boss', 'admin');
     await boss.post(`${G}/release`, { ref: 'v1.0', version: 'v1.0', makeCurrent: true });
     prod.objects.set('fieldday/aqualab-two/index.html', 1);   // a neighbour whose name starts the same survives
-    const page = await (await as('ada', 'none', 'admin').get('/s/fieldday/g/aqualab?tab=cdn')).text();
+    const mia = as('mia', 'none', 'maintainer');   // studio.view, studio.edit, studio.request_publish
+    const page = await (await mia.get('/s/fieldday/g/aqualab?tab=cdn')).text();
     assert.match(page, /Danger zone[\s\S]*Type <b class="mono">aqualab<\/b> to confirm/);
-    assert.doesNotMatch(await (await as('mia', 'none', 'maintainer').get('/s/fieldday/g/aqualab?tab=cdn')).text(), /Danger zone/);
-    for (const who of [as('mia', 'none', 'maintainer'), as('vera', 'none', 'viewer')]) assert.equal((await who.post(`${G}/delete`, { confirm: 'aqualab' })).status, 403);
-    const ada = as('ada', 'none', 'admin');
-    assert.equal((await ada.post(`${G}/delete`, { confirm: 'aqua' })).status, 400, 'must type the name');
+    const vera = as('vera', 'none', 'viewer'), bea = as('bea', 'none');
+    db.setVaultPermissions('bea', ['vault.blog.edit', 'vault.users.maintain'], 'test');
+    db.setMembership(db.studioBySlug('fieldday')!.id, 'rex', ['studio.request_publish'], 'test');
+    const rex = as('rex', 'none');
+    for (const who of [vera, bea, rex]) {
+      assert.doesNotMatch(await (await who.get('/s/fieldday/g/aqualab?tab=cdn')).text(), /Danger zone/);
+      assert.equal((await who.post(`${G}/delete`, { confirm: 'aqualab' })).status, 403);
+    }
+    assert.equal((await mia.post(`${G}/delete`, { confirm: 'aqua' })).status, 400, 'must type the name');
     assert.ok(db.game(db.studioBySlug('fieldday')!.id, 'aqualab'));
-    assert.equal((await ada.post(`${G}/delete`, { confirm: 'aqualab' })).status, 200);
+    assert.equal((await mia.post(`${G}/delete`, { confirm: 'aqualab' })).status, 200);
     assert.equal(db.game(db.studioBySlug('fieldday')!.id, 'aqualab'), undefined);
     assert.equal([...staging.objects.keys()].filter((k) => k.startsWith('fieldday/aqualab/')).length, 0);
     assert.deepEqual([...prod.objects.keys()], ['fieldday/aqualab-two/index.html']);
-    assert.equal((await ada.get('/s/fieldday/g/aqualab')).status, 404);
+    assert.equal((await mia.get('/s/fieldday/g/aqualab')).status, 404);
     assert.ok(db.recentAudit(5).some((a) => a.action === 'game.delete' && a.target === 'fieldday/aqualab/'));
   });
 
@@ -377,25 +386,37 @@ describe('deleting a game', () => {
 });
 
 describe('user management', () => {
-  test('studio admins manage members; others can’t', async () => {
+  test('studio members who maintain users manage members; others can’t', async () => {
     const ada = as('ada', 'none', 'admin');
-    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'newbie', role: 'maintainer' })).status, 200);
-    assert.equal(db.roleIn(db.studioBySlug('fieldday')!.id, 'NEWBIE'), 'maintainer'); // case-insensitive
-    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'bad user!', role: 'viewer' })).status, 400);
-    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'ada', role: 'viewer' })).status, 409); // the only studio admin
-    assert.equal((await as('mia', 'none', 'maintainer').post('/portal/api/s/fieldday/members', { login: 'x', role: 'admin' })).status, 403);
+    const fd = db.studioBySlug('fieldday')!.id;
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'newbie', permissions: ['studio.edit'] })).status, 200);
+    assert.deepEqual(db.studioPermissionsOf(fd, 'NEWBIE'), ['studio.view', 'studio.edit']); // case-insensitive; Edit implies View
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'newbie', 'studio.view': true, 'studio.request_publish': 'on' })).status, 200, 'the editor’s checkboxes');
+    assert.deepEqual(db.studioPermissionsOf(fd, 'newbie'), ['studio.view', 'studio.request_publish']);
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'bad user!', permissions: ['studio.view'] })).status, 400);
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'x', permissions: ['studio.publish'] })).status, 400, 'not a permission');
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'x', 'studio.publish': true })).status, 400, 'a mistyped checkbox');
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'x', permissions: [] })).status, 400, 'at least View');
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'x', role: 'viewer' })).status, 400, 'roles are gone');
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'ada', permissions: ['studio.view'] })).status, 409); // the only one who maintains users
+    assert.equal((await as('mia', 'none', 'maintainer').post('/portal/api/s/fieldday/members', { login: 'x', permissions: STUDIO_PERMISSIONS })).status, 403);
     assert.equal((await ada.post('/portal/api/s/fieldday/members/remove', { login: 'newbie' })).status, 200);
-    assert.equal(db.roleIn(db.studioBySlug('fieldday')!.id, 'newbie'), undefined);
+    assert.equal(db.membership(fd, 'newbie'), undefined);
   });
 
-  test('Vault admins set Vault roles, but not their own', async () => {
+  test('Vault staff who maintain users set Vault permissions, but not their own', async () => {
     const boss = as('boss', 'admin');
-    const rita = db.upsertUser({ github_id: 'id-rita', login: 'rita', name: null, avatar_url: null });
-    assert.equal((await boss.post(`/portal/api/vault/users/${rita.id}/role`, { role: 'release_manager' })).status, 200);
-    assert.equal(db.userById(rita.id)?.vault_role, 'release_manager');
-    const me = db.users().find((u) => u.login === 'boss')!;
-    assert.equal((await boss.post(`/portal/api/vault/users/${me.id}/role`, { role: 'none' })).status, 400);
-    assert.equal((await as('rita', 'release_manager').post(`/portal/api/vault/users/${me.id}/role`, { role: 'none' })).status, 403);
+    db.upsertUser({ github_id: 'id-rita', login: 'rita', name: null, avatar_url: null });
+    const set = (who: ReturnType<typeof as>, body: unknown) => who.post('/portal/api/vault/permissions', body);
+    assert.equal((await set(boss, { login: 'rita', permissions: ['vault.content.edit'] })).status, 200);
+    assert.deepEqual(db.vaultPermissionsOf('rita'), ['vault.content.edit']);
+    assert.equal(db.userByLogin('rita')?.vault_role, 'release_manager', 'the old column follows');
+    assert.equal((await set(boss, { login: 'rita', 'vault.content.edit': true, 'vault.blog.edit': 'on' })).status, 200, 'the editor’s checkboxes');
+    assert.deepEqual(db.vaultPermissionsOf('rita'), ['vault.content.edit', 'vault.blog.edit']);
+    assert.equal((await set(boss, { login: 'rita', permissions: ['vault.admin'] })).status, 400);
+    assert.equal((await set(boss, { login: 'boss', permissions: [] })).status, 400);
+    assert.equal((await set(as('rita', ['vault.content.edit', 'vault.blog.edit']), { login: 'boss', permissions: [] })).status, 403);
+    assert.deepEqual(db.vaultPermissionsOf('boss'), VAULT_PERMISSIONS);
   });
 });
 

@@ -279,7 +279,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   let items = deserializeBlocks(post.blocks);
   const els = new Map(); // block key -> its element
   let saving = false;
-  // A Blog maintainer edits posts but doesn't publish, unpublish or delete them (or change when or whether they show).
+  // data-can-publish="0" hides publishing, unpublishing and deleting (the portal always allows them to vault.blog.edit).
   const canPublish = root.dataset.canPublish !== '0';
 
   const h = (tag, attrs, ...kids) => {

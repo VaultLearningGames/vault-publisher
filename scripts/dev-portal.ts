@@ -1,9 +1,10 @@
 // Local portal preview with example data, in-memory storage and a fake GitHub sign-in.
-//   node scripts/dev-portal.ts        → http://localhost:4181  (sign in as any username; "boss" is a Vault admin)
+//   node scripts/dev-portal.ts        → http://localhost:4181  (sign in as any username; "boss" holds every Vault permission)
 import { serve } from '@hono/node-server';
 import type { Readable } from 'node:stream';
 import { createApp } from '../src/app.ts';
 import { Db, type Upload } from '../src/db.ts';
+import { STUDIO_PERMISSIONS } from '../src/permissions.ts';
 import { saveMonitor } from '../src/url-monitor.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import { browseKeys, type Storage } from '../src/storage.ts';
@@ -81,10 +82,10 @@ for (const v of ['m3.0', 'm3.1']) production.objects.set(`fieldday/wake/_release
 production.objects.set('fieldday/wake/index.html', new TextEncoder().encode('<h1>wake m3.1</h1>'));
 db.setCurrentRelease(wake.id, db.release(wake.id, 'm3.1')!.id);
 db.createReleaseRequest({ game_id: wake.id, ref: 'm3.2', version: 'm3.2', notes: 'New kelp job; fixes the iPad save bug.', requested_by: 'user:mia' });
-db.setMembership(fd.id, 'mia', 'maintainer', 'user:boss');
-db.setMembership(fd.id, 'vera', 'viewer', 'user:boss');
-db.setMembership(fd.id, 'ada', 'admin', 'user:boss');
-db.setMembership(fd.id, 'newhire', 'viewer', 'user:ada'); // invited: hasn't signed in yet
+db.setMembership(fd.id, 'mia', ['studio.view', 'studio.edit', 'studio.request_publish'], 'user:boss');
+db.setMembership(fd.id, 'vera', ['studio.view'], 'user:boss');
+db.setMembership(fd.id, 'ada', [...STUDIO_PERMISSIONS], 'user:boss');
+db.setMembership(fd.id, 'newhire', ['studio.view'], 'user:ada'); // invited: hasn't signed in yet
 
 // A game copied from the studio's own site by a URL monitor (Upload builds, path 4).
 {
@@ -106,7 +107,7 @@ if (existsSync(`${rebuild}/migration/games-export.json`)) {
   console.log(`site listings: imported ${r.created.length} published, ${r.drafts.length} drafts, ${r.studiosCreated.length} new studios from ${rebuild}`);
   // A studio member for the listings walkthrough: lee maintains NMSU Learning Games Lab's listings.
   const lgl = db.studios().find((s) => s.name === 'Learning Games Lab: NMSU');
-  if (lgl) db.setMembership(lgl.id, 'lee', 'maintainer', 'user:boss');
+  if (lgl) db.setMembership(lgl.id, 'lee', ['studio.view', 'studio.edit', 'studio.request_publish'], 'user:boss');
   // The home page's Featured Games, as on vaultlearninggames.org today (the banners are in vault-rebuild/static/images/featured).
   saveFeatured(db, [
     { slug: 'project-hercules', blurb: 'In *Project Hercules*, you play Astrid, an astronomer in the distant future, working to identify objects in the night sky and uncover the mystery of an impending celestial event.', image: 'images/featured/project-hercules.webp', sequence: 1 },
@@ -190,7 +191,7 @@ app.put('/dev-r2/*', async (c) => {
 app.get('/dev-login', (c) => c.html(`<form action="/auth/callback" style="font:16px system-ui;max-width:360px;margin:15vh auto;display:grid;gap:10px">
   <b>Dev sign-in</b><input type="hidden" name="state" value="${c.req.query('state')}">
   <input name="code" placeholder="GitHub username" autofocus required style="padding:8px">
-  <small>boss = Vault admin · ada = studio admin · mia = maintainer · vera = viewer · lee = NMSU maintainer · anyone else = no access</small>
+  <small>boss = every Vault permission · ada = every studio permission · mia = view, edit, request publish · vera = view · lee = NMSU edit · anyone else = no access</small>
   <button style="padding:8px">Sign in</button></form>`));
 
 serve({ fetch: app.fetch, port: PORT }, () => console.log(`portal preview on http://localhost:${PORT}`));

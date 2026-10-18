@@ -77,7 +77,7 @@ describe('listing image uploads', () => {
     assert.equal((await as('boss', 'release_manager').upload('screenshot', PNG)).status, 200);
     const viewer = await as('vera', 'none', 'viewer').upload('hero', WEBP);
     assert.equal(viewer.status, 403);
-    assert.match(await errorOf(viewer), /maintainers, admins and Vault staff/);
+    assert.match(await errorOf(viewer), /studio members who can edit, and Vault staff who can edit game\/studio content/);
     assert.equal((await as('zed').upload('hero', WEBP)).status, 403, 'signed in, not in the studio');
     assert.equal((await as('mia', 'none', 'maintainer').upload('hero', PNG, 'wake', 'ucalgary')).status, 404, 'wrong studio for the listing');
     assert.equal((await as('mia', 'none', 'maintainer').upload('hero', PNG, 'nope')).status, 404);

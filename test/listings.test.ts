@@ -4,6 +4,7 @@ import type { Readable } from 'node:stream';
 import { createApp } from '../src/app.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db } from '../src/db.ts';
+import type { VaultPermission } from '../src/permissions.ts';
 import { fieldsFromPage, shortText } from '../src/listings-import.ts';
 import { changedFields, normalize, problems } from '../src/listings.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
@@ -56,9 +57,11 @@ beforeEach(async () => {
   await app.request(`/v1/previews/${j.upload_id}/finalize`, { method: 'POST', headers: { Authorization: 'Bearer wake' } });
 });
 
-function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' = 'none', studioRole?: 'viewer' | 'maintainer' | 'admin') {
+// vaultRole: an old role (permissions.ts maps it) or the Vault permissions themselves.
+function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' | VaultPermission[] = 'none', studioRole?: 'viewer' | 'maintainer' | 'admin') {
   const u = db.upsertUser({ github_id: `id-${login}`, login, name: null, avatar_url: null });
-  db.setVaultRole(u.id, vaultRole);
+  if (Array.isArray(vaultRole)) db.setVaultPermissions(login, vaultRole, 'test');
+  else db.setVaultRole(u.id, vaultRole);
   if (studioRole) db.setMembership(db.studioBySlug('fieldday')!.id, login, studioRole, 'test');
   const cookie = `vault_session=${signSession(u.id, SECRET)}`;
   return {
@@ -320,7 +323,7 @@ describe('import from the Hugo prototype', () => {
     ];
     const overrides = { ztype: { studio: 'PhobosLab', play_url: 'https://zty.pe/' }, crowds: { fit: '1920,1024,0,0,800,600' } };
     const boss = as('boss', 'admin');
-    assert.equal((await as('rm', 'release_manager').post('/portal/api/vault/listings/import', { pages: JSON.stringify(pages) })).status, 403, 'admins only');
+    assert.equal((await as('bea', ['vault.blog.edit', 'vault.users.maintain']).post('/portal/api/vault/listings/import', { pages: JSON.stringify(pages) })).status, 403, 'Vault staff who edit game/studio content only');
     const res = await boss.post('/portal/api/vault/listings/import', { pages: JSON.stringify(pages), overrides: JSON.stringify({ overrides }) });
     const r = (await res.json()) as any;
     assert.deepEqual(r.created.sort(), ['crowds', 'wake', 'ztype']);
@@ -542,14 +545,16 @@ describe('Vault admins move a game to another studio', () => {
     assert.equal((await move(boss, 'transformations-quest', 'nowhere', 'ucalgary')).status, 404);
   });
 
-  test('co-makers are kept; only Vault admins can move games', async () => {
+  test('co-makers are kept; only Vault staff who edit game/studio content can move games', async () => {
     const boss = as('boss', 'admin');
     await boss.post(L, { slug: 'shady-sam', title: 'Shady Sam' });
     await boss.post(`${L}/shady-sam`, { makers: 'Field Day Lab\nSomeone Else' });
     assert.equal((await move(as('mia', 'none', 'maintainer'), 'shady-sam', 'ucalgary')).status, 403);
-    assert.equal((await move(as('rita', 'release_manager'), 'shady-sam', 'ucalgary')).status, 403);
-    assert.doesNotMatch(await (await as('rita', 'release_manager').get('/s/fieldday/g/shady-sam')).text(), /Move to this studio/);
-    assert.equal((await move(boss, 'shady-sam', 'ucalgary')).status, 200);
+    const bea = as('bea', ['vault.blog.edit', 'vault.users.maintain']), rita = as('rita', ['vault.content.edit']);
+    assert.equal((await move(bea, 'shady-sam', 'ucalgary')).status, 403);
+    assert.doesNotMatch(await (await bea.get('/s/fieldday/g/shady-sam')).text(), /Move to this studio/);
+    assert.match(await (await rita.get('/s/fieldday/g/shady-sam')).text(), /Move to this studio/);
+    assert.equal((await move(rita, 'shady-sam', 'ucalgary')).status, 200);
     assert.deepEqual(db.listing('shady-sam')!.draft.makers, ['Field Day Lab', 'Someone Else']);
   });
 

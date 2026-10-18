@@ -512,6 +512,10 @@ tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
 .mem a { min-width: 0; }
 .mem form { margin: 0; display: inline-flex; gap: 6px; align-items: center; }
 .mem .err:empty { display: none; }
+/* Permission editors (people.ts): one row of labelled checkboxes; implied ones are checked and disabled. */
+.perm-checks { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.perm-checks .check, .field .perm-checks .check + .check { margin: 0; white-space: nowrap; }
+.perm-checks .check:has(input:disabled) { color: var(--ink-2); }
 
 /* Danger zone: deleting a game */
 .card.danger { border-color: var(--bad); }

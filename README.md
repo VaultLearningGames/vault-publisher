@@ -108,10 +108,19 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `POST /portal/api/s/:studio/uploads` + `/:id/finalize` | A zip uploaded in the portal: presigned PUTs per file, then record the test build |
 | | `POST /portal/api/s/:studio/monitors[/:id/check\|delete]` | URL monitors: register (and copy now), check now, stop |
 | | `POST /portal/api/s/:studio/members[?]` | Studio members add/remove, website URL |
-| | `POST /portal/api/vault/…` | Vault-admin: studios CRUD, a studio's `repositories` (add/remove), users/roles, listings import, featured |
+| | `POST /portal/api/vault/…` | Vault staff: studios CRUD, a studio's `repositories` (add/remove), listings import, featured (`vault.content.edit`); people and Vault `permissions` (`vault.users.maintain`) |
 | Public (token) | `GET /_preview/:token/` · `GET /v1/listing-previews/:token` | An unsaved listing preview, rendered as the website's page (the second answers the preview's JSON to `Accept: application/json`) |
 
-**Admin-lane** routes (`/v1/admin/*`) additionally require the token's repository to be the admin repo running in the protected environment; **portal mutations** require a signed-in Vault-admin session.
+**Admin-lane** routes (`/v1/admin/*`) additionally require the token's repository to be the admin repo running in the protected environment; **portal mutations** require a signed-in session holding the route's permission.
+
+Portal permissions (`src/permissions.ts`, the single source of truth) are two fixed sets. **Vault staff** (by GitHub
+login, so they can be given before a first sign-in; `VAULT_ADMINS` always hold all three): `vault.users.maintain`
+(*Maintain users*: People, everyone's Vault permissions, every studio's members), `vault.content.edit` (*Edit game/studio
+content*: any studio's games and listings, approving releases and publishing, studios) and `vault.blog.edit` (*Edit blog
+posts*: the whole blog). **Studio members**, per membership: `studio.view` (*View*), `studio.edit` (*Edit*: listings,
+uploads, deleting games), `studio.request_publish` (*Request publish*: release requests, submitting listings, switching
+between approved releases) and `studio.maintain_users` (*Maintain users*: members and the studio's website). Every studio
+permission implies *View*; anything outside the sets is refused with 400.
 
 Vault also runs a separate staging copy of all of this (site, portal, test builds, releases) on
 `vaultlearninggames-staging.org` for trying new versions. Studios never need it. See [docs/setup.md](docs/setup.md).

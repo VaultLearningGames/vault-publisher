@@ -5,7 +5,8 @@
 // Studios edit a listing's draft; Vault publishes it. The site is built from GET /v1/catalog (published listings).
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
-import type { Db, Game, Listing, Studio, StudioRole, User } from '../db.ts';
+import type { Db, Game, Listing, Studio, User } from '../db.ts';
+import type { StudioPermission, VaultPermission } from '../permissions.ts';
 import { markDeployPending } from '../deploy-status.ts';
 import { draftProblems, importFromExport, moveListingToStudio, publishListing, saveListing } from '../listing-ops.ts';
 import { changedFields, FIELD_LABEL, GRADES, isListingSlug, MIN_SIZE_RANGE, normalize, VAULT_ONLY, type ListingFields } from '../listings.ts';
@@ -52,10 +53,11 @@ export interface ListingHelpers {
   studioFor(c: Context, u: User): Studio | Response;
   apiUser(c: Context): User;
   actor(u: User): string;
+  // Permissions (permissions.ts): anyone with a Vault permission; studio.view in the studio; one permission.
   isStaff(u: User): boolean;
-  canRelease(u: User): boolean;
-  isVaultAdmin(u: User): boolean;
-  roleIn(u: User, s: Studio): StudioRole | undefined;
+  isMember(u: User, s: Studio): boolean;
+  vaultCan(u: User, p: VaultPermission): boolean;
+  studioCan(u: User, s: Studio, p: StudioPermission): boolean;
 }
 export type ListingRow = Listing & { studio_slug: string; studio_name: string };
 
@@ -63,9 +65,11 @@ const err = html`<span class="err" role="status" aria-live="polite"></span>`;
 
 export function listingPieces(h: ListingHelpers) {
   const { db } = h;
-  // Studio maintainers and admins edit their studio's listings; Vault staff edit any. Only Vault publishes.
-  const canEdit = (u: User, s: Studio) => h.isStaff(u) || ['maintainer', 'admin'].includes(h.roleIn(u, s) ?? '');
-  const canPublish = (u: User) => h.canRelease(u);
+  // studio.edit edits the studio's listings; vault.content.edit edits any, and is the only way onto the site.
+  // studio.request_publish submits the studio's changes to Vault.
+  const canEdit = (u: User, s: Studio) => h.vaultCan(u, 'vault.content.edit') || h.studioCan(u, s, 'studio.edit');
+  const canPublish = (u: User) => h.vaultCan(u, 'vault.content.edit');
+  const canSubmit = (u: User, s: Studio) => !canPublish(u) && h.studioCan(u, s, 'studio.request_publish');
   const currentOf = (g: Game | null) => (g ? db.currentRelease(g.id) ?? null : null);
   const cdnUrl = (s: Studio, g: Game) => `${h.deps.prodPublicUrl}/${s.slug}/${g.slug}/`;
 
@@ -113,7 +117,7 @@ export function listingPieces(h: ListingHelpers) {
   }
 
   // The listing editor (draft) and its status card.
-  // Vault admins: which studio a game belongs to (whose members edit it, and the studio shown on the site).
+  // vault.content.edit: which studio a game belongs to (whose members edit it, and the studio shown on the site).
   function studioCard(s: Studio, l: ListingRow): Html {
     const others = db.studios().filter((x) => x.id !== s.id).sort((a, b) => a.name.localeCompare(b.name));
     const cdn = l.game_id ? db.gameById(l.game_id) : null;
@@ -165,7 +169,7 @@ export function listingPieces(h: ListingHelpers) {
         ${vault ? txt('fit', 'Player fit (Vault)', 'For fixed-size games: page width, page height, x, y, width, height of the game on that page.') : ''}
         ${minSizeField(f, vault && edit)}
       </div>
-      ${edit ? html`<div class="form-foot">${saveControls(vault, l)}${previewButtons(api, h.deps.previewSites)}${err}</div>` : ''}
+      ${edit ? html`<div class="form-foot">${saveControls(vault, l, canSubmit(u, s))}${previewButtons(api, h.deps.previewSites)}${err}</div>` : ''}
     </form>`;
     const side = html`<div class="card"><h2>Site listing</h2><p>${state(l)}</p>
         ${l.published ? html`<p class="small">On the site since ${l.published_at?.slice(0, 10)} (${who(l.published_by ?? '')}).</p>` : html`<p class="small muted">Not on the site yet.</p>`}
@@ -176,7 +180,7 @@ export function listingPieces(h: ListingHelpers) {
           <form data-api="${api}/publish" data-then="reload" data-confirm="Publish ${f.title || l.slug} to the site?"><button class="btn brass" ${changed.length || !l.published ? '' : 'disabled'}>Publish the draft</button>${err}</form>
           ${l.review === 'submitted' ? html`<form data-api="${api}/return" data-then="reload" class="stack" style="margin-top:10px"><input name="note" placeholder="What to change" aria-label="Why it’s being sent back"><button class="btn sm">Send back</button>${err}</form>` : ''}
           ${l.published ? html`<form data-api="${api}/unpublish" data-then="reload" data-confirm="Take ${f.title || l.slug} off the site?" style="margin-top:10px"><button class="btn sm">Take off the site</button>${err}</form>` : ''}` : ''}
-      </div>${h.isVaultAdmin(u) ? studioCard(s, l) : ''}`;
+      </div>${canPublish(u) ? studioCard(s, l) : ''}`;
     return { form, side };
   }
 
@@ -201,7 +205,7 @@ export function listingPieces(h: ListingHelpers) {
         <button class="btn">Connect</button>${err}</form>` : ''}</div>`;
   }
 
-  return { canEdit, canPublish, state, hosting, playCard, editor, createListingCard, linkCard };
+  return { canEdit, canPublish, canSubmit, state, hosting, playCard, editor, createListingCard, linkCard };
 }
 
 export function registerListingPages(app: Hono, h: ListingHelpers) {
@@ -234,7 +238,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const count = (f: (l: ListingRow) => boolean) => all.filter(f).length;
 
     // Featured: a checkbox per game; a featured game gets a row below it with its sequence, blurb and image.
-    const featuring = h.canRelease(u);
+    const featuring = h.vaultCan(u, 'vault.content.edit');
     const feat = readFeatured(db);
     const featBy = new Map(feat.games.map((e) => [e.slug, e]));
     const full = feat.games.length >= MAX_FEATURED;
@@ -307,14 +311,14 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
       ${queue.length ? html`<h2>Waiting for Vault (${queue.length})</h2><div class="grid">${queue}</div>` : html`<div class="card"><p class="muted">No site changes are waiting for review.</p></div>`}
       <div class="tbl-wrap" style="margin-top:22px"><table class="site-games"><thead><tr><th scope="col" class="catalog-thumb">Image</th><th>Game</th><th>Studio</th><th>Featured</th><th>Hosted by</th>${AVAILABILITY_HEADS}<th>Last edit</th></tr></thead>
         <tbody>${rows.length ? rows : html`<tr><td colspan="${COLS}" class="muted">No games yet.</td></tr>`}</tbody></table></div>
-      ${featuring ? '' : html`<p class="small muted">Only Vault release managers can change the featured games.</p>`}${addGame}`;
+      ${featuring ? '' : html`<p class="small muted">Only Vault staff who can edit game/studio content can change the featured games.</p>`}${addGame}`;
     return h.page(c, 'Games', body, { active: 'vault-listings' });
   });
 
   // ---------- API ----------
   function apiListing(c: Context, u: User) {
     const s = db.studioBySlug(c.req.param('studio') ?? '');
-    if (!s || !(h.isStaff(u) || h.roleIn(u, s))) fail(404, 'unknown studio');
+    if (!s || !(h.isStaff(u) || h.isMember(u, s))) fail(404, 'unknown studio');
     const l = db.listing(c.req.param('slug') ?? '');
     if (!l || l.studio_id !== s.id) fail(404, 'unknown listing');
     return { s, l };
@@ -339,7 +343,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
   app.post('/portal/api/s/:studio/listings', async (c) => {
     const u = h.apiUser(c);
     const s = db.studioBySlug(c.req.param('studio'));
-    if (!s || !P.canEdit(u, s)) fail(403, 'Only studio maintainers, admins and Vault staff can add games to the site.');
+    if (!s || !P.canEdit(u, s)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can add games to the site.');
     return c.json({ ok: true, url: createListing(u, s, await jsonBody(c)).url });
   });
   // Vault → Games' "Add Game": the same, with the studio in the body. Vault staff only, like the page.
@@ -356,15 +360,16 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
   app.post('/portal/api/s/:studio/listings/:slug', async (c) => {
     const u = h.apiUser(c);
     const { s, l } = apiListing(c, u);
-    if (!P.canEdit(u, s)) fail(403, 'Only studio maintainers, admins and Vault staff can edit site listings.');
+    if (!P.canEdit(u, s)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can edit site listings.');
     const b = await jsonBody(c);
     if (typeof b.embed === 'string') b.embed = b.embed === 'true';
     if (!P.canPublish(u)) for (const k of VAULT_ONLY) delete b[k];  // player fit and minimum size are Vault's call
     const draft = normalize(b, l.draft);
     const flag = (v: unknown) => v === true || v === '1' || v === 'on';
     const wantsPublish = flag(b.publish) && P.canPublish(u);
-    // Studio saves always go to Vault for review; Vault staff save and publish in one step.
-    const wantsSubmit = !wantsPublish && !P.canPublish(u);
+    // Studio saves go to Vault for review when the member can request publish (else they stay a draft); Vault staff
+    // save and publish in one step.
+    const wantsSubmit = !wantsPublish && P.canSubmit(u, s);
     const bad = draftProblems(db, l, draft, wantsPublish || wantsSubmit);
     if (bad.length) fail(400, bad.join(' '));
     // A name left in "Made by"’s "Add a new studio…" fields is added with the save (listing-makers.ts).
@@ -382,7 +387,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
   app.post('/portal/api/s/:studio/listings/:slug/link', async (c) => {
     const u = h.apiUser(c);
     const { s, l } = apiListing(c, u);
-    if (!P.canEdit(u, s)) fail(403, 'Only studio maintainers, admins and Vault staff can connect games.');
+    if (!P.canEdit(u, s)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can connect games.');
     const slug = String((await jsonBody(c)).game ?? '');
     if (!slug) {
       if (l.published?.play_source === 'cdn' || l.draft.play_source === 'cdn') fail(400, 'Switch it back to its web address first.');
@@ -398,7 +403,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
 
   app.post('/portal/api/s/:studio/listings/:slug/publish', async (c) => {
     const u = h.apiUser(c);
-    if (!P.canPublish(u)) fail(403, 'Only Vault release managers can publish to the site.');
+    if (!P.canPublish(u)) fail(403, 'Only Vault staff who can edit game/studio content can publish to the site.');
     const { l } = apiListing(c, u);
     const bad = draftProblems(db, l, l.draft, true);
     if (bad.length) fail(400, bad.join(' '));
@@ -409,7 +414,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
 
   app.post('/portal/api/s/:studio/listings/:slug/return', async (c) => {
     const u = h.apiUser(c);
-    if (!P.canPublish(u)) fail(403, 'Only Vault release managers can send changes back.');
+    if (!P.canPublish(u)) fail(403, 'Only Vault staff who can edit game/studio content can send changes back.');
     const { s, l } = apiListing(c, u);
     const note = String((await jsonBody(c)).note ?? '').trim().slice(0, 500);
     if (!note) fail(400, 'Say what should change.');
@@ -420,7 +425,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
 
   app.post('/portal/api/s/:studio/listings/:slug/unpublish', async (c) => {
     const u = h.apiUser(c);
-    if (!P.canPublish(u)) fail(403, 'Only Vault release managers can take games off the site.');
+    if (!P.canPublish(u)) fail(403, 'Only Vault staff who can edit game/studio content can take games off the site.');
     const { s, l } = apiListing(c, u);
     db.unpublishListing(l.id);
     db.audit(h.actor(u), 'listing.unpublish', `${s.slug}:${l.slug}`);
@@ -428,10 +433,10 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     return c.json({ ok: true });
   });
 
-  // Vault admins: move a listing to another studio.
+  // vault.content.edit: move a listing to another studio.
   app.post('/portal/api/s/:studio/listings/:slug/studio', async (c) => {
     const u = h.apiUser(c);
-    if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can move games between studios.');
+    if (!P.canPublish(u)) fail(403, 'Only Vault staff who can edit game/studio content can move games between studios.');
     const { s, l } = apiListing(c, u);
     const to = db.studioBySlug(String((await jsonBody(c)).studio ?? ''));
     if (!to) fail(404, 'Choose a studio.');
@@ -439,11 +444,11 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     return c.json({ ok: true, url: `/s/${to.slug}/g/${l.slug}` });
   });
 
-  // Vault admins: the one-time import of the Hugo prototype's game pages (../listings-import.ts). It has no form in
+  // vault.content.edit: the one-time import of the Hugo prototype's game pages (../listings-import.ts). It has no form in
   // the portal; Body: { pages, overrides? }, each the JSON itself or its text.
   app.post('/portal/api/vault/listings/import', async (c) => {
     const u = h.apiUser(c);
-    if (!h.isVaultAdmin(u)) fail(403, 'Only Vault admins can import listings.');
+    if (!P.canPublish(u)) fail(403, 'Only Vault staff who can edit game/studio content can import listings.');
     const b = await jsonBody(c);
     return c.json({ ok: true, ...importFromExport(db, b.pages, b.overrides, h.actor(u)) });
   });

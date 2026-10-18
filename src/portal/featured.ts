@@ -1,5 +1,5 @@
 // The featured games API behind Vault → Game Catalog (listings.ts): the Featured checkbox, each featured game's
-// sequence number and home-page blurb, and its uploaded image. Vault release managers only. The site gets the list
+// sequence number and home-page blurb, and its uploaded image. vault.content.edit only. The site gets the list
 // from GET /v1/catalog ("featured") on its next build.
 import type { Context, Hono } from 'hono';
 import { fail, jsonBody } from '../app.ts';
@@ -14,7 +14,7 @@ export function registerFeaturedApi(app: Hono, h: ListingHelpers) {
   const onSite = () => new Set(db.listings({ published: true }).map((l) => l.slug));
   const editor = (c: Context): User => {
     const u = h.apiUser(c);
-    if (!h.canRelease(u)) fail(403, 'Only Vault release managers can change the featured games.');
+    if (!h.vaultCan(u, 'vault.content.edit')) fail(403, 'Only Vault staff who can edit game/studio content can change the featured games.');
     return u;
   };
   const save = (u: User, edit: FeaturedEdit): FeaturedLists => {

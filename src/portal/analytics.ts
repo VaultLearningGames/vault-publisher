@@ -364,7 +364,7 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
 
   // Who may see analytics: the whole site, Vault staff; a studio and its games, Vault staff and every member of the
   // studio (viewers too).
-  const canSeeStudio = (u: User, s: Studio) => h.isStaff(u) || !!h.roleIn(u, s);
+  const canSeeStudio = (u: User, s: Studio) => h.isStaff(u) || h.isMember(u, s);
   const canSeeGame = (u: User, l: ListingRow) => canSeeStudio(u, db.studioById(l.studio_id)!);
   // Each game's page paths on the site, for its page views (the Squarespace addresses come from the site's data).
   const legacy = loadLegacy();

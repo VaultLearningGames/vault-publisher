@@ -83,6 +83,18 @@ export function imageFromTransfer(dt) {
   return null;
 }
 
+// Every image file in a DataTransfer or ClipboardData, in order (a drop of several files adds them all).
+export function imageFilesFromTransfer(dt) {
+  if (!dt) return [];
+  const files = Array.from(dt.files || []).filter(isImageFile);
+  if (files.length) return files;
+  const out = [];
+  for (const it of Array.from(dt.items || [])) {
+    if (it.kind === 'file' && /^image\//i.test(it.type)) { const f = it.getAsFile(); if (isImageFile(f)) out.push(f); }
+  }
+  return out;
+}
+
 // Uploads a blob as multipart field "file". Resolves to the server's JSON ({ key, url, ... }); rejects with its error.
 export async function uploadImage(slug, blob, name = 'image', fetchFn = fetch) {
   const fd = new FormData();
@@ -311,6 +323,40 @@ export function imageDropTarget(target, onPick) {
     if (!f) return;
     e.preventDefault();
     onPick(f);
+  });
+  return el('span', { class: 'bie-up' }, btn, picker);
+}
+
+// Makes `target` a drop zone for several image files (drag and drop, or paste) and returns an "Upload images…" button
+// with a hidden multi-file picker. Each calls onPick(files) with the image files, in order. While files are dragged
+// over it, `target` has the class bie-drop.
+export function imagesDropTarget(target, onPick, label = 'Upload images…') {
+  const picker = el('input', { type: 'file', accept: ACCEPT, multiple: true, hidden: true,
+    onchange: () => { const fs = Array.from(picker.files || []).filter(isImageFile); picker.value = ''; if (fs.length) onPick(fs); } });
+  const btn = el('button', { type: 'button', class: 'btn sm', onclick: () => picker.click() }, label);
+  let depth = 0;
+  const hasFiles = (e) => !!e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+  target.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; depth++; target.classList.add('bie-drop'); });
+  target.addEventListener('dragover', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    target.classList.add('bie-drop');
+  });
+  target.addEventListener('dragleave', (e) => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) target.classList.remove('bie-drop'); });
+  target.addEventListener('drop', (e) => {
+    depth = 0;
+    target.classList.remove('bie-drop');
+    const fs = imageFilesFromTransfer(e.dataTransfer);
+    if (!fs.length) return;
+    e.preventDefault(); e.stopPropagation();
+    onPick(fs);
+  });
+  target.addEventListener('paste', (e) => {
+    const fs = imageFilesFromTransfer(e.clipboardData);
+    if (!fs.length) return;
+    e.preventDefault();
+    onPick(fs);
   });
   return el('span', { class: 'bie-up' }, btn, picker);
 }

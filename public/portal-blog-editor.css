@@ -80,6 +80,28 @@
 
 @media (max-width: 960px) { .be-layout { grid-template-columns: 1fr; } .be-settings { position: static; max-height: none; } }
 /* image upload and the image editor (portal-blog-image-editor.js) */
+/* The image block: layout choice, the images (thumbnail, fields, reorder/remove), the drop zone. */
+.be-gallery { flex-direction: column; align-items: stretch; }
+.be-gallery-opts { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+.be-layouts { display: flex; gap: 6px; flex-wrap: wrap; }
+.be-layout-opt { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 10px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; font-size: 12.5px; color: var(--ink-3); }
+.be-layout-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.be-layout-opt:has(input:checked) { background: var(--surface); border-color: var(--line); color: var(--ink); font-weight: 600; }
+.be-layout-opt:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 1px; }
+.be-gallery-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.be-gallery-list[hidden] { display: none; }
+.be-gimg { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.be-gimg.be-drop-before { box-shadow: 0 -3px 0 var(--ink); }
+.be-gimg .be-img-prev { width: 96px; height: 96px; }
+.be-gimg-tools { display: flex; flex-direction: column; gap: 4px; }
+.be-gimg textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); color: var(--ink); font: inherit; resize: vertical; }
+.be-span { grid-column: 1 / -1; }
+.be-checks { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.be-check { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+.be-check-hint { display: block; font-size: 12px; }
+.be-dropzone { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 14px; border: 2px dashed var(--line); border-radius: 8px; justify-content: center; }
+.be-gallery.bie-drop .be-dropzone { border-color: var(--ink); background: var(--surface); }
+.be-gallery-msg:empty { display: none; }
 .be-img-up { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .be-img-drop { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .be-img-drop input[type=url] { flex: 1 1 160px; min-width: 0; }

@@ -35,6 +35,7 @@
 //   GET    /portal/blog/tags?q=             -> { tags } up to 10 existing tags whose name starts with q
 //   GET    /assets/portal-blog-editor.js|.css  the editor's script (an ES module) and styles
 //   GET    /assets/portal-blog-image-editor.js  the image editor (crop, resize, compress, alt text) the editor imports
+//   GET    /assets/portal-blog-image-block.js  the image block's shape (normalizeImageBlock), shared with the server
 //   GET    /assets/portal-blog-editor-commands.js  the editor's formatting commands (all its execCommand calls)
 // A draft is a post with no publish date (draft: true in its front matter): the site doesn't publish it.
 // Errors: 409 { error: 'conflict', currentSha } (the file changed since it was loaded), 409 { error: 'slug_taken' },
@@ -204,12 +205,13 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   // The editor's script and styles, read once at startup and versioned by content like the portal's own assets.
   const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
   const editorJs = asset('portal-blog-editor.js'), editorCss = asset('portal-blog-editor.css'), imageJs = asset('portal-blog-image-editor.js');
-  const commandsJs = asset('portal-blog-editor-commands.js');
-  const editorVersion = createHash('sha256').update(editorJs).update(editorCss).update(imageJs).update(commandsJs).digest('hex').slice(0, 10);
+  const commandsJs = asset('portal-blog-editor-commands.js'), imageBlockJs = asset('portal-blog-image-block.js');
+  const editorVersion = createHash('sha256').update(editorJs).update(editorCss).update(imageJs).update(commandsJs).update(imageBlockJs).digest('hex').slice(0, 10);
   const immutable = 'public, max-age=31536000, immutable';
   app.get('/assets/portal-blog-editor.js', (c) => c.body(editorJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': immutable }));
   // The editor imports it by this unversioned address, so browsers revalidate it rather than keep it for good.
   app.get('/assets/portal-blog-image-editor.js', (c) => c.body(imageJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
+  app.get('/assets/portal-blog-image-block.js', (c) => c.body(imageBlockJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
   app.get('/assets/portal-blog-editor-commands.js', (c) => c.body(commandsJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
   app.get('/assets/portal-blog-editor.css', (c) => c.body(editorCss, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
   const maintains = (u: User) => h.isVaultAdmin(u) || h.db.hasVaultPermission(u.login, 'blog.maintain');

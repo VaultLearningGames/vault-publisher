@@ -20,7 +20,8 @@
 // This file is an ES module so its pure functions (serialize, deserialize, reorder, slugs, tags, autosave timing) can be tested with node:test;
 // the page itself is set up by the IIFE at the bottom, which only runs in a browser.
 
-import { imageDropTarget, openImageEditor } from './portal-blog-image-editor.js';
+import { imageDropTarget, imagesDropTarget, openImageEditor } from './portal-blog-image-editor.js';
+import { LAYOUTS, LAYOUT_LABELS, MAX_DESCRIPTION, MAX_TITLE, newImageId, normalizeImageBlock } from './portal-blog-image-block.js';
 import * as commands from './portal-blog-editor-commands.js';
 
 export const BLOCK_TYPES = ['heading', 'paragraph', 'image', 'divider'];
@@ -53,7 +54,7 @@ export function newBlock(type) {
   switch (type) {
     case 'heading': return { key, type, level: 2, text: '' };
     case 'paragraph': return { key, type, html: '' };
-    case 'image': return { key, type, src: '', alt: '', caption: '', align: '' };
+    case 'image': return { key, type, layout: 'stacked', align: '', images: [] };
     case 'divider': return { key, type };
     default: throw new Error(`Unknown block type "${type}"`);
   }
@@ -77,15 +78,15 @@ export function deserializeBlocks(blocks) {
     const e = newBlock(b.type);
     if (b.type === 'heading') { e.level = [2, 3, 4].includes(b.level) ? b.level : 2; e.text = String(b.text || ''); }
     else if (b.type === 'paragraph') e.html = typeof b.html === 'string' ? b.html : spansToHtml(b.children);
-    else if (b.type === 'image') { e.src = String(b.src || ''); e.alt = String(b.alt || ''); e.caption = String(b.caption || ''); e.align = ALIGNS.includes(b.align) ? b.align : ''; }
+    else if (b.type === 'image') { const n = normalizeImageBlock(b); e.layout = n.layout; e.align = n.align || ''; e.images = n.images; }
     out.push(e);
   }
   return out;
 }
 
-// The editor's blocks -> the block JSON the server stores. Blocks left completely empty (a heading or paragraph with
-// no text, an image with no fields filled in) are not content and are left out; anything else is sent as it is, so
-// the server's validation can say what's wrong with it.
+// The editor's blocks -> the block JSON the server stores. Headings and paragraphs with no text are not content and
+// are left out; an image block is kept even with no images yet (a draft may hold one; publishing asks for an image).
+// Anything else is sent as it is, so the server's validation can say what's wrong with it.
 export function serializeBlocks(items) {
   const out = [];
   for (const e of items || []) {
@@ -96,12 +97,8 @@ export function serializeBlocks(items) {
       const html = String(e.html || '').trim();
       if (htmlHasText(html)) out.push({ type: 'paragraph', html });
     } else if (e.type === 'image') {
-      const src = String(e.src || '').trim(), alt = String(e.alt || '').trim(), caption = String(e.caption || '').trim();
-      if (!src && !alt && !caption) continue;
-      const b = { type: 'image', src, alt };
-      if (caption) b.caption = caption;
-      if (ALIGNS.includes(e.align)) b.align = e.align;
-      out.push(b);
+      // With src, alt and caption mirroring the first image, for code that only knows a single image.
+      out.push(normalizeImageBlock({ layout: e.layout, align: e.align, images: e.images || [] }));
     } else if (e.type === 'divider') out.push({ type: 'divider' });
   }
   return out;
@@ -661,34 +658,117 @@ export function writeSettingsCollapsed(storage, collapsed) {
         h('input', { type: 'text', class: 'be-h-text', value: item.text, maxlength: '300', 'aria-label': 'Heading text', placeholder: 'Heading', oninput: set('text') }));
     }
     if (item.type === 'paragraph') return paragraphEditor(item);
-    if (item.type === 'image') {
-      const preview = h('img', { class: 'be-img-prev', alt: '', hidden: !item.src });
-      const showPreview = () => { const ok = isLinkHref(item.src) && !/^(http:|mailto:|#)/i.test(item.src); preview.hidden = !ok; if (ok) preview.src = item.src; };
-      showPreview();
-      const f = (label, input) => h('label', { class: 'field' }, h('span', { class: 'lab' }, label), input);
-      const srcInput = h('input', { type: 'url', value: item.src, placeholder: 'https://… or /path', oninput: (e) => { item.src = e.target.value; showPreview(); changed(); } });
-      const altInput = h('input', { type: 'text', value: item.alt, maxlength: '500', placeholder: 'What the image shows', oninput: set('alt') });
-      const wrap = h('div', { class: 'be-img' });
-      const upload = imageDropTarget(wrap, async (file) => {
-        const r = await editImage(file, { title: 'Image', alt: item.alt });
-        if (!r) return;
-        item.src = srcInput.value = r.url;
-        if (r.alt) item.alt = altInput.value = r.alt;
-        showPreview(); changed(); say('Image uploaded.');
-      });
-      wrap.append(
-        h('div', { class: 'be-img-fields' },
-          f('Image URL', srcInput),
-          f('Alt text', altInput),
-          f('Caption', h('input', { type: 'text', value: item.caption, maxlength: '1000', oninput: set('caption') })),
-          f('Alignment', h('select', { onchange: set('align') },
-            h('option', { value: '', selected: !item.align }, 'Default'),
-            ...ALIGNS.map((a) => h('option', { value: a, selected: item.align === a }, a[0].toUpperCase() + a.slice(1))))),
-          h('div', { class: 'be-img-up' }, upload, h('span', { class: 'muted' }, ' or drop or paste an image here'))),
-        preview);
-      return wrap;
-    }
+    if (item.type === 'image') return imageBlockEditor(item);
     return h('hr', { class: 'be-hr' });
+  }
+
+  // An image block: its layout (slideshow, carousel, grid, stacked) and alignment, a drop zone that takes one or more
+  // images (drag and drop, paste, or the picker; each goes through the image editor and is uploaded), and each image
+  // with its thumbnail, title, description, alt text and link. The stored address is never shown: images change by
+  // uploading. Images reorder by dragging their handle or with their Move up/down buttons.
+  function imageBlockEditor(item) {
+    const wrap = h('div', { class: 'be-img be-gallery' });
+    const f = (label, input, cls) => h('label', { class: `field${cls ? ` ${cls}` : ''}` }, h('span', { class: 'lab' }, label), input);
+    const check = (label, checked, onchange, hint) => h('label', { class: 'be-check' },
+      h('input', { type: 'checkbox', checked, onchange: (e) => { onchange(e.target.checked); changed(); } }), ' ', label,
+      hint ? h('span', { class: 'muted be-check-hint' }, hint) : null);
+
+    const layoutName = `be-layout-${item.key}`;
+    const layouts = h('div', { class: 'be-layouts', role: 'radiogroup', 'aria-label': 'Layout' },
+      ...['slideshow', 'carousel', 'grid', 'stacked'].filter((l) => LAYOUTS.includes(l)).map((l) => h('label', { class: 'be-layout-opt' },
+        h('input', { type: 'radio', name: layoutName, value: l, checked: item.layout === l, onchange: () => { item.layout = l; changed(); } }),
+        layoutIcon(l), h('span', null, LAYOUT_LABELS[l]))));
+    const alignSel = h('select', { 'aria-label': 'Alignment', onchange: (e) => { item.align = e.target.value; changed(); } },
+      h('option', { value: '', selected: !item.align }, 'Default'),
+      ...ALIGNS.map((a) => h('option', { value: a, selected: item.align === a }, a[0].toUpperCase() + a.slice(1))));
+
+    const rows = h('ol', { class: 'be-gallery-list', 'aria-label': 'Images' });
+    const drop = h('div', { class: 'be-dropzone' });
+    const progress = h('p', { class: 'muted be-gallery-msg', 'aria-live': 'polite' });
+    drop.append(imagesDropTarget(wrap, (files) => addFiles(files)), h('span', { class: 'muted' }, ' or drag and drop or paste images here'));
+
+    async function addFiles(files) {
+      for (let i = 0; i < files.length; i++) {
+        progress.textContent = files.length > 1 ? `Image ${i + 1} of ${files.length}…` : '';
+        const r = await editImage(files[i], { title: files.length > 1 ? `Image ${i + 1} of ${files.length}` : 'Image' });
+        if (!r) continue;
+        item.images.push({ id: newImageId(), url: r.url, alt: r.alt || '', title: '', description: '', showTitle: true, showDescription: true, link: '', linkTarget: '_self' });
+        drawRows(); changed(); say('Image uploaded.');
+      }
+      progress.textContent = '';
+    }
+
+    let dragId = null;
+    function moveImage(id, to, focusSel) {
+      const from = item.images.findIndex((x) => x.id === id);
+      if (from < 0 || to < 0 || to >= item.images.length || to === from) return;
+      item.images = moveBlock(item.images, from, to);
+      drawRows(); changed();
+      say(`Image moved to position ${to + 1} of ${item.images.length}.`);
+      if (focusSel) { const b = rows.querySelector(`[data-id="${id}"] ${focusSel}`); if (b && !b.disabled) b.focus(); }
+    }
+    function drawRows() {
+      rows.replaceChildren(...item.images.map((img, i) => imageRow(img, i)));
+      rows.hidden = !item.images.length;
+    }
+    function imageRow(img, i) {
+      const n = item.images.length;
+      const set = (k) => (e) => { img[k] = e.target.value; changed(); };
+      const row = h('li', { class: 'be-gimg', 'data-id': img.id, 'aria-label': `Image ${i + 1} of ${n}`,
+        ondragover: (e) => { if (!dragId || dragId === img.id) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; row.classList.add('be-drop-before'); },
+        ondragleave: () => row.classList.remove('be-drop-before'),
+        ondrop: (e) => {
+          if (!dragId) return;
+          e.preventDefault(); e.stopPropagation();
+          row.classList.remove('be-drop-before');
+          const from = item.images.findIndex((x) => x.id === dragId);
+          moveImage(dragId, from < i ? i - 1 : i);
+          dragId = null;
+        } },
+        h('span', { class: 'be-handle', draggable: 'true', title: 'Drag to reorder', 'aria-hidden': 'true',
+          ondragstart: (e) => { e.stopPropagation(); dragId = img.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', `Image ${i + 1}`); },
+          ondragend: () => { dragId = null; } }, '⠿'),
+        h('img', { class: 'be-img-prev', src: img.url, alt: img.alt ? `Image ${i + 1}: ${img.alt}` : `Image ${i + 1}` }),
+        h('div', { class: 'be-img-fields' },
+          f('Title', h('input', { type: 'text', value: img.title, maxlength: String(MAX_TITLE), oninput: set('title') })),
+          f('Alt text', h('input', { type: 'text', value: img.alt, maxlength: '500', placeholder: 'What the image shows', oninput: set('alt') })),
+          f('Description', h('textarea', { rows: '2', maxlength: String(MAX_DESCRIPTION), oninput: set('description') }, img.description), 'be-span'),
+          h('div', { class: 'be-checks be-span' },
+            check('Show title', img.showTitle, (v) => { img.showTitle = v; }),
+            check('Show description', img.showDescription, (v) => { img.showDescription = v; })),
+          f('Link', h('input', { type: 'url', value: img.link, placeholder: 'https://… or /path (optional)', oninput: set('link') })),
+          h('div', { class: 'be-checks' },
+            check('Open link in new window', img.linkTarget === '_blank', (v) => { img.linkTarget = v ? '_blank' : '_self'; }))),
+        h('div', { class: 'be-gimg-tools' },
+          h('button', { type: 'button', class: 'btn sm be-gimg-up', 'aria-label': `Move image ${i + 1} up`, title: 'Move up', disabled: i === 0, onclick: () => moveImage(img.id, i - 1, '.be-gimg-up') }, '↑'),
+          h('button', { type: 'button', class: 'btn sm be-gimg-down', 'aria-label': `Move image ${i + 1} down`, title: 'Move down', disabled: i === n - 1, onclick: () => moveImage(img.id, i + 1, '.be-gimg-down') }, '↓'),
+          h('button', { type: 'button', class: 'btn sm be-del', 'aria-label': `Remove image ${i + 1}`, title: 'Remove image',
+            onclick: () => {
+              item.images = item.images.filter((x) => x.id !== img.id); drawRows(); changed(); say('Image removed.');
+              // Focus stays in the block: the next image's (or else the last one's) Remove, or the upload button.
+              const dels = rows.querySelectorAll('.be-del');
+              (dels[Math.min(i, dels.length - 1)] || drop.querySelector('button')).focus();
+            } }, trashIcon())));
+      return row;
+    }
+    drawRows();
+    wrap.append(
+      h('div', { class: 'be-gallery-opts' }, layouts, f('Alignment', alignSel)),
+      rows, drop, progress);
+    return wrap;
+  }
+  // Line icons for the layouts: a big image over thumbnails, one between brackets, a 2x2 grid, two stacked.
+  function layoutIcon(l) {
+    const paths = {
+      slideshow: '<rect x="4" y="3" width="24" height="15" rx="1"/><rect x="4" y="21" width="7" height="6"/><rect x="12.5" y="21" width="7" height="6"/><rect x="21" y="21" width="7" height="6"/>',
+      carousel: '<rect x="8" y="6" width="16" height="20" rx="1"/><path d="M5 8v16M27 8v16"/>',
+      grid: '<rect x="5" y="5" width="10" height="10"/><rect x="17" y="5" width="10" height="10"/><rect x="5" y="17" width="10" height="10"/><rect x="17" y="17" width="10" height="10"/>',
+      stacked: '<rect x="6" y="4" width="20" height="11" rx="1"/><rect x="6" y="17" width="20" height="11" rx="1"/>',
+    };
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 32 32'); svg.setAttribute('width', '32'); svg.setAttribute('height', '32'); svg.setAttribute('aria-hidden', 'true');
+    svg.innerHTML = `<g fill="none" stroke="currentColor" stroke-width="1.6">${paths[l]}</g>`;
+    return svg;
   }
 
   // The image editor for a picked, dropped or pasted file; resolves to { url, alt } once uploaded, or null.

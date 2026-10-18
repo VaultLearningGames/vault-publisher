@@ -1,0 +1,15 @@
+{{- /* A post's image, as the portal writes it (src/site-content/markdown-blocks.ts): src, alt, caption, align. One of an
+       image collection also has gallery (the same value for one collection's images), layout (stacked, grid,
+       carousel, slideshow), id, title, description, show_title / show_description ("false" hides), link and target
+       ("_blank": a new window). Each renders as its own figure; vault-sq.js gathers one collection's figures into
+       its layout, so without the script every image still shows, one under the other. */ -}}
+{{- $align := "" }}{{ with .Get "align" }}{{ if in (slice "left" "center" "right" "wide" "full") . }}{{ $align = . }}{{ end }}{{ end -}}
+{{- with .Get "gallery" }}
+{{- $layout := "stacked" }}{{ if in (slice "stacked" "grid" "carousel" "slideshow") ($.Get "layout") }}{{ $layout = $.Get "layout" }}{{ end -}}
+{{- $attrs := printf `data-gallery="%s" data-layout="%s"` (. | htmlEscape) $layout }}{{ with $align }}{{ $attrs = printf `%s data-align="%s"` $attrs . }}{{ end -}}
+{{- partial "blog/gallery-item.html" (dict "url" ($.Get "src") "alt" ($.Get "alt" | default "") "title" ($.Get "title") "description" ($.Get "description")
+      "showTitle" (ne ($.Get "show_title") "false") "showDescription" (ne ($.Get "show_description") "false")
+      "link" ($.Get "link") "blank" (eq ($.Get "target") "_blank") "attrs" ($attrs | safeHTMLAttr)) }}
+{{- else -}}
+<figure class="blog-figure{{ with $align }} align-{{ . }}{{ end }}"><img src="{{ .Get "src" }}" alt="{{ .Get "alt" | default "" }}" loading="lazy">{{ with .Get "caption" }}<figcaption>{{ . }}</figcaption>{{ end }}</figure>
+{{- end -}}

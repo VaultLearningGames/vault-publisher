@@ -419,6 +419,33 @@ picture { display: contents; }
 html:not(.js) .blog-share-btn[data-share="instagram"] { display: none; }
 .blog-share-status { flex-basis: 100%; text-align: center; font-size: 14px; }
 .blog-share-status:empty { display: none; }
+
+/* A post's image collection (partials/blog/block.html, shortcodes/image.html): stacked, grid, carousel or slideshow.
+   The carousel's and slideshow's controls come from vault-sq.js; without it (html:not(.js)) every image shows stacked. */
+.blog-gallery { display: flex; flex-direction: column; gap: 24px; margin: 1.5em 0; }
+.blog-gallery-item { margin: 0; min-width: 0; }
+.blog-gallery-item img { display: block; width: 100%; height: auto; }
+.blog-gallery-link { display: block; }
+.blog-gallery-item figcaption { margin-top: 8px; font-size: .9em; }
+.blog-gallery-title { display: block; font-weight: 600; }
+.blog-gallery-desc { display: block; white-space: pre-line; }
+.blog-gallery--grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 16px; }
+.blog-gallery--grid .blog-gallery-item img { aspect-ratio: 1; object-fit: cover; }
+html.js .blog-gallery--carousel { position: relative; display: block; }
+html.js .blog-gallery--carousel .blog-gallery-track { display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth; scrollbar-width: thin; }
+html.js .blog-gallery--carousel .blog-gallery-item { flex: 0 0 min(80%, 420px); scroll-snap-align: start; }
+html.js .blog-gallery--carousel .blog-gallery-item img { aspect-ratio: 4 / 3; object-fit: cover; }
+html.js .blog-gallery--slideshow { display: block; }
+html.js .blog-gallery--slideshow .blog-gallery-item:not(.is-current) { display: none; }
+.blog-gallery-nav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; }
+.blog-gallery-btn { width: 40px; height: 40px; border: 1px solid currentColor; border-radius: 50%; background: none; color: inherit; cursor: pointer; font-size: 18px; line-height: 1; }
+.blog-gallery-btn:disabled { opacity: .35; cursor: default; }
+.blog-gallery-count { min-width: 5em; text-align: center; font-size: 14px; }
+.blog-gallery-thumbs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+.blog-gallery-thumb { width: 64px; height: 48px; padding: 0; border: 2px solid transparent; background: none; cursor: pointer; opacity: .6; }
+.blog-gallery-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.blog-gallery-thumb[aria-current="true"] { border-color: currentColor; opacity: 1; }
+.blog-gallery:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
 .blog-title a::after { content: " \2192"; }
 .blog-excerpt { margin: 0 10%; font-size: 14.92px; line-height: 1.5; }
 .blog-excerpt p { margin: 0; }

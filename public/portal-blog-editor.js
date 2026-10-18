@@ -13,7 +13,7 @@
 // editor in portal-blog-image-editor.js: crop, resize, compress, alt text, then stored on the CDN under the post's slug.
 //
 // Two panes: the body, settings on the right. Each block is a section with a thin outline and a '+' before and after
-// it to add a block there; clicking a section selects it and shows its trash button, which asks before deleting. Clicking into a paragraph shows its format
+// it to add a block there; clicking a section selects it and shows its trash button, which asks before deleting. Clicking into a text block shows its format
 // bar (style, bold, italic, underline, strikethrough, link, lists, quote, indent); the commands are in
 // portal-blog-editor-commands.js, and the server sanitizes the HTML they make.
 //
@@ -25,6 +25,9 @@ import { LAYOUTS, LAYOUT_LABELS, MAX_DESCRIPTION, MAX_TITLE, newImageId, normali
 import * as commands from './portal-blog-editor-commands.js';
 
 export const BLOCK_TYPES = ['heading', 'paragraph', 'image', 'divider'];
+// What the editor calls each block type. The stored type stays 'paragraph' (saved posts, the server and the site use
+// it); a text block holds any number of paragraphs, lists and quotes with inline formatting.
+export const BLOCK_LABELS = { heading: 'Heading', paragraph: 'Text', image: 'Image', divider: 'Divider' };
 export const ALIGNS = ['left', 'center', 'right', 'wide', 'full'];
 
 export const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -504,8 +507,8 @@ export function writeSettingsCollapsed(storage, collapsed) {
   // `where`: 'before' or 'after' the block it is in (a number: the index, for the one above an empty post).
   function inserter(where) {
     const menu = h('div', { class: 'be-ins-menu', hidden: true, role: 'group', 'aria-label': 'Add a block' },
-      ...[['heading', 'Heading'], ['paragraph', 'Paragraph'], ['image', 'Image'], ['divider', 'Divider']].map(([type, label]) =>
-        h('button', { type: 'button', class: 'btn sm', onclick: () => { close(); add(type, indexAfter()); } }, label)));
+      ...BLOCK_TYPES.map((type) =>
+        h('button', { type: 'button', class: 'btn sm', onclick: () => { close(); add(type, indexAfter()); } }, BLOCK_LABELS[type])));
     const label = where === 'before' ? 'Add a block above' : where === 'after' ? 'Add a block below' : 'Add a block here';
     const btn = h('button', { type: 'button', class: 'be-ins-btn', 'aria-expanded': 'false', title: label, 'aria-label': label, onclick: () => (menu.hidden ? open() : close()) }, '+');
     const wrap = h('div', { class: `be-ins${typeof where === 'string' ? ` be-ins-${where}` : ''}`, onkeydown: (e) => { if (e.key === 'Escape' && !menu.hidden) { close(); btn.focus(); } } }, btn, menu);
@@ -561,11 +564,10 @@ export function writeSettingsCollapsed(storage, collapsed) {
       if (list.children[i] !== el) list.insertBefore(el, list.children[i] || null);
       el.querySelector('.be-up').disabled = i === 0;
       el.querySelector('.be-down').disabled = i === items.length - 1;
-      el.setAttribute('aria-label', `${LABELS[e.type]}, block ${i + 1} of ${items.length}`);
+      el.setAttribute('aria-label', `${BLOCK_LABELS[e.type]}, block ${i + 1} of ${items.length}`);
     });
   }
   const say = (msg) => { announce.textContent = ''; setTimeout(() => { announce.textContent = msg; }, 30); };
-  const LABELS = { heading: 'Heading', paragraph: 'Paragraph', image: 'Image', divider: 'Divider' };
 
   // ----- drag and drop (the handle drags its block) -----
   let dragKey = null;
@@ -607,20 +609,20 @@ export function writeSettingsCollapsed(storage, collapsed) {
       ondragstart: (e) => {
         dragKey = key;
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', LABELS[item.type]);
+        e.dataTransfer.setData('text/plain', BLOCK_LABELS[item.type]);
         e.dataTransfer.setDragImage(el, 20, 20);
         el.classList.add('be-dragging');
       },
       ondragend: endDrag }, '⠿');
     const tools = h('div', { class: 'be-tools' },
-      h('span', { class: 'be-type' }, LABELS[item.type]),
+      h('span', { class: 'be-type' }, BLOCK_LABELS[item.type]),
       h('button', { type: 'button', class: 'btn sm be-up', 'aria-label': 'Move up', title: 'Move up', onclick: () => move(key, idx() - 1, '.be-up') }, '↑'),
       h('button', { type: 'button', class: 'btn sm be-down', 'aria-label': 'Move down', title: 'Move down', onclick: () => move(key, idx() + 1, '.be-down') }, '↓'),
       h('button', { type: 'button', class: 'btn sm be-del', 'aria-label': 'Delete section', title: 'Delete section', 'aria-expanded': 'false', onclick: () => askDelete() }, trashIcon()));
     // Delete asks first, in place: "Delete this section?" with Delete and Cancel.
     const confirmBox = h('div', { class: 'be-confirm', role: 'alertdialog', 'aria-label': 'Confirm delete', hidden: true,
       onkeydown: (e) => { if (e.key === 'Escape') { e.preventDefault(); cancelDelete(); } } },
-      h('span', null, `Delete this ${LABELS[item.type].toLowerCase()} section?`),
+      h('span', null, `Delete this ${BLOCK_LABELS[item.type].toLowerCase()} section?`),
       h('button', { type: 'button', class: 'btn sm danger be-confirm-yes', onclick: () => remove(key) }, 'Delete'),
       h('button', { type: 'button', class: 'btn sm be-confirm-no', onclick: () => cancelDelete() }, 'Cancel'));
     function askDelete() { select(el); confirmBox.hidden = false; tools.querySelector('.be-del').setAttribute('aria-expanded', 'true'); confirmBox.querySelector('.be-confirm-no').focus(); }
@@ -780,7 +782,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
   // A contenteditable text section with a format bar that shows while it has focus: style (paragraph, headings, quote),
   // bold, italic, underline, strikethrough, link, bulleted and numbered lists, quote, outdent/indent, clear formatting.
   function paragraphEditor(item) {
-    const area = h('div', { class: 'be-p', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Paragraph' });
+    const area = h('div', { class: 'be-p', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Text' });
     area.innerHTML = item.html;
     const update = () => { item.html = area.innerHTML; changed(); };
     area.addEventListener('input', () => { linkErr.textContent = ''; update(); });

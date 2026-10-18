@@ -9,6 +9,7 @@ export type EditorBlock =
   | { key: string; type: 'divider' };
 
 export const BLOCK_TYPES: Block['type'][];
+export const BLOCK_LABELS: Record<Block['type'], string>;
 export const ALIGNS: Align[];
 export function escapeHtml(s: string): string;
 export function spansToHtml(children: Span[]): string;

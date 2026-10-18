@@ -26,7 +26,7 @@
 .be-link[hidden] { display: none; }
 .be-link input { padding: 4px 8px; width: 240px; }
 .be-p { min-height: 2.6em; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); line-height: 1.6; }
-.be-p:empty::before { content: "Write a paragraph…"; color: var(--ink-3); }
+.be-p:empty::before { content: "Write text…"; color: var(--ink-3); }
 .be-p p { margin: 0 0 .6em; }
 .be-p p:last-child { margin-bottom: 0; }
 .be-p ul, .be-p ol { margin: .3em 0; padding-left: 1.5em; }

@@ -42,7 +42,6 @@
 .be-ins-menu { display: flex; flex-wrap: wrap; gap: 4px; }
 .be-ins-menu[hidden] { display: none; }
 
-.be-bar { display: flex; align-items: center; gap: 12px; position: sticky; bottom: 0; padding: 10px 0; background: var(--paper); }
 .be-alert { border-color: var(--bad); background: var(--bad-soft); }
 .be-alert p { margin: 0 0 8px; }
 .be-alert ul { margin: 0 0 8px; padding-left: 1.2em; font-size: 12.5px; }
@@ -55,9 +54,18 @@
 .be-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
 .be-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .be-settings { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
-.be-settings[hidden] { display: none; }
-.be-layout--settings-collapsed { grid-template-columns: minmax(0, 1fr); }
-.be-settings-toggle { margin-left: auto; }
+.be-actions { display: flex; gap: 8px; }
+.be-state-field { border: 0; margin: 0; padding: 0 0 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.be-state-field legend { padding: 0; margin-bottom: 6px; }
+.be-seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.be-seg label { display: inline-flex; cursor: pointer; }
+.be-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.be-seg span { padding: 6px 14px; font-size: 13px; }
+.be-seg label + label span { border-left: 1px solid var(--line); }
+.be-seg input:checked + span { background: var(--slate); color: #fff; }
+.be-seg input:focus-visible + span { outline: 2px solid var(--slate); outline-offset: -2px; }
+.be-seg input:disabled + span { opacity: .6; cursor: default; }
+.be-danger-zone { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 4px; }
 .be-settings h2 { margin: 0; font-size: 15px; }
 .be-settings .field input, .be-settings .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); color: var(--ink); font: inherit; width: 100%; box-sizing: border-box; }
 .be-settings .field p { margin: 2px 0 0; font-size: 12px; }

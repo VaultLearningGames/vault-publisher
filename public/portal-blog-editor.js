@@ -5,9 +5,11 @@
 // in between, the server answers 409 and that is shown, nothing is overwritten.
 //
 // Beside the blocks, a settings panel (slug with a live URL and availability check, featured image, excerpt, author,
-// Published/Private, publish date, tags). Edits autosave about 2 s after the last change to the portal's scratch
-// storage (not a commit: only Save, Publish, Unpublish and Delete change the site); Preview shows the unsaved post as
-// the site builds it; Publish commits with the publish date set. A new slug renames the post on Save.
+// Published/Private, publish date, tags), always shown: Save and Preview and the post's State (Published / Hidden) at its
+// top, Delete at its bottom. Edits autosave about 2 s after the last change to the portal's scratch storage (not a
+// commit: only Save, a change of State and Delete change the site); Preview shows the unsaved post as the site builds
+// it; State Published commits with the publish date set, Hidden takes the post back to a draft. A new slug renames the
+// post on Save.
 //
 // Image blocks and the featured image take an uploaded image (picker, drag and drop, or paste) through the image
 // editor in portal-blog-image-editor.js: crop, resize, compress, alt text, then stored on the CDN under the post's slug.
@@ -233,16 +235,6 @@ export function autosaveStep(state, action, delay = AUTOSAVE_DELAY) {
 // Whether a save should start at time `now`.
 export const autosaveDue = (state, now) => !state.stopped && !state.saving && state.dueAt !== null && now >= state.dueAt;
 
-// Whether the settings panel is hidden, remembered in localStorage as '1' / '0'. No value, or no usable storage
-// (private mode, disabled), means shown; a failed write still lets the panel be toggled for this page.
-export const SETTINGS_COLLAPSED_KEY = 'vault-portal:blog-editor:settings-collapsed';
-export function readSettingsCollapsed(storage) {
-  try { return !!storage && storage.getItem(SETTINGS_COLLAPSED_KEY) === '1'; } catch (_) { return false; }
-}
-export function writeSettingsCollapsed(storage, collapsed) {
-  try { if (storage) storage.setItem(SETTINGS_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (_) { /* in-session only */ }
-}
-
 // ---------- the page ----------
 (function () {
   if (typeof document === 'undefined') return;
@@ -281,8 +273,6 @@ export function writeSettingsCollapsed(storage, collapsed) {
   const err = h('div', { class: 'be-err', role: 'alert' });
   const saveBtn = h('button', { type: 'button', class: 'btn pri', onclick: () => save() }, 'Save');
   const previewBtn = h('button', { type: 'button', class: 'btn', onclick: preview }, 'Preview');
-  const publishBtn = h('button', { type: 'button', class: 'btn brass', onclick: publish }, 'Publish');
-  const unpublishBtn = h('button', { type: 'button', class: 'btn', onclick: unpublish, hidden: true }, 'Unpublish');
   const deleteBtn = h('button', { type: 'button', class: 'btn danger', onclick: removePost }, 'Delete');
   const announce = h('p', { class: 'be-sr', 'aria-live': 'polite' });
   const siteUrl = String(root.dataset.siteUrl || '').replace(/\/+$/, '');
@@ -340,12 +330,31 @@ export function writeSettingsCollapsed(storage, collapsed) {
   const tagMsg = h('p', { class: 'err', 'aria-live': 'polite' });
   const tagCount = h('span', { class: 'muted' });
 
+  // State: Published (on the blog, or scheduled) or Hidden (a draft). Choosing one publishes or unpublishes the post;
+  // the radios follow the server's state again afterwards (showState), so a cancelled or failed change reverts.
   const stateLine = h('p', { class: 'be-state', role: 'status' });
+  const stateRadio = (value, label) => h('input', { type: 'radio', name: 'be-post-state', id: fieldId(`state-${value}`), value,
+    onchange: () => setPostState(value) });
+  const statePublished = stateRadio('published'), stateHidden = stateRadio('hidden');
+  const stateRadios = [statePublished, stateHidden];
+  let stateBusy = 0;
+  function busyState(delta) {
+    stateBusy += delta;
+    for (const r of stateRadios) r.disabled = !canPublish || stateBusy > 0;
+  }
+  busyState(0);
+  const stateField = h('fieldset', { class: 'field be-state-field' }, h('legend', { class: 'lab' }, 'State'),
+    h('div', { class: 'be-seg', role: 'radiogroup', 'aria-label': 'State' },
+      h('label', { for: fieldId('state-published') }, statePublished, h('span', null, 'Published')),
+      h('label', { for: fieldId('state-hidden') }, stateHidden, h('span', null, 'Hidden'))),
+    stateLine);
   if (!canPublish) statusSwitch.disabled = dateInput.disabled = true;
 
   const panel = h('aside', { class: 'card be-settings', id: 'be-settings', 'aria-label': 'Post settings' },
+    h('div', { class: 'be-actions' }, saveBtn, previewBtn),
+    status, err,
+    stateField,
     h('h2', null, 'Settings'),
-    stateLine,
     field('slug', 'URL slug', slugInput, slugUrl, slugMsg),
     field('img', 'Featured image', imgField, imgPrev, imgMsg,
       h('p', { class: 'muted' }, 'Drop, paste or upload an image. The public blog uses the title as its alt text.')),
@@ -356,6 +365,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
       h('p', { class: 'muted' }, 'Private hides the post from the catalog only; it is not secure.')),
     field('date', 'Published date', dateInput, h('p', { class: 'muted' }, 'Empty until the post is published. A date in the future schedules it.')),
     field('tags', h('span', null, 'Tags ', tagCount), tagInput, tagOptions, tagChips, tagMsg),
+    canPublish ? h('div', { class: 'be-danger-zone' }, deleteBtn) : null,
   );
 
   const previewFrame = h('iframe', { class: 'be-preview-frame', title: 'Preview of the post', sandbox: 'allow-popups allow-popups-to-escape-sandbox' });
@@ -364,31 +374,13 @@ export function writeSettingsCollapsed(storage, collapsed) {
       h('button', { type: 'button', class: 'btn sm', onclick: () => previewDlg.close() }, 'Close')),
     previewFrame);
 
-  // Show/hide the settings to give the body the full width. Hidden settings keep their inputs and values, and are
-  // still saved; the state is applied before the editor is first attached, so it doesn't flash.
-  const settingsToggle = h('button', { type: 'button', class: 'btn be-settings-toggle', 'aria-controls': 'be-settings',
-    onclick: () => { setCollapsed(!panel.hidden, true); settingsToggle.focus(); } });
   const layout = h('div', { class: 'be-layout' },
     h('div', { class: 'be-col' },
       h('div', { class: 'card be-head' }, h('div', { class: 'field' }, h('label', { for: 'be-title' }, 'Title'), titleInput)),
       h('div', { class: 'card be-body' }, inserter(0), list)),
     panel);
-  function storage() { try { return window.localStorage; } catch (_) { return null; } }
-  function setCollapsed(collapsed, remember) {
-    if (collapsed && panel.contains(document.activeElement)) settingsToggle.focus();
-    panel.hidden = collapsed;
-    layout.classList.toggle('be-layout--settings-collapsed', collapsed);
-    settingsToggle.textContent = collapsed ? 'Show settings' : 'Hide settings';
-    settingsToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-    if (remember) writeSettingsCollapsed(storage(), collapsed);
-  }
-  setCollapsed(readSettingsCollapsed(storage()), false);
 
-  root.append(
-    layout,
-    h('div', { class: 'be-bar' }, saveBtn, previewBtn, canPublish ? [publishBtn, unpublishBtn, deleteBtn] : null, status, settingsToggle),
-    err, announce, previewDlg,
-  );
+  root.append(layout, announce, previewDlg);
 
   // ----- state -----
   const fullBody = (loadedSha) => ({ ...saveBody(titleInput.value, items, loadedSha), ...settingsBody(settings) });
@@ -486,16 +478,16 @@ export function writeSettingsCollapsed(storage, collapsed) {
   function showState() {
     const url = `${siteUrl}/blog/${postSlug}/`;
     stateLine.replaceChildren();
-    unpublishBtn.hidden = !canPublish || !publishedAt || !sha;
-    if (!sha) { stateLine.append(h('span', { class: 'pill p-off' }, 'New'), ' Not in the website repository until you save it.'); publishBtn.textContent = 'Publish'; return; }
-    if (!publishedAt) { stateLine.append(h('span', { class: 'pill p-off' }, 'Draft'), ' Not on the blog yet.'); publishBtn.textContent = 'Publish'; return; }
+    statePublished.checked = !!(sha && publishedAt);
+    stateHidden.checked = !statePublished.checked;
+    if (!sha) { stateLine.append(h('span', { class: 'pill p-off' }, 'New'), ' Not in the website repository until you save it.'); return; }
+    if (!publishedAt) { stateLine.append(h('span', { class: 'pill p-off' }, 'Draft'), ' Not on the blog yet.'); return; }
     const when = new Date(publishedAt);
     const future = when.getTime() > Date.now();
     stateLine.append(h('span', { class: `pill ${future ? 'p-wait' : 'p-ok'}` }, future ? 'Scheduled' : 'Published'),
       ` ${future ? 'Goes live' : 'Since'} ${when.toLocaleString()}. `,
       settings.status === 'private' ? 'Private: only people with the link see it. ' : '',
       future ? '' : h('a', { href: url, target: '_blank', rel: 'noopener' }, 'View on the blog'));
-    publishBtn.textContent = 'Publish changes';
   }
   // Autosaved edits are kept by the portal, so only edits not even autosaved yet warn.
   window.addEventListener('beforeunload', (e) => { if (dirty() || saving) e.preventDefault(); });
@@ -925,9 +917,9 @@ export function writeSettingsCollapsed(storage, collapsed) {
     saving = true;
     auto = autosaveStep(auto, { type: 'start' });
     clearTimeout(autoTimer);
-    const btn = publishing ? publishBtn : saveBtn;
-    saveBtn.disabled = publishBtn.disabled = true;
-    btn.innerHTML = `<span class="spin" aria-hidden="true"></span> ${publishing ? 'Publishing' : 'Saving'}…`;
+    saveBtn.disabled = true;
+    busyState(1);
+    if (!publishing) saveBtn.innerHTML = '<span class="spin" aria-hidden="true"></span> Saving…';
     status.textContent = publishing ? 'Publishing…' : 'Saving…';
     let ok = false;
     try {
@@ -937,10 +929,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
       if (res.status === 409 && data.error === 'slug_taken') {
         settings.slugTaken = true;
         slugMsg.textContent = 'Another post already uses this slug. Choose a different one; until then the post keeps its current URL.';
-        if (panel.hidden) setCollapsed(false, true); // the message is in the settings: show them
       }
-      // TODO: the server's other validation errors (data.errors) are plain strings with no field, shown in showError;
-      // once they name their field, show the settings when one of them is a settings field.
       if (!res.ok) {
         showError(errorText(data, res, 'Something went wrong'), false, data.errors);
         status.textContent = 'Not saved';
@@ -970,7 +959,8 @@ export function writeSettingsCollapsed(storage, collapsed) {
       saving = false;
       auto = autosaveStep(auto, { type: 'done', ok });
       schedule();
-      saveBtn.disabled = publishBtn.disabled = false;
+      saveBtn.disabled = false;
+      busyState(-1);
       saveBtn.textContent = 'Save';
       showState();
     }
@@ -1021,6 +1011,12 @@ export function writeSettingsCollapsed(storage, collapsed) {
     }
   }
 
+  // ----- state: the State radios publish or unpublish; whatever happens, they show the server's state after -----
+  async function setPostState(value) {
+    busyState(1);
+    try { await (value === 'published' ? publish() : unpublish()); } finally { busyState(-1); showState(); }
+  }
+
   // ----- publish: one commit of the post with the publish date set (now, unless one is set) -----
   async function publish() {
     if (current) await current;
@@ -1031,7 +1027,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
   async function unpublish() {
     if (current) await current;
     if (!sha || !confirm('Take this post off the blog? It stays in the repository as a draft.')) return;
-    unpublishBtn.disabled = true;
+    busyState(1);
     try {
       const res = await send('POST', `/portal/blog/${encodeURIComponent(postSlug)}/unpublish`, { sha });
       const data = await res.json().catch(() => ({}));
@@ -1047,7 +1043,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
     } catch (e) {
       showError('Could not reach the portal. Check your connection and try again.');
     } finally {
-      unpublishBtn.disabled = false;
+      busyState(-1);
     }
   }
 
@@ -1070,7 +1066,7 @@ export function writeSettingsCollapsed(storage, collapsed) {
     }
   }
 
-  // Errors under the Save button; a conflict says so plainly and offers to reload (losing these edits).
+  // Errors under Save and Preview; a conflict says so plainly and offers to reload (losing these edits).
   function showError(msg, conflict, list_) {
     err.replaceChildren();
     if (!msg) return;

@@ -47,7 +47,4 @@ export function settingsBody(s: EditorSettings): {
 };
 export function autosaveInit(): AutosaveState;
 export function autosaveStep(state: AutosaveState, action: AutosaveAction, delay?: number): AutosaveState;
-export const SETTINGS_COLLAPSED_KEY: string;
-export function readSettingsCollapsed(storage: Pick<Storage, 'getItem'> | null | undefined): boolean;
-export function writeSettingsCollapsed(storage: Pick<Storage, 'setItem'> | null | undefined, collapsed: boolean): void;
 export function autosaveDue(state: AutosaveState, now: number): boolean;

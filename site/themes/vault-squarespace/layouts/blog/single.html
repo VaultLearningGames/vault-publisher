@@ -17,6 +17,7 @@
 <div class="blog-meta">{{ with .author.name }}<span class="blog-author">{{ . }}</span><span class="blog-delim" aria-hidden="true"></span>{{ end }}{{ partial "blog/date.html" .published_at }}</div>
 <div class="blog-body">{{ range .blocks }}{{ partial "blog/block.html" . }}{{ end }}</div>
 {{ with .tags }}<div class="blog-meta blog-tags">{{ partial "blog/tags.html" . }}</div>{{ end }}
+{{ partial "blog/share.html" . }}
 </div></article>
 {{- partial "blog/post-nav.html" (dict "post" . "all" $all) }}
 {{- end }}

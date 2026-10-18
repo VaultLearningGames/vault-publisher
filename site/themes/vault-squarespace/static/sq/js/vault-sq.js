@@ -358,4 +358,24 @@
       newer.href = prev <= 0 ? location.pathname : location.pathname + '?offset=' + items[prev - 1].dataset.offset;
     }
   });
+
+  /* A post's Instagram share button (partials/blog/share.html): Instagram has no web share address, so this opens the
+     browser's share sheet, or else copies the post's address for pasting into Instagram. */
+  $$('.blog-share [data-share="instagram"]').forEach(function (btn) {
+    var status = $('.blog-share-status', btn.closest('.blog-share'));
+    var url = btn.dataset.shareUrl, title = btn.dataset.shareTitle;
+    function say(msg) { if (status) status.textContent = msg; }
+    function copy() {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(function () { say('Link copied: paste it into Instagram.'); },
+          function () { say('Copy this link to share it on Instagram: ' + url); });
+      } else say('Copy this link to share it on Instagram: ' + url);
+    }
+    btn.addEventListener('click', function () {
+      say('');
+      if (navigator.share) {
+        navigator.share({ title: title, url: url }).catch(function (e) { if (!e || e.name !== 'AbortError') copy(); });
+      } else copy();
+    });
+  });
 })();

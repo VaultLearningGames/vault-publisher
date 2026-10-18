@@ -410,6 +410,15 @@ picture { display: contents; }
 .blog-title a { text-decoration: none; }
 .post-nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; padding: 0 6vw 40px; font: 500 16px/24px var(--meta); }
 .post-nav-next { margin-left: auto; text-align: right; }
+/* The share links under a post (partials/blog/share.html). Instagram's button needs the script (vault-sq.js). */
+.blog-share { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: 25px 10% 7.8px; font: 500 16px/24px var(--meta); }
+.blog-share-label { margin-right: 4px; }
+.blog-share-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: 1px solid currentColor; border-radius: 50%; background: none; color: inherit; cursor: pointer; text-decoration: none; }
+.blog-share-btn:hover, .blog-share-btn:focus-visible { background: currentColor; }
+.blog-share-btn:hover svg, .blog-share-btn:focus-visible svg { fill: #fff; }
+html:not(.js) .blog-share-btn[data-share="instagram"] { display: none; }
+.blog-share-status { flex-basis: 100%; text-align: center; font-size: 14px; }
+.blog-share-status:empty { display: none; }
 .blog-title a::after { content: " \2192"; }
 .blog-excerpt { margin: 0 10%; font-size: 14.92px; line-height: 1.5; }
 .blog-excerpt p { margin: 0; }

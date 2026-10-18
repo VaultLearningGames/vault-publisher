@@ -688,6 +688,7 @@ else. Settings:
 | `DEPLOY_STATUS_GITHUB_TOKEN` | (none: no bar) | the token above; empty or unset turns the bar off |
 | `DEPLOY_STATUS_STAGING_BRANCH` | `main` | the branch whose runs are the staging portal's deploys |
 | `DEPLOY_STATUS_PRODUCTION_BRANCH` | `production` | the branch whose runs are the production portal's deploys |
+| `DEPLOY_ESTIMATE_MINUTES` | `10` | how long after a deploy is scheduled the bar says it should be done (a positive whole number) |
 
 vault-site's *Deploy (site)* runs are read on the branch the portal commits to there (`VAULT_SITE_BRANCH`, else
 `staging` or `production`), not on these.

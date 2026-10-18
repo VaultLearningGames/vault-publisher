@@ -24,7 +24,8 @@ import { githubAccount, githubRepository, registerPeople, type GitHubAccountLook
 import { buildOrigin, registerUploads } from './uploads.ts';
 import { registerBlogAdmin } from './blog-admin.ts';
 import type { MonitorEnv } from '../url-monitor.ts';
-import { DeployStatusCache, deployBranch, siteDeployBranch, getScheduledDeploy, githubRunsFetcher, settleScheduled, type DeployStatus, type RunsFetcher, type SettingsStore } from '../deploy-status.ts';
+import { DeployStatusCache, deployBranch, siteDeployBranch, getScheduledDeploy, githubRunsFetcher, settleScheduled, withDeployEta, type DeployStatus, type RunsFetcher, type SettingsStore } from '../deploy-status.ts';
+import { formatDeployEta } from '../deploy-eta.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -141,10 +142,12 @@ const nowDate = () => new Date(deployNow ? deployNow() : Date.now());
 function deployBar(): Html | '' {
   if (!deployStatus && !scheduledStore) return '';
   const deploys = deployStatus?.peek()?.deploys ?? [];
-  const scheduled = scheduledStore ? getScheduledDeploy(scheduledStore, nowDate()) : null;
+  const now = nowDate();
+  const scheduled = scheduledStore ? withDeployEta(getScheduledDeploy(scheduledStore, now), now) : null;
+  const eta = scheduled?.deployEtaAt ? formatDeployEta(now, new Date(scheduled.deployEtaAt)) : null;
   const known: DeployStatus = { deploys, scheduled };
   const shown = deploys.length || scheduled;
-  return html`<div class="deploy-bar" id="deploy-bar" role="status" aria-live="polite" data-src="${DEPLOY_STATUS_PATH}"${shown ? html` data-state="${JSON.stringify(known)}"` : ''}${shown ? '' : ' hidden'}>${scheduled ? html`<div class="deploy-row scheduled"><b>A deploy is scheduled — some recent changes may not be live yet.</b></div>` : ''}</div>`;
+  return html`<div class="deploy-bar" id="deploy-bar" role="status" aria-live="polite" data-src="${DEPLOY_STATUS_PATH}"${shown ? html` data-state="${JSON.stringify(known)}"` : ''}${shown ? '' : ' hidden'}>${scheduled ? html`<div class="deploy-row scheduled"><b${eta ? html` title="${scheduled!.deployEtaAt}"` : ''}>A deploy is scheduled — some recent changes may not be live yet.${eta ? ` ${eta}` : ''}</b></div>` : ''}</div>`;
 }
 // blog: whether the Blog link shows (Vault admins and Blog maintainers).
 interface Nav { user: User; studio?: Studio; memberships: (Membership & { studio_slug: string; studio_name: string })[]; allStudios: Studio[]; blog?: boolean }
@@ -223,7 +226,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   // scheduled.
   app.get(DEPLOY_STATUS_PATH, async (c) => {
     const deploys = deployCache ? (await deployCache.get()).deploys : [];
-    const body: DeployStatus = { deploys, scheduled: settleScheduled(db, deploys, nowDate()) };
+    const now = nowDate();
+    const body: DeployStatus = { deploys, scheduled: withDeployEta(settleScheduled(db, deploys, now), now) };
     return c.json(body, 200, { 'Cache-Control': 'no-store' });
   });
 

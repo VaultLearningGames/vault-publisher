@@ -447,6 +447,17 @@
     return a;
   };
 
+  // As formatDeployEta (src/deploy-eta.ts): relative to now, never a clock time.
+  const etaText = (iso) => {
+    const t = iso ? Date.parse(iso) : NaN;
+    if (!Number.isFinite(t)) return null;
+    const min = Math.ceil((t - Date.now()) / 60000);
+    if (!(min > 0)) return 'It should be live shortly.';
+    if (min < 60) return `Estimated completion in about ${min} min.`;
+    const h = Math.floor(min / 60), m = min % 60;
+    return `Estimated completion in about ${h} h${m ? ` ${m} min` : ''}.`;
+  };
+
   function render() {
     const list = shown();
     bar.replaceChildren();
@@ -455,7 +466,9 @@
       const row = document.createElement('div');
       row.className = 'deploy-row scheduled';
       const b = document.createElement('b');
-      b.textContent = 'A deploy is scheduled — some recent changes may not be live yet.';
+      const eta = etaText(scheduled().deployEtaAt);
+      b.textContent = 'A deploy is scheduled — some recent changes may not be live yet.' + (eta ? ` ${eta}` : '');
+      if (eta) b.title = scheduled().deployEtaAt;
       row.append(b);
       bar.append(row);
     }
@@ -496,6 +509,7 @@
     }
     clearInterval(clock);
     if (list.some((d) => d.state === 'running')) clock = setInterval(render, 5000);
+    else if (scheduled() && scheduled().deployEtaAt) clock = setInterval(render, 60000);
     return list.length > 0 || !!scheduled();
   }
 

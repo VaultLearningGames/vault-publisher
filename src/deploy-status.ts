@@ -5,6 +5,7 @@
 // CACHE_MS, whatever the number of pages open; without DEPLOY_STATUS_GITHUB_TOKEN nothing here runs.
 
 import { PRODUCTION_SITE_BRANCH, STAGING_SITE_BRANCH } from './site-repo/config.ts';
+import { deployEstimateMinutes, estimateDeployCompletion } from './deploy-eta.ts';
 
 export type DeployKind = 'portal' | 'site';
 export type DeployEnvironment = 'staging' | 'production';
@@ -43,8 +44,9 @@ export interface Deploy {
   expectedSeconds: number;
   url: string;
 }
-// scheduled: a deploy a portal action asked for that hasn't started yet (markDeployPending, below).
-export interface DeployStatus { deploys: Deploy[]; scheduled?: { since: string; reason: string | null } | null }
+// scheduled: a deploy a portal action asked for that hasn't started yet (markDeployPending, below); deployEtaAt (ISO)
+// is when it should be done (withDeployEta), null when that can't be told.
+export interface DeployStatus { deploys: Deploy[]; scheduled?: { since: string; reason: string | null; deployEtaAt?: string | null } | null }
 
 const ACTIVE = new Set(['queued', 'in_progress', 'waiting', 'pending', 'requested']);
 export const isActive = (run: Pick<WorkflowRun, 'status'>) => ACTIVE.has(run.status ?? '');
@@ -282,4 +284,19 @@ export function settleScheduled(store: SettingsStore, deploys: readonly Deploy[]
     return null;
   }
   return s;
+}
+
+// The scheduled deploy with when it should be done: since it was scheduled plus DEPLOY_ESTIMATE_MINUTES (there is no
+// history of the deploy it will be). deployEtaAt is null when it can't be worked out; this never throws.
+export function withDeployEta(s: ScheduledDeploy | null, now = new Date()): (ScheduledDeploy & { deployEtaAt: string | null }) | null {
+  if (!s) return null;
+  let deployEtaAt: string | null = null;
+  try {
+    const since = new Date(s.since);
+    const eta = estimateDeployCompletion({ now, scheduledAt: Number.isFinite(since.getTime()) ? since : null, defaultDurationMs: deployEstimateMinutes() * 60_000 });
+    deployEtaAt = eta ? eta.toISOString() : null;
+  } catch {
+    deployEtaAt = null;
+  }
+  return { ...s, deployEtaAt };
 }

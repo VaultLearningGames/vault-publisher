@@ -41,6 +41,18 @@ export const isFeaturedImageSrc = (v) => /^https:\/\/[^/?#\s]+\S*$/i.test(v) || 
 // it); a text block holds any number of paragraphs, lists and quotes with inline formatting.
 export const BLOCK_LABELS = { heading: 'Heading', paragraph: 'Text', image: 'Image', divider: 'Divider' };
 export const ALIGNS = ['left', 'center', 'right', 'wide', 'full'];
+// The image block's alignment buttons, in order: '' is the site's default (no align stored), then each of ALIGNS.
+// Each is an icon only; its label is its aria-label and title.
+export const ALIGN_OPTIONS = [
+  { value: '', label: 'Default' },
+  { value: 'left', label: 'Align left' },
+  { value: 'center', label: 'Align center' },
+  { value: 'right', label: 'Align right' },
+  { value: 'wide', label: 'Wide' },
+  { value: 'full', label: 'Full width' },
+];
+// The alignment an image block shows as chosen: its own when it is one of ALIGNS, else the default ('').
+export const alignChoice = (align) => (ALIGNS.includes(align) ? align : '');
 
 export const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -741,9 +753,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       ...['slideshow', 'carousel', 'grid', 'stacked'].filter((l) => LAYOUTS.includes(l)).map((l) => h('label', { class: 'be-layout-opt' },
         h('input', { type: 'radio', name: layoutName, value: l, checked: item.layout === l, onchange: () => { item.layout = l; changed(); } }),
         layoutIcon(l), h('span', null, LAYOUT_LABELS[l]))));
-    const alignSel = h('select', { 'aria-label': 'Alignment', onchange: (e) => { item.align = e.target.value; changed(); } },
-      h('option', { value: '', selected: !item.align }, 'Default'),
-      ...ALIGNS.map((a) => h('option', { value: a, selected: item.align === a }, a[0].toUpperCase() + a.slice(1))));
+    const alignGroup = imageAlignmentControl(item.align, (a) => { item.align = a; changed(); });
 
     const rows = h('ol', { class: 'be-gallery-list', 'aria-label': 'Images' });
     const drop = h('div', { class: 'be-dropzone' });
@@ -816,9 +826,39 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     }
     drawRows();
     wrap.append(
-      h('div', { class: 'be-gallery-opts' }, layouts, f('Alignment', alignSel)),
+      h('div', { class: 'be-gallery-opts' }, layouts, h('div', { class: 'field' }, h('span', { class: 'lab', 'aria-hidden': 'true' }, 'Alignment'), alignGroup)),
       rows, drop, progress);
     return wrap;
+  }
+  // The image alignment buttons (ALIGN_OPTIONS): one icon button each, the chosen one pressed. Clicking another calls
+  // onChange with its value (the same strings the block stores); clicking the chosen one does nothing.
+  function imageAlignmentControl(value, onChange, disabled = false) {
+    let current = alignChoice(value);
+    const group = h('div', { class: 'be-aligns', role: 'group', 'aria-label': 'Image alignment' },
+      ...ALIGN_OPTIONS.map((o) => h('button', { type: 'button', class: 'be-align-opt', 'data-align': o.value, 'aria-label': o.label, title: o.label,
+        'aria-pressed': o.value === current ? 'true' : 'false', disabled,
+        onclick: () => {
+          if (o.value === current) return;
+          current = o.value;
+          for (const b of group.querySelectorAll('.be-align-opt')) b.setAttribute('aria-pressed', b.dataset.align === current ? 'true' : 'false');
+          onChange(current);
+        } }, alignIcon(o.value))));
+    return group;
+  }
+  // Line icons for the alignments: an image (the filled box) with text lines beside it, or as wide as the column or wider.
+  function alignIcon(a) {
+    const paths = {
+      '': '<rect x="7" y="7" width="10" height="10" rx="1" stroke-dasharray="2 2"/>',
+      left: '<rect x="3" y="5" width="9" height="8" rx="1" fill="currentColor"/><path d="M15 6h6M15 10h6M3 17h18M3 20h12"/>',
+      center: '<rect x="7" y="4" width="10" height="8" rx="1" fill="currentColor"/><path d="M3 16h18M6 20h12"/>',
+      right: '<rect x="12" y="5" width="9" height="8" rx="1" fill="currentColor"/><path d="M3 6h6M3 10h6M3 17h18M9 20h12"/>',
+      wide: '<rect x="4" y="7" width="16" height="10" rx="1" fill="currentColor"/><path d="M1.5 9.5 0.5 12l1 2.5M22.5 9.5l1 2.5-1 2.5"/>',
+      full: '<rect x="1" y="7" width="22" height="10" fill="currentColor"/><path d="M8 4h8M8 20h8"/>',
+    };
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('width', '18'); svg.setAttribute('height', '18'); svg.setAttribute('aria-hidden', 'true');
+    svg.innerHTML = `<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths[a] ?? paths['']}</g>`;
+    return svg;
   }
   // Line icons for the layouts: a big image over thumbnails, one between brackets, a 2x2 grid, two stacked.
   function layoutIcon(l) {

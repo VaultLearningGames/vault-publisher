@@ -103,6 +103,12 @@
 .be-layout-opt input { position: absolute; opacity: 0; pointer-events: none; }
 .be-layout-opt:has(input:checked) { background: var(--surface); border-color: var(--line); color: var(--ink); font-weight: 600; }
 .be-layout-opt:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 1px; }
+.be-aligns { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; }
+.be-align-opt { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--ink-3); cursor: pointer; }
+.be-align-opt:hover:not(:disabled) { color: var(--ink); background: var(--surface); }
+.be-align-opt[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.be-align-opt:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.be-align-opt:disabled { opacity: .5; cursor: default; }
 .be-gallery-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .be-gallery-list[hidden] { display: none; }
 .be-gimg { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }

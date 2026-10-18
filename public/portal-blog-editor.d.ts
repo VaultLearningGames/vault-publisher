@@ -11,6 +11,8 @@ export type EditorBlock =
 export const BLOCK_TYPES: Block['type'][];
 export const BLOCK_LABELS: Record<Block['type'], string>;
 export const ALIGNS: Align[];
+export const ALIGN_OPTIONS: { value: Align | ''; label: string }[];
+export function alignChoice(align: unknown): Align | '';
 export function escapeHtml(s: string): string;
 export function spansToHtml(children: Span[]): string;
 export function htmlHasText(html: string): boolean;

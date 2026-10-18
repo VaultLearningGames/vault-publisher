@@ -241,12 +241,13 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
 
   // Static assets, read once at startup.
   const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
-  const css = asset('portal.css'), js = asset('portal.js'), logoPng = asset('vault-logo.png');
-  assetVersion = createHash('sha256').update(css).update(js).update(logoPng).digest('hex').slice(0, 10);
+  const css = asset('portal.css'), js = asset('portal.js'), logoPng = asset('vault-logo.png'), loginGames = asset('login-games.webp');
+  assetVersion = createHash('sha256').update(css).update(js).update(logoPng).update(loginGames).digest('hex').slice(0, 10);
   const immutable = 'public, max-age=31536000, immutable';
   app.get('/assets/portal.css', (c) => c.body(css, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
   app.get('/assets/portal.js', (c) => c.body(js, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': immutable }));
   app.get('/assets/vault-logo.png', (c) => c.body(logoPng, 200, { 'Content-Type': 'image/png', 'Cache-Control': immutable }));
+  app.get('/assets/login-games.webp', (c) => c.body(loginGames, 200, { 'Content-Type': 'image/webp', 'Cache-Control': immutable }));
 
   // ---------- identity & permissions ----------
   function currentUser(c: Context): User | null {
@@ -318,7 +319,12 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   app.get('/login', (c) => {
     if (currentUser(c)) return c.redirect('/');
     const next = c.req.query('next') ?? '/';
-    const body = html`<div class="login">
+    // The games artwork from https://vaultlearninggames.org/sq/img/site/games-ca9fcd_hu_3db183ebbf20ed04.webp (vendored as
+    // public/login-games.webp), drawn twice so the column scrolls without a seam; decorative, so hidden from assistive tech.
+    const games = html`<img src="/assets/login-games.webp?v=${assetVersion}" alt="" aria-hidden="true" class="login-games" width="1000" height="2000" decoding="async">`;
+    const body = html`<div class="login-page">
+      <div class="login-art" aria-hidden="true"><div class="login-games-track">${games}${games}</div></div>
+      <div class="login login-card">
       <div class="brand big">${logo()}</div>
       <h1>Studio Portal</h1>
       <p>Publish your games to classrooms. Your studio controls testing on staging; Vault reviews every release.</p>
@@ -328,6 +334,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
         : html`<p class="fix">Sign-in isn’t set up yet: the GitHub OAuth app and session secret are missing.</p>`}
       ${c.req.query('error') ? html`<p class="err">${c.req.query('error')}</p>` : ''}
       ${supportUrl ? html`<p class="small muted">Need support? ${supportLink('Join our Slack')} and ask in the <b>${SUPPORT_CHANNEL}</b> channel.</p>` : ''}
+      </div>
     </div>`;
     return c.html(layout('Sign in', null, body));
   });

@@ -371,6 +371,29 @@ td select { border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px;
 .login { max-width: 420px; margin: 12vh auto 0; text-align: center; display: flex; flex-direction: column; gap: 12px; align-items: center; }
 .login h1 { font: 700 30px/1.1 var(--display); margin: 0; }
 .login p { color: var(--ink-2); margin: 0; }
+/* Sign-in page: the games artwork scrolling on the left, the sign-in card on the right. */
+.login-page { display: grid; grid-template-columns: minmax(0, 55fr) minmax(0, 45fr); gap: 48px; align-items: center; min-height: calc(100vh - 104px); max-width: 1280px; margin: 0 auto; }
+.login-art { position: relative; align-self: stretch; min-height: 480px; border-radius: 18px; overflow: hidden; background: #0B0F13; }
+.login-art::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(11, 15, 19, .55), transparent 18%, transparent 82%, rgba(11, 15, 19, .55)); }
+.login-games-track { display: flex; flex-direction: column; animation: login-games-scroll 90s linear infinite; will-change: transform; }
+.login-games { display: block; width: 100%; height: auto; }
+@keyframes login-games-scroll { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+@media (prefers-reduced-motion: reduce) { .login-games-track { animation: none; } }
+.login.login-card { width: 100%; margin: 0 auto; padding: 40px; gap: 24px; line-height: 1.5; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+.login-card .brand.big { max-width: 100%; }
+.login-card .brand.big .logo { width: min(242px, 100%); height: auto; }
+.login-card h1 { margin-top: 4px; }
+.login-card p { line-height: 1.5; }
+.login-card .btn.big { margin-top: 8px; }
+@media (max-width: 899px) {
+  .login-page { grid-template-columns: minmax(0, 1fr); gap: 32px; min-height: 0; max-width: 560px; }
+  .login-art { min-height: 0; height: 220px; max-height: 220px; }
+}
+@media (max-width: 599px) {
+  .login-page { gap: 0; }
+  .login-art { display: none; }
+  .login.login-card { padding: 32px; }
+}
 .brand.big { align-self: center; margin: 0; padding: 12px 16px; }
 .brand.big .logo { height: 40px; }
 .wrap { overflow-wrap: anywhere; }

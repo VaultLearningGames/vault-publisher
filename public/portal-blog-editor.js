@@ -370,7 +370,6 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
 
   // State: Published (on the blog, or scheduled) or Hidden (a draft). Choosing one publishes or unpublishes the post;
   // the radios follow the server's state again afterwards (showState), so a cancelled or failed change reverts.
-  const stateLine = h('p', { class: 'be-state', role: 'status' });
   const stateRadio = (value, label) => h('input', { type: 'radio', name: 'be-post-state', id: fieldId(`state-${value}`), value,
     onchange: () => setPostState(value) });
   const statePublished = stateRadio('published'), stateHidden = stateRadio('hidden');
@@ -384,8 +383,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   const stateField = h('fieldset', { class: 'field be-state-field' }, h('legend', { class: 'lab' }, 'State'),
     h('div', { class: 'be-seg', role: 'radiogroup', 'aria-label': 'State' },
       h('label', { for: fieldId('state-published') }, statePublished, h('span', null, 'Published')),
-      h('label', { for: fieldId('state-hidden') }, stateHidden, h('span', null, 'Hidden'))),
-    stateLine);
+      h('label', { for: fieldId('state-hidden') }, stateHidden, h('span', null, 'Hidden'))));
   if (!canPublish) statusSwitch.disabled = dateInput.disabled = true;
 
   const panel = h('aside', { class: 'card be-settings', id: 'be-settings', 'aria-label': 'Post settings' },
@@ -520,20 +518,10 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   });
   tagInput.addEventListener('blur', () => { if (tagInput.value.trim()) commitTag(); });
 
-  // ----- where the post stands on the public blog -----
+  // ----- where the post stands on the public blog: the State radios -----
   function showState() {
-    const url = `${siteUrl}/blog/${postSlug}/`;
-    stateLine.replaceChildren();
     statePublished.checked = !!(sha && publishedAt);
     stateHidden.checked = !statePublished.checked;
-    if (!sha) { stateLine.append(h('span', { class: 'pill p-off' }, 'New'), ' Not in the website repository until you save it.'); return; }
-    if (!publishedAt) { stateLine.append(h('span', { class: 'pill p-off' }, 'Draft'), ' Not on the blog yet.'); return; }
-    const when = new Date(publishedAt);
-    const future = when.getTime() > Date.now();
-    stateLine.append(h('span', { class: `pill ${future ? 'p-wait' : 'p-ok'}` }, future ? 'Scheduled' : 'Published'),
-      ` ${future ? 'Goes live' : 'Since'} ${when.toLocaleString()}. `,
-      settings.status === 'private' ? 'Private: only people with the link see it. ' : '',
-      future ? '' : h('a', { href: url, target: '_blank', rel: 'noopener' }, 'View on the blog'));
   }
   // Autosaved edits are kept by the portal, so only edits not even autosaved yet warn.
   window.addEventListener('beforeunload', (e) => { if (dirty() || saving) e.preventDefault(); });
@@ -999,7 +987,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       }
       status.textContent = dirty() ? `${savedLabel(new Date())}; newer changes not saved yet` : savedLabel(new Date());
       showState();
-      if (publishing) say(stateLine.textContent);
+      if (publishing) say(new Date(publishedAt).getTime() > Date.now() ? 'Post scheduled.' : 'Post published.');
       ok = true;
       return true;
     } catch (e) {
@@ -1090,7 +1078,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
       dateInput.value = '';
       showState();
       changed();
-      say(stateLine.textContent);
+      say('Post unpublished: it is a draft now.');
     } catch (e) {
       showError('Could not reach the portal. Check your connection and try again.');
     } finally {

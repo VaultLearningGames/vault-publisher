@@ -765,7 +765,8 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
         progress.textContent = files.length > 1 ? `Image ${i + 1} of ${files.length}…` : '';
         const r = await editImage(files[i], { title: files.length > 1 ? `Image ${i + 1} of ${files.length}` : 'Image' });
         if (!r) continue;
-        item.images.push({ id: newImageId(), url: r.url, alt: r.alt || '', title: '', description: '', showTitle: true, showDescription: true, link: '', linkTarget: '_self' });
+        // A new image starts with its title and description hidden; images saved before keep their own settings.
+        item.images.push({ id: newImageId(), url: r.url, alt: r.alt || '', title: '', description: '', showTitle: false, showDescription: false, link: '', linkTarget: '_self' });
         drawRows(); changed(); say('Image uploaded.');
       }
       progress.textContent = '';

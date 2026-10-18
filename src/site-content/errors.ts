@@ -3,19 +3,30 @@
 // The portal's save-conflict answer: the same 409 and message the blog editor's save gets when the post changed since it
 // was loaded (portal/blog-admin.ts, `conflict`). Here it means the file's SHA on GitHub is not the one the caller loaded.
 export const SAVE_CONFLICT_STATUS = 409;
-export const SAVE_CONFLICT_MESSAGE = 'This post was changed elsewhere since you loaded it. Reload to get the latest version.';
+export const SAVE_CONFLICT_MESSAGE = 'This post changed on GitHub since you opened it. Reload to get the latest version.';
+export const DELETED_UPSTREAM_MESSAGE = 'This post was deleted or renamed on GitHub since you opened it. Nothing was saved; reload to see the latest version.';
 
 export class SaveConflictError extends Error {
   readonly status = SAVE_CONFLICT_STATUS;
-  readonly code = 'save_conflict';
+  readonly code: string = 'save_conflict';
   // The path that conflicted, and the SHA it has now when known.
   readonly path: string;
   readonly currentSha?: string;
-  constructor(path: string, currentSha?: string) {
-    super(SAVE_CONFLICT_MESSAGE);
+  constructor(path: string, currentSha?: string, message = SAVE_CONFLICT_MESSAGE) {
+    super(message);
     this.name = 'SaveConflictError';
     this.path = path;
     this.currentSha = currentSha;
+  }
+}
+
+// The file the caller loaded is no longer at its path (deleted, or renamed: renames are not followed). A conflict too,
+// so every SaveConflictError check still refuses to write.
+export class PostDeletedUpstreamError extends SaveConflictError {
+  readonly code: string = 'deleted_upstream';
+  constructor(path: string) {
+    super(path, undefined, DELETED_UPSTREAM_MESSAGE);
+    this.name = 'PostDeletedUpstreamError';
   }
 }
 

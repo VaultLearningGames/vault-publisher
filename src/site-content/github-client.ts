@@ -1,6 +1,7 @@
 // The blog's Markdown files in the vault-site repository, through GitHub's REST API (config.ts says which repository,
 // branch and folder). A post is <blogDir>/<slug>/index.md; its blob SHA is the conflict check: a write names the SHA
-// it was loaded at and fails with SaveConflictError (the editor's 409) when the file has changed since.
+// it was loaded at and fails with SaveConflictError (the editor's 409) when the file has changed since, or
+// PostDeletedUpstreamError (a SaveConflictError) when it is no longer there. Nothing is ever written without the check.
 //   listPosts()                       every post's slug, path and SHA (one request: the branch's tree)
 //   getPost(slug)                     the file as text (UTF-8, as stored: a BOM and CRLF are kept), or null
 //   getBlob(sha)                      a file's text by its blob SHA
@@ -14,7 +15,7 @@ import { Buffer } from 'node:buffer';
 import { sitePublishingEnabled } from '../site-repo/config.ts';
 import { checkSiteContentConfig, readSiteContentConfig, type SiteContentConfig } from './config.ts';
 import { createInstallationTokenSource } from './app-auth.ts';
-import { SaveConflictError, SiteContentConfigError, SiteContentError } from './errors.ts';
+import { PostDeletedUpstreamError, SaveConflictError, SiteContentConfigError, SiteContentError } from './errors.ts';
 
 export interface PostRef { slug: string; path: string; sha: string }
 export interface PostContent extends PostRef { raw: string }
@@ -142,9 +143,12 @@ export function createSiteContentClient(opts: SiteContentClientOptions = {}): Si
     return { slug, path, sha: j.sha, raw };
   }
 
-  // A conflict, with the file's SHA now when it can be had.
+  // A conflict, with the file's SHA now when it can be had; PostDeletedUpstreamError when the file is gone (deleted or
+  // renamed on GitHub: renames are not followed).
   async function conflict(slug: string): Promise<SaveConflictError> {
-    const cur = await getAt(slug, conf().branch).catch(() => null);
+    let cur: PostContent | null | undefined;
+    try { cur = await getAt(slug, conf().branch); } catch { cur = undefined; }
+    if (cur === null) return new PostDeletedUpstreamError(postPath(slug));
     return new SaveConflictError(postPath(slug), cur?.sha);
   }
 

@@ -1007,10 +1007,13 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     credentials: 'same-origin',
   });
   const errorText = (data, res, what) => data.message || data.error || `${what} (HTTP ${res.status}).`;
-  // A 409 conflict: the file changed in the repository since it was loaded. No more autosaves until a reload.
+  // The 409s a reload fixes: the post changed on GitHub since it was opened (conflict), was deleted or renamed there
+  // (deleted_upstream), or this editor didn't say which version it opened (post_reload_required). Nothing was saved.
+  const RELOAD_ERRORS = ['conflict', 'deleted_upstream', 'post_reload_required'];
+  // No more autosaves until a reload; the error offers the Reload action.
   function conflicted(data) {
     auto = autosaveStep(auto, { type: 'stop' });
-    showError(data.message || 'This post was changed elsewhere since you loaded it.', true);
+    showError(data.message || 'This post changed on GitHub since you opened it. Reload to get the latest version.', true);
   }
   // After a commit: the post as the repository has it now (a rename moves the page to the new address).
   function committed(p) {
@@ -1074,7 +1077,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     try {
       const res = await send(publishing ? 'POST' : 'PUT', `/portal/blog/${encodeURIComponent(postSlug)}${publishing ? '/publish' : ''}`, body);
       const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.error === 'conflict') { conflicted(data); status.textContent = 'Not saved'; return false; }
+      if (res.status === 409 && RELOAD_ERRORS.includes(data.error)) { conflicted(data); status.textContent = 'Not saved'; return false; }
       if (res.status === 409 && data.error === 'slug_taken') {
         settings.slugTaken = true;
         slugMsg.textContent = 'Another post already uses this slug. Choose a different one; until then the post keeps its current URL.';
@@ -1181,7 +1184,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     try {
       const res = await send('POST', `/portal/blog/${encodeURIComponent(postSlug)}/unpublish`, { sha });
       const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.error === 'conflict') { conflicted(data); return; }
+      if (res.status === 409 && RELOAD_ERRORS.includes(data.error)) { conflicted(data); return; }
       if (!res.ok) { showError(errorText(data, res, 'Could not unpublish'), false, data.errors); return; }
       showError('');
       committed(data.post);
@@ -1205,7 +1208,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     try {
       const res = await send('DELETE', `/portal/blog/${encodeURIComponent(postSlug)}`, { sha });
       const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.error === 'conflict') { conflicted(data); return; }
+      if (res.status === 409 && RELOAD_ERRORS.includes(data.error)) { conflicted(data); return; }
       if (!res.ok) { showError(errorText(data, res, 'Could not delete'), false, data.errors); return; }
       savedJson = snapshot();
       location.href = '/portal/blog';
@@ -1221,7 +1224,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     err.replaceChildren();
     if (!msg) return;
     const box = h('div', { class: `card be-alert${conflict ? ' be-conflict' : ''}` },
-      h('p', null, h('strong', null, conflict ? 'Not saved: someone else changed this post. ' : 'Not saved. '), msg));
+      h('p', null, h('strong', null, conflict ? 'Not saved: this post changed on GitHub. ' : 'Not saved. '), msg));
     if (Array.isArray(list_) && list_.length) box.append(h('ul', null, ...list_.map((x) => h('li', null, String(x)))));
     if (conflict) box.append(h('p', { class: 'muted' }, 'Your edits are still here: copy anything you need before reloading.'),
       h('button', { type: 'button', class: 'btn', onclick: async () => {

@@ -7,14 +7,15 @@
 //   savePost(slug, input, expectedSha, message)   creates (expectedSha null: the file must not exist) or updates
 //   renamePost(old, new, input, expectedSha, message)  one commit: the folder moved, /blog/<old>/ added to aliases
 //   deletePost(slug, expectedSha, message)        one commit removing the post's folder
-// Every write is one commit. Errors: SaveConflictError (the SHA isn't the file's any more), PostSlugTakenError (create
+// Every write is one commit. Errors: SaveConflictError (the SHA isn't the file's any more; PostDeletedUpstreamError,
+// a subclass, when the file is gone: deleted or renamed on GitHub), PostSlugTakenError (create
 // or rename onto a post that exists), SiteContentError (GitHub; status 0 for the network), SiteContentConfigError,
 // FrontMatterError (a file whose front matter can't be read, on load or update).
 import type { BlogPostInput } from './repo.ts';
 import { isBlogSlug } from './slug.ts';
 import { DEFAULT_TAG_LIMIT, rankTags, type TagCount } from '../../public/portal-blog-tags.js';
 import {
-  applyPostInput, createPostListCache, createSiteContentClient, parsePostFile, postInputFromFile, SaveConflictError, serializePostFile,
+  applyPostInput, createPostListCache, createSiteContentClient, parsePostFile, PostDeletedUpstreamError, postInputFromFile, SaveConflictError, serializePostFile,
   SiteContentError, type PostListCache, type PostListEntry, type SiteContentClient,
 } from '../site-content/index.ts';
 
@@ -73,7 +74,9 @@ export class SiteBlogRepo {
   // The file at `slug` as loaded at expectedSha, parsed (for its layout and other front matter); conflict when it moved.
   private async loaded(slug: string, expectedSha: string) {
     const got = await this.client.getPost(slug);
-    if (!got || got.sha !== expectedSha) throw new SaveConflictError(`${slug}/index.md`, got?.sha);
+    // Gone from its path: deleted, or renamed on GitHub (renames are not followed). Never re-created by an update.
+    if (!got) throw new PostDeletedUpstreamError(`${slug}/index.md`);
+    if (got.sha !== expectedSha) throw new SaveConflictError(`${slug}/index.md`, got.sha);
     return parsePostFile(got.raw);
   }
 

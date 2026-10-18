@@ -41,7 +41,9 @@
 //   GET    /assets/portal-blog-tags.js      tag normalization and ranking, shared with the server
 //   GET    /assets/portal-blog-editor-commands.js  the editor's formatting commands (all its execCommand calls)
 // A draft is a post with no publish date (draft: true in its front matter): the site doesn't publish it.
-// Errors: 409 { error: 'conflict', currentSha } (the file changed since it was loaded), 409 { error: 'slug_taken' },
+// Errors: 409 { error: 'conflict', currentSha } (the file changed since it was loaded), 409 { error: 'deleted_upstream' }
+// (the loaded file is gone: deleted or renamed on GitHub), 409 { error: 'post_reload_required' } (a Save of a post on
+// GitHub naming no SHA), 409 { error: 'slug_taken' },
 // 502 { error: 'upstream' } (GitHub failed or couldn't be reached; nothing was saved), 503 { error: 'not_configured' }.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -59,7 +61,7 @@ import { PostSlugTakenError, SiteBlogRepo, type RepoPost } from '../blog/siteRep
 import { isBlogSlug, MAX_SLUG, slugify, uniqueSlug } from '../blog/slug.ts';
 import { copyImages, deleteOld, discardCopies, ImageMoveError, referencedKeys, rewriteImageRefs, withImageLock } from '../blog/imageMove.ts';
 import {
-  applyPostInput, FrontMatterError, parsePostFile, postInputFromFile, SaveConflictError, SAVE_CONFLICT_MESSAGE, serializePostFile, SiteContentConfigError, SiteContentError,
+  applyPostInput, DELETED_UPSTREAM_MESSAGE, FrontMatterError, parsePostFile, PostDeletedUpstreamError, postInputFromFile, SaveConflictError, SAVE_CONFLICT_MESSAGE, serializePostFile, SiteContentConfigError, SiteContentError,
 } from '../site-content/index.ts';
 import { withPortalUserTrailer } from '../site-repo/config.ts';
 import { sanitizeTags, tagLimit } from '../../public/portal-blog-tags.js';
@@ -251,12 +253,15 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
   };
   const jsonError = (status: number, body: Record<string, unknown>) =>
     new HTTPException(status as 409, { res: Response.json(body, { status }) });
+  // The post the editor loaded is gone from GitHub (deleted, or renamed there): nothing is written, not even re-created.
+  const deletedUpstream = () => jsonError(409, { error: 'deleted_upstream', message: DELETED_UPSTREAM_MESSAGE, currentSha: null });
   // A failure of the repository as the HTTP answer. Nothing reached scratch storage or the repository when these throw.
   const repoError = (err: unknown): never => {
     if (err instanceof HTTPException) throw err;
+    if (err instanceof PostDeletedUpstreamError) throw deletedUpstream();
     if (err instanceof SaveConflictError) throw jsonError(409, { error: 'conflict', message: SAVE_CONFLICT_MESSAGE, currentSha: err.currentSha ?? null });
     if (err instanceof PostSlugTakenError) {
-      throw jsonError(409, { error: 'slug_taken', message: `The slug "${err.slug}" is already used by another post.`, field: 'slug', detail: { field: 'slug' } });
+      throw jsonError(409, { error: 'slug_taken', message: `A post with this slug already exists on GitHub ("${err.slug}"). Choose a different slug.`, field: 'slug', detail: { field: 'slug' } });
     }
     if (err instanceof ImageMoveError) throw jsonError(err.status, { error: err.code, message: err.message, field: 'slug' });
     if (err instanceof FrontMatterError) throw jsonError(422, { error: 'unreadable', message: `The post’s front matter can’t be read: ${err.message}` });
@@ -393,7 +398,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const sha = shaOf(body.sha, true)!;
     delete body.sha;
     const base = await guarded(() => repo.getPost(slug));
-    if (!base) fail(404, 'No such blog post.');
+    if (!base) throw deletedUpstream();
     if (base.sha !== sha) throw jsonError(409, { error: 'conflict', message: SAVE_CONFLICT_MESSAGE, currentSha: base.sha });
     const input = parseInput(body, base.input, () => slug);
     keepsPublishing(u, base.input, input);
@@ -456,6 +461,26 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const s = scratch.get(slug);
     if (!s || s.base_sha !== null) fail(404, 'No such blog post.');
     return { input: scratchInput(s.data, slug) ?? newPostInput(slug, ''), sha: null };
+  };
+
+  // What a Save or Publish naming `sha` (as the editor loaded it; null for a new post) writes over, checked so a change
+  // made on GitHub since is never overwritten: the loaded file is gone -> deleted_upstream; no SHA for a post that is on
+  // GitHub -> post_reload_required (a stale tab or an old editor: no proof it saw the latest version), or slug_taken
+  // when it was a new post whose slug was taken on GitHub meanwhile. A differing SHA is the caller's 409 conflict.
+  const saveBase = async (slug: string, sha: string | null): Promise<{ input: BlogPostInput; sha: string | null }> => {
+    const committed = await guarded(() => repo.getPost(slug));
+    if (sha !== null) {
+      if (!committed) throw deletedUpstream();
+      return { input: committed.input, sha: committed.sha };
+    }
+    if (committed) {
+      const s = scratch.get(slug);
+      if (s && s.base_sha === null) {
+        throw jsonError(409, { error: 'slug_taken', message: `A post with this slug already exists on GitHub ("${slug}"). Choose a different slug.`, field: 'slug', detail: { field: 'slug' } });
+      }
+      throw jsonError(409, { error: 'post_reload_required', message: 'This post is on GitHub, but this editor didn’t say which version it opened. Nothing was saved; reload to get the latest version.', currentSha: committed.sha });
+    }
+    return baseOf(slug);
   };
 
   // Every post, newest first, with its thumbnail and a link to its editor; new posts that only have an autosave come first.
@@ -556,7 +581,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     if (!('sha' in body)) fail(400, 'sha (the post’s SHA as loaded, or null for a new post) is required.', { field: 'sha' });
     const sha = shaOf(body.sha, false);
     if (sha === null && !h.isVaultAdmin(u)) fail(403, 'Only Vault admins can create blog posts.');
-    const base = await baseOf(slug);
+    const base = await saveBase(slug, sha);
     if (base.sha !== sha) throw jsonError(409, { error: 'conflict', message: SAVE_CONFLICT_MESSAGE, currentSha: base.sha });
     const input = parseInput(editorBody(body), base.input, () => slug, false);
     if (!publish) keepsPublishing(u, base.input, input);
@@ -573,7 +598,7 @@ export function registerBlogAdmin(app: Hono, h: ListingHelpers) {
     const body = await jsonBody(c);
     const sha = shaOf(body.sha, true)!;
     const base = await guarded(() => repo.getPost(slug));
-    if (!base) fail(404, 'No such blog post.');
+    if (!base) throw deletedUpstream();
     if (base.sha !== sha) throw jsonError(409, { error: 'conflict', message: SAVE_CONFLICT_MESSAGE, currentSha: base.sha });
     const input = { ...base.input, published_at: null };
     return c.json(await guarded(() => commit(u, slug, sha, input, 'unpublish')));

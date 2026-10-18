@@ -34,7 +34,7 @@
 //   GET    /portal/blog/slug-check?slug=&current= -> { slug, available } (slug normalized)
 //   GET    /portal/blog/tags?q=             -> { tags } up to 10 existing tags whose name starts with q
 //   GET    /assets/portal-blog-editor.js|.css  the editor's script (an ES module) and styles
-//   GET    /assets/portal-blog-image-editor.js  the image editor (crop, resize, compress, alt text) the editor imports
+//   GET    /assets/portal-blog-image-editor.js  the image editor (crop, zoom, resize, compress, alt text) and drop zone the editor imports
 //   GET    /assets/portal-blog-image-block.js  the image block's shape (normalizeImageBlock), shared with the server
 //   GET    /assets/portal-blog-editor-commands.js  the editor's formatting commands (all its execCommand calls)
 // A draft is a post with no publish date (draft: true in its front matter): the site doesn't publish it.

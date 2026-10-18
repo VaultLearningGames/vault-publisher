@@ -48,3 +48,7 @@ export function settingsBody(s: EditorSettings): {
 export function autosaveInit(): AutosaveState;
 export function autosaveStep(state: AutosaveState, action: AutosaveAction, delay?: number): AutosaveState;
 export function autosaveDue(state: AutosaveState, now: number): boolean;
+export const FEATURED_IMAGE_ASPECT: number;
+export const FEATURED_IMAGE_OUTPUT_MAX_WIDTH: number;
+export const FEATURED_IMAGE_CANT_ADJUST: string;
+export function isFeaturedImageSrc(v: string): boolean;

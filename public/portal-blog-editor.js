@@ -12,7 +12,9 @@
 // post on Save.
 //
 // Image blocks and the featured image take an uploaded image (picker, drag and drop, or paste) through the image
-// editor in portal-blog-image-editor.js: crop, resize, compress, alt text, then stored on the CDN under the post's slug.
+// editor in portal-blog-image-editor.js: crop, zoom, resize, compress, alt text, then stored on the CDN under the post's
+// slug. The featured image is a drop zone (no address to type): a placeholder until there is one, then its preview with
+// Adjust (crop it again), Replace and Remove; it is cropped to FEATURED_IMAGE_ASPECT.
 //
 // Two panes: the body, settings on the right. Each block is a section with a thin outline and a '+' before and after
 // it to add a block there; clicking a section selects it and shows its trash button, which asks before deleting. Clicking into a text block shows its format
@@ -22,11 +24,18 @@
 // This file is an ES module so its pure functions (serialize, deserialize, reorder, slugs, tags, autosave timing) can be tested with node:test;
 // the page itself is set up by the IIFE at the bottom, which only runs in a browser.
 
-import { imageDropTarget, imagesDropTarget, openImageEditor } from './portal-blog-image-editor.js';
+import { fetchImageBlob, imageDropzone, imagesDropTarget, openImageEditor } from './portal-blog-image-editor.js';
 import { LAYOUTS, LAYOUT_LABELS, MAX_DESCRIPTION, MAX_TITLE, newImageId, normalizeImageBlock } from './portal-blog-image-block.js';
 import * as commands from './portal-blog-editor-commands.js';
 
 export const BLOCK_TYPES = ['heading', 'paragraph', 'image', 'divider'];
+// The featured image's shape (width / height) and widest size, as the image editor crops and resizes it.
+export const FEATURED_IMAGE_ASPECT = 16 / 9;
+export const FEATURED_IMAGE_OUTPUT_MAX_WIDTH = 1600;
+export const FEATURED_IMAGE_CANT_ADJUST = 'Adjust is off: this image is on another site that doesn’t allow it to be edited here. Replace it to crop a new one.';
+
+// Whether a featured image value is one the server takes (blog-admin.ts: an https URL or a path starting with /).
+export const isFeaturedImageSrc = (v) => /^https:\/\/[^/?#\s]+\S*$/i.test(v) || (v.startsWith('/') && !v.startsWith('//') && !/\s/.test(v));
 // What the editor calls each block type. The stored type stays 'paragraph' (saved posts, the server and the site use
 // it); a text block holds any number of paragraphs, lists and quotes with inline formatting.
 export const BLOCK_LABELS = { heading: 'Heading', paragraph: 'Text', image: 'Image', divider: 'Divider' };
@@ -293,23 +302,42 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   const slugUrl = h('p', { class: 'muted be-url' });
   const slugMsg = h('p', { class: 'err be-slug-msg', 'aria-live': 'polite' });
 
-  const imgInput = h('input', { type: 'url', id: fieldId('img'), value: settings.featured_image, placeholder: 'https://… or /path',
-    oninput: () => { settings.featured_image = imgInput.value; showImg(); changed(); } });
-  const imgPrev = h('img', { class: 'be-img-prev', alt: '', hidden: true });
-  const imgMsg = h('p', { class: 'err' });
-  const imgField = h('div', { class: 'be-img-drop' }, imgInput);
-  imgField.append(imageDropTarget(imgField, async (file) => {
-    const r = await editImage(file, { title: 'Featured image', withAlt: false });
+  // The featured image: a drop zone, a placeholder until there is one, then its preview with Adjust, Replace and Remove.
+  // A picked, dropped or pasted image goes through the image editor at FEATURED_IMAGE_ASPECT. Adjust crops again from
+  // the file picked this session, else from the image fetched from its URL; when that can't be fetched (another site
+  // that doesn't allow it), Adjust is off and says why.
+  let featuredSource = null; // { url, file }: what the current featured image can be cropped again from
+  let featuredSeq = 0;
+  const imgMsg = h('p', { class: 'err', 'aria-live': 'polite' });
+  const imgZone = imageDropzone({ id: fieldId('img'), aspect: FEATURED_IMAGE_ASPECT,
+    onPick: (file) => cropFeatured(file), onAdjust: adjustFeatured,
+    onRemove: () => { setFeatured(''); changed(); say('Featured image removed.'); } });
+  async function cropFeatured(file) {
+    const r = await editImage(file, { title: 'Featured image', withAlt: false, aspect: FEATURED_IMAGE_ASPECT, maxWidth: FEATURED_IMAGE_OUTPUT_MAX_WIDTH });
     if (!r) return;
-    imgInput.value = settings.featured_image = r.url;
-    showImg(); changed(); say('Featured image uploaded.');
-  }));
-  function showImg() {
-    const v = imgInput.value.trim();
-    const ok = /^https:\/\/[^/?#\s]+\S*$/i.test(v) || (v.startsWith('/') && !v.startsWith('//') && !/\s/.test(v));
-    imgPrev.hidden = !ok;
-    if (ok) imgPrev.src = v;
-    imgMsg.textContent = v && !ok ? 'Use an https address or a path starting with /.' : '';
+    setFeatured(r.url, file); changed(); say('Featured image uploaded.');
+  }
+  async function adjustFeatured() {
+    const url = settings.featured_image;
+    const file = featuredSource && featuredSource.url === url ? featuredSource.file : await fetchImageBlob(url);
+    if (!file) { imgZone.adjustable(false, FEATURED_IMAGE_CANT_ADJUST); return; }
+    featuredSource = { url, file };
+    await cropFeatured(file);
+  }
+  function setFeatured(url, file = null) {
+    const seq = ++featuredSeq;
+    settings.featured_image = url;
+    featuredSource = url && file ? { url, file } : null;
+    const ok = !url || isFeaturedImageSrc(url);
+    imgMsg.textContent = ok ? '' : 'This featured image’s address can’t be used: replace or remove it.';
+    imgZone.show(ok ? url : '');
+    if (!url || !ok || featuredSource) return;
+    // An image from before this session: Adjust needs its bytes, so check now that they can be fetched.
+    imgZone.adjustable(false, 'Checking whether this image can be adjusted…');
+    fetchImageBlob(url).then((blob) => {
+      if (seq !== featuredSeq) return;
+      if (blob) { featuredSource = { url, file: blob }; imgZone.adjustable(true); } else imgZone.adjustable(false, FEATURED_IMAGE_CANT_ADJUST);
+    });
   }
 
   const excerptInput = h('textarea', { id: fieldId('excerpt'), rows: '3', maxlength: '1000', oninput: () => { settings.excerpt = excerptInput.value; changed(); } });
@@ -356,8 +384,8 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     stateField,
     h('h2', null, 'Settings'),
     field('slug', 'URL slug', slugInput, slugUrl, slugMsg),
-    field('img', 'Featured image', imgField, imgPrev, imgMsg,
-      h('p', { class: 'muted' }, 'Drop, paste or upload an image. The public blog uses the title as its alt text.')),
+    field('img', 'Featured image', imgZone.root, imgMsg,
+      h('p', { class: 'muted' }, 'Drop, paste or choose an image; it is cropped to 16:9. The public blog uses the title as its alt text.')),
     field('excerpt', 'Excerpt', excerptInput, h('p', { class: 'muted' }, 'Shown in the catalog and in link previews.')),
     field('author', 'Author', authorInput),
     h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Visibility'),
@@ -1087,7 +1115,7 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
   items.forEach((e) => els.set(e.key, render(e)));
   sync();
   renderTags();
-  showImg();
+  setFeatured(settings.featured_image);
   showState();
   if (post.autosaved_at) status.textContent = `Autosaved changes from ${new Date(post.autosaved_at).toLocaleString()}; Save to put them on the site`;
 })();

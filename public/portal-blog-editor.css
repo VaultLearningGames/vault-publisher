@@ -69,8 +69,6 @@
 .be-settings h2 { margin: 0; font-size: 15px; }
 .be-settings .field input, .be-settings .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); color: var(--ink); font: inherit; width: 100%; box-sizing: border-box; }
 .be-settings .field p { margin: 2px 0 0; font-size: 12px; }
-.be-settings .be-img-prev { max-width: 100%; margin-top: 6px; }
-.be-settings .be-img-prev[hidden] { display: none; }
 .be-url { word-break: break-all; font-family: var(--mono, monospace); }
 .be-state { margin: 0; font-size: 12.5px; }
 .be-state .pill { margin-right: 4px; }
@@ -111,8 +109,19 @@
 .be-gallery.bie-drop .be-dropzone { border-color: var(--ink); background: var(--surface); }
 .be-gallery-msg:empty { display: none; }
 .be-img-up { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.be-img-drop { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.be-img-drop input[type=url] { flex: 1 1 160px; min-width: 0; }
+.bie-zone { --bie-aspect: 16 / 9; }
+.bie-zone-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 100%; aspect-ratio: var(--bie-aspect); padding: 12px; border: 2px dashed var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); font: inherit; text-align: center; cursor: pointer; }
+.bie-zone-empty:hover, .bie-zone.bie-drop .bie-zone-empty { border-color: var(--ink); background: var(--surface); }
+.bie-zone-empty:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.bie-zone-empty .muted { font-size: 12px; }
+.bie-zone-label { font-weight: 600; }
+.bie-zone-empty[hidden], .bie-zone-filled[hidden] { display: none; }
+.bie-zone-frame { aspect-ratio: var(--bie-aspect); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.bie-zone-img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bie-zone-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.bie-zone-why:empty { display: none; }
+.bie-zoom { display: flex; gap: 8px; align-items: flex-end; }
+.bie-zoom .field { flex: 1; }
 .bie-drop { outline: 2px dashed var(--brass, #b08d3c); outline-offset: 4px; border-radius: 8px; }
 .bie { width: min(1100px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 12px; }
 .bie[open] { display: flex; flex-direction: column; }

@@ -129,8 +129,9 @@ function stagingBannerFor(baseUrl: string): Html | '' {
   if (prod === null) return '';
   return html`<div class="env-banner" role="note" aria-label="This is the staging portal">
     <strong><span aria-hidden="true">⚠</span> Staging portal: for previewing features, not for content.</strong>
-    <span>Settings, game data and anything else saved here apply only to staging, and are overwritten whenever the Vault code changes.
-    Make real changes, and preview them, on the production portal${prod ? html`: <a href="${prod}/">${new URL(prod).host}</a>` : ''}.</span></div>`;
+    <span>Staging is for testing layouts and the portal. Content is written on the production portal and flows down to staging
+    (staging's content is replaced from production, and anything saved here is thrown away). Only code is promoted to production.
+    Make real changes${prod ? html` on <a href="${prod}/">${new URL(prod).host}</a>` : ' on the production portal'}.</span></div>`;
 }
 // The deploy bar, under the staging banner on every page while a deploy of this system runs or one is scheduled by a
 // portal action (public/portal.js fills it in and polls DEPLOY_STATUS_PATH). Set by registerPortal: deployStatus is

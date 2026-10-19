@@ -153,12 +153,12 @@ describe('the staging banner', () => {
   const pages = async () => [await (await app.request('/login')).text(), await (await as('vera', 'none', 'viewer').get('/s/fieldday')).text(),
     await (await as('boss', 'admin').get('/vault/listings')).text()];
 
-  test('the staging portal warns, on every page, that what is saved there is overwritten, and links to production', async () => {
+  test('the staging portal warns, on every page, that staging holds no content (production does) and anything saved is thrown away, and links to production', async () => {
     app = createApp({ ...base(), portal: { baseUrl: 'https://portal.vaultlearninggames-staging.org', sessionSecret: SECRET, vaultAdmins: ['boss'] } });
     for (const page of await pages()) {
       assert.match(page, /<body class="staging"><div class="env-banner" role="note" aria-label="This is the staging portal">/);
       assert.match(page, /Staging portal: for previewing features, not for content\./);
-      assert.match(page, /apply only to staging, and are overwritten whenever the Vault code changes/);
+      assert.match(page, /Content is written on the production portal and flows down to staging/);
       assert.match(page, /<a href="https:\/\/portal\.vaultlearninggames\.org\/">portal\.vaultlearninggames\.org<\/a>/);
       assert.doesNotMatch(page.match(/<div class="env-banner"[^]*?<\/div>/)![0], /<button|data-close|dismiss/i, 'it can’t be dismissed');
     }

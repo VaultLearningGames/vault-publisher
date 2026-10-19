@@ -18,8 +18,8 @@ Studios only ever use production. Staging is where Vault tries the next version;
 `VaultLearningGames/vault-publisher-test` publishes to it.
 
 The staging portal says so on every page, signed in or not: a banner at the top that can't be closed, saying that what
-is saved there (settings, game data, listings) applies only to staging and is overwritten whenever the Vault code
-changes, and that real changes are made and previewed on the production portal. The portal decides from its own
+is saved there (settings, game data, listings) is thrown away: staging is for testing layouts and the portal, content is written on the production portal and flows
+down to staging (never up), and only code is promoted. Real changes are made on the production portal. The portal decides from its own
 address: `PORTAL_URL` containing `staging` (the deploy already refuses a staging `PORTAL_URL` without it, and a
 production one with it), so there is nothing to set.
 

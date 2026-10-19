@@ -3,7 +3,7 @@
 {{- define "head" }}{{ partial "blog/head.html" (dict "page" . "feeds" (slice (dict "title" "Vault Learning Games Blog" "path" "/blog/rss.xml"))) }}{{ end }}
 {{- define "main" }}
 {{- $blog := hugo.Data.blog | default dict }}
-<section class="sq-sec theme-white sq-blog is-first"><div class="blog-grid blog-head"><h1>Blog</h1>
+<section class="sq-sec theme-white sq-blog is-first"><div class="blog-grid blog-head"><h1 class="sr-only">Blog</h1>
 {{- partial "blog/filter.html" (dict "active" "") -}}
 </div>{{ partial "blog/grid.html" (where ($blog.posts | default slice) "listed" true) }}</section>
 {{- end }}

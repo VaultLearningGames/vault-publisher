@@ -14,7 +14,8 @@ The portal publishes web game builds to Vault Learning Games:
 
 Studios manage games, members and release requests at **https://portal.vaultlearninggames.org**. The staging portal
 (`portal.vaultlearninggames-staging.org`) is for testing layouts and the portal, never content: a banner on every page says that
-content is written on production and flows down to staging, anything saved there is thrown away, and only code is promoted ([docs/setup.md](docs/setup.md)).
+content is written on production and flows down to staging, anything saved there is thrown away, and only code is promoted. Its database is replaced with a copy of
+production's every day and on demand (`gh workflow run reseed-staging.yml`; [docs/setup.md](docs/setup.md#re-seeding-stagings-database)).
 
 ## Site checks dashboard
 

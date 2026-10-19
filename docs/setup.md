@@ -14,7 +14,7 @@ from. The old `site/` folder here is retired and ignored (a board card removes i
 | Portal and deployer (this repo) | `portal.vaultlearninggames.org` → `vault-publisher` | `portal.vaultlearninggames-staging.org` → `vault-publisher-staging` |
 | Studios' test builds | `builds.vaultlearninggames.org` → R2 `builds-vaultlearninggames` | `builds.vaultlearninggames-staging.org` → `builds-vaultlearninggames-staging` |
 | Releases | `cdn.vaultlearninggames.org` → R2 `cdn-vaultlearninggames` | `cdn.vaultlearninggames-staging.org` → `cdn-vaultlearninggames-staging` |
-| Database (Litestream) | GCS `PROJECT-vault-publisher-db` | GCS `PROJECT-vault-publisher-staging-db`, a disposable copy seeded from production's (a scheduled re-seed is planned) |
+| Database (Litestream) | GCS `PROJECT-vault-publisher-db` | GCS `PROJECT-vault-publisher-staging-db`, a disposable copy of production's, replaced from it daily and on demand ([Re-seeding staging's database](#re-seeding-stagings-database)) |
 | Deployed from | the `production` branch | `main` |
 
 Studios only ever use production. Staging is throwaway: it is for testing the portal's code, the site's layouts and the
@@ -113,7 +113,7 @@ gcloud iam service-accounts create vault-publisher-staging --display-name "vault
 gcloud storage buckets create gs://$PROJECT-vault-publisher-staging-db --location=$REGION --uniform-bucket-level-access
 gcloud storage buckets update gs://$PROJECT-vault-publisher-staging-db --versioning
 gcloud storage buckets add-iam-policy-binding gs://$PROJECT-vault-publisher-staging-db --member=serviceAccount:$SA --role=roles/storage.objectAdmin
-# Read-only on production's database, only to seed staging's first start (docker-entrypoint.sh).
+# Read-only on production's database, only to seed staging from it (docker-entrypoint.sh: the first start and every re-seed).
 gcloud storage buckets add-iam-policy-binding gs://$PROJECT-vault-publisher-db --member=serviceAccount:$SA --role=roles/storage.objectViewer
 
 newsecret vault-publisher-staging-r2-builds-access-key-id        # builds-vaultlearninggames-staging token
@@ -232,7 +232,8 @@ rclone copy r2:cdn-vaultlearninggames-staging r2:builds-vaultlearninggames --pro
 5. Add `https://builds.vaultlearninggames.org` to the CORS allowlists of game servers that test builds call (Aqualab's
    save server, OpenGameData logging if it checks origins).
 
-Then deploy staging: push to `main`. On its first start it seeds its database from production's.
+Then deploy staging: push to `main`. On its first start it seeds its database from production's, and from then on
+[Re-seed staging's database](#re-seeding-stagings-database) replaces it with production's every day.
 
 ## 6. Custom domains
 
@@ -736,6 +737,55 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
 - Aqualab's save server accepts requests from the new origin (CORS);
 - deleting the branch removes the preview.
 
+## Re-seeding staging's database
+
+Staging's data is always a copy of production's: content is made on production and flows to staging, and whatever
+was saved on staging (test games, settings, listings) is discarded. The workflow *Re-seed staging's database*
+(`.github/workflows/reseed-staging.yml`) does it every day at 09:17 UTC, and on demand:
+
+```bash
+gh workflow run reseed-staging.yml -R VaultLearningGames/vault-publisher
+```
+
+How it works, with no new permission or secret:
+
+1. The workflow, in the `staging` environment, refuses to run unless `SERVICE` is `vault-publisher-staging`,
+   `LITESTREAM_BUCKET` and `PORTAL_URL` are staging's and `LITESTREAM_SEED_BUCKET` isn't. As the deploy account
+   (which already deploys staging) it sets one variable on staging's Cloud Run service,
+   `LITESTREAM_RESEED=<run id>-<attempt>`: a new revision of the same image. It shares the staging deploy's
+   concurrency group, so it never runs during a deploy.
+2. The new revision's `docker-entrypoint.sh` sees an id its database doesn't have, deletes the local copy of staging's
+   database, restores production's (`gcs://$LITESTREAM_SEED_BUCKET/publisher.db`) in its place and records the id in
+   the copy (table `staging_reseed`, `src/staging-reseed.ts`). Litestream then replicates the copy to staging's bucket
+   as a new generation, which is what later restores pick. Production's bucket is only read: staging's service
+   account has `roles/storage.objectViewer` on it (2.2) and nothing more, and the restore writes only the local file.
+3. Restarts of that revision restore staging's replica, find the id and keep what testers did since. A replica
+   without it (an older generation written by the outgoing instance) is re-seeded again. The next deploy drops the
+   variable (it overwrites the service's variables), so nothing is re-seeded until the next run.
+4. If production's replica can't be read, the new revision fails to start and the running one keeps serving; the
+   workflow fails. It then checks `PORTAL_URL/health`.
+
+The entrypoint also refuses a re-seed when `LITESTREAM_BUCKET` isn't staging's, so the variable set on production by
+mistake stops the start instead of touching anything.
+
+**Checking a re-seed.** Before, add something to staging only (a studio or a game's listing), and note a row that
+exists only on production (production's newest `audit_log` row, newer than staging's last re-seed). Note production's
+replica: `gcloud storage ls -l -r gs://$PROJECT-vault-publisher-db/publisher.db > /tmp/prod-before.txt`. Run the
+workflow, then:
+
+```bash
+litestream restore -o /tmp/staging.db gcs://$PROJECT-vault-publisher-staging-db/publisher.db
+sqlite3 /tmp/staging.db 'select * from staging_reseed'                      # this run's id
+sqlite3 /tmp/staging.db "select slug from studios where slug = 'THE-STAGING-ONLY-ONE'"   # nothing
+sqlite3 /tmp/staging.db 'select id, action from audit_log order by id desc limit 1'    # production's newest row
+gcloud storage ls -l -r gs://$PROJECT-vault-publisher-db/publisher.db > /tmp/prod-after.txt
+diff /tmp/prod-before.txt /tmp/prod-after.txt   # production changes only with its own writes, never a staging_reseed
+```
+
+(Production may have written new WAL segments of its own in between; what matters is that nothing was deleted and its
+database has no `staging_reseed` table: `litestream restore -o /tmp/prod.db gcs://$PROJECT-vault-publisher-db/publisher.db`
+then `sqlite3 /tmp/prod.db "select name from sqlite_master where name = 'staging_reseed'"` prints nothing.)
+
 ## Operating notes
 
 - **The CDN's player-only rule is a Cloudflare dashboard rule, not code:** see
@@ -752,9 +802,9 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
 
 - **Restore test:** `litestream restore -o /tmp/check.db gcs://PROJECT-vault-publisher-db/publisher.db`, then
   `sqlite3 /tmp/check.db 'select * from audit_log order by id desc limit 5'`.
-- **Refresh staging's data from production:** delete staging's replica
-  (`gcloud storage rm -r gs://PROJECT-vault-publisher-staging-db/publisher.db`) and redeploy staging. Staging's copies of
-  production previews and releases are records only; their files aren't in staging's buckets.
+- **Refresh staging's data from production:** run *Re-seed staging's database*
+  (`gh workflow run reseed-staging.yml`); see [Re-seeding staging's database](#re-seeding-stagings-database).
+  Staging's copies of production previews and releases are records only; their files aren't in staging's buckets.
 - **Deploys** briefly run the old and new instance together. Writes are rare (one per push), but avoid
   deploying while a large batch of game builds is publishing.
 - **The portal's "Need support?" link** (the sidebar's foot and the sign-in page) invites people to the Slack workspace

@@ -1,0 +1,70 @@
+name: Re-seed staging's database
+
+# Replaces the staging portal's database with a copy of production's, daily and on demand: staging is for testing
+# code, layouts and the process, never content, so what is saved there is discarded and content flows production →
+# staging only (docs/setup.md "Re-seeding staging's database").
+#
+#   gh workflow run reseed-staging.yml -R VaultLearningGames/vault-publisher
+#
+# It changes nothing but one variable on staging's Cloud Run service, LITESTREAM_RESEED (this run's id), which starts a
+# new revision of the same image. docker-entrypoint.sh, seeing a new id, restores production's Litestream replica
+# (staging's service account only has read access to that bucket) in place of staging's own, and replicates the copy to
+# staging's bucket. The next deploy drops the variable, and with it nothing is re-seeded until the next run.
+on:
+  schedule:
+  - cron: '17 9 * * *'   # daily, 09:17 UTC (early morning in Wisconsin)
+  workflow_dispatch:
+
+# Shares the staging deploy's group (deploy.yml), so a re-seed never runs alongside a deploy of staging.
+concurrency:
+  group: Deploy (portal)-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  reseed:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+    # Only ever staging, and only ever from production's bucket into staging's.
+    - name: Check the variables are staging's
+      env:
+        SERVICE: ${{ vars.SERVICE }}
+        LITESTREAM_BUCKET: ${{ vars.LITESTREAM_BUCKET }}
+        LITESTREAM_SEED_BUCKET: ${{ vars.LITESTREAM_SEED_BUCKET }}
+        PORTAL_URL: ${{ vars.PORTAL_URL }}
+      run: |
+        set -eu
+        [ "$SERVICE" = vault-publisher-staging ] || { echo "::error::SERVICE is '$SERVICE', not vault-publisher-staging"; exit 1; }
+        case "$LITESTREAM_BUCKET" in *staging*) ;; *) echo "::error::LITESTREAM_BUCKET '$LITESTREAM_BUCKET' isn't staging's"; exit 1 ;; esac
+        case "$LITESTREAM_SEED_BUCKET" in ""|*staging*) echo "::error::LITESTREAM_SEED_BUCKET '$LITESTREAM_SEED_BUCKET' isn't production's"; exit 1 ;; esac
+        case "$PORTAL_URL" in *staging*) ;; *) echo "::error::PORTAL_URL '$PORTAL_URL' isn't staging's"; exit 1 ;; esac
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+        service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+    - uses: google-github-actions/setup-gcloud@v3
+
+    # Same image, same everything else: a new revision whose start re-seeds. gcloud waits until it serves; if it can't
+    # start (for example production's replica can't be read), the running revision keeps serving and this fails.
+    - name: Start a revision that re-seeds
+      env:
+        SERVICE: ${{ vars.SERVICE }}
+        REGION: ${{ vars.GCP_REGION }}
+        PROJECT: ${{ vars.GCP_PROJECT_ID }}
+        RESEED: ${{ github.run_id }}-${{ github.run_attempt }}
+      run: |
+        set -eu
+        gcloud run services update "$SERVICE" --region "$REGION" --project "$PROJECT" --update-env-vars "LITESTREAM_RESEED=$RESEED"
+        echo "Re-seeded $SERVICE from production as $RESEED" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Check the portal answers
+      env:
+        PORTAL_URL: ${{ vars.PORTAL_URL }}
+      run: curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$PORTAL_URL/health"

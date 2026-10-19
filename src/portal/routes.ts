@@ -332,10 +332,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       <div class="login login-card vault-login-card">
       <div class="brand big">${logo()}</div>
       <h1>Studio Portal</h1>
-      <p>Publish your games to classrooms. Your studio controls testing on staging; Vault reviews every release.</p>
       ${configured
-        ? html`<a class="btn pri big" href="/auth/github?next=${encodeURIComponent(next)}">Sign in with GitHub</a>
-               <p class="small muted">We only read your GitHub name and picture.</p>`
+        ? html`<a class="btn pri big" href="/auth/github?next=${encodeURIComponent(next)}">Sign in with GitHub</a>`
         : html`<p class="fix">Sign-in isn’t set up yet: the GitHub OAuth app and session secret are missing.</p>`}
       ${c.req.query('error') ? html`<p class="err">${c.req.query('error')}</p>` : ''}
       ${supportUrl ? html`<p class="small muted">Need support? ${supportLink('Join our Slack')} and ask in the <b>${SUPPORT_CHANNEL}</b> channel.</p>` : ''}

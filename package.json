@@ -16,7 +16,8 @@
     "site:build": "npm run site:catalog && hugo --source site --buildDrafts --cleanDestinationDir && node site/scripts/squarespace-paths.mjs && node scripts/site-hosting.ts site/public",
     "site:dev": "npm run site:catalog; hugo server --source site --buildDrafts --port 1313",
     "site:check": "cloudflare/site/check.sh",
-    "site:audit": "node scripts/check-site.ts"
+    "site:audit": "node scripts/check-site.ts",
+    "import:medium": "node scripts/import-medium-fielddaylab.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1139.0",

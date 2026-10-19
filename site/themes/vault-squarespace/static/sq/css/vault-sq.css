@@ -509,6 +509,8 @@ html.js .blog-gallery--slideshow .blog-gallery-item:not(.is-current) { display: 
   .blog-more { padding-top: 20px; }
 }
 @media (min-width: 1024px) { .blog-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* /blog and its tag pages (partials/blog/grid.html) stay at three posts to a row: four was too many there. */
+@media (min-width: 1024px) { .blog-grid--posts { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 /* ---------- Submit a Game form ---------- */
 .fb-form { justify-content: flex-start !important; }

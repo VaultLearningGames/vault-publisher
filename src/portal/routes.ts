@@ -326,9 +326,10 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     // The games artwork from https://vaultlearninggames.org/sq/img/site/games-ca9fcd_hu_3db183ebbf20ed04.webp (vendored as
     // public/login-games.webp), drawn twice so the column scrolls without a seam; decorative, so hidden from assistive tech.
     const games = html`<img src="/assets/login-games.webp?v=${assetVersion}" alt="" aria-hidden="true" class="login-games" width="1000" height="2000" decoding="async">`;
-    const body = html`<div class="login-page">
+    // Centred in whatever viewport space is left under the banners (CSS only, so it recentres on resize/rotation).
+    const body = html`<div class="vault-login-page"><div class="login-page">
       <div class="login-art" aria-hidden="true"><div class="login-games-track">${games}${games}</div></div>
-      <div class="login login-card">
+      <div class="login login-card vault-login-card">
       <div class="brand big">${logo()}</div>
       <h1>Studio Portal</h1>
       <p>Publish your games to classrooms. Your studio controls testing on staging; Vault reviews every release.</p>
@@ -339,7 +340,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       ${c.req.query('error') ? html`<p class="err">${c.req.query('error')}</p>` : ''}
       ${supportUrl ? html`<p class="small muted">Need support? ${supportLink('Join our Slack')} and ask in the <b>${SUPPORT_CHANNEL}</b> channel.</p>` : ''}
       </div>
-    </div>`;
+    </div></div>`;
     return c.html(layout('Sign in', null, body));
   });
 

@@ -358,4 +358,120 @@
       newer.href = prev <= 0 ? location.pathname : location.pathname + '?offset=' + items[prev - 1].dataset.offset;
     }
   });
+
+  /* A post's share bar (partials/blog/share.html). Instagram has no web share address, so its button opens the
+     browser's share sheet, or else copies the post's address for pasting into Instagram. "Copy link" copies the
+     address; the share-sheet button shows only where the browser has one. */
+  $$('.blog-share [data-share="instagram"], .blog-share [data-share="copy"], .blog-share [data-share="native"]').forEach(function (btn) {
+    var status = $('.blog-share-status', btn.closest('.blog-share'));
+    var url = btn.dataset.shareUrl, title = btn.dataset.shareTitle, action = btn.dataset.share;
+    var where = action === 'instagram' ? ' into Instagram' : '';
+    function say(msg) { if (status) status.textContent = msg; }
+    function copy() {
+      var fail = function () { say('Copy this link to share it' + (where ? ' on Instagram' : '') + ': ' + url); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(function () { say('Link copied' + (where ? ': paste it' + where : '') + '.'); }, fail);
+      } else fail();
+    }
+    if (action === 'native') {
+      if (!navigator.share) return;
+      btn.hidden = false;
+    }
+    btn.addEventListener('click', function () {
+      say('');
+      if (action !== 'copy' && navigator.share) {
+        navigator.share({ title: title, url: url }).catch(function (e) { if (!e || e.name !== 'AbortError') copy(); });
+      } else copy();
+    });
+  });
+  /* A post's image collections. The shortcode (shortcodes/image.html) writes each image as its own figure with
+     data-gallery (one value per collection) and data-layout: gather each run of them into one .blog-gallery. Then the
+     carousel gets Previous/Next buttons and the slideshow shows one image at a time, with Previous/Next, a count and
+     thumbnails; both take the arrow keys when focused. Without this script every image shows, one under the other. */
+  var loose = $$('.blog-gallery-item[data-gallery]').filter(function (f) { return !f.closest('.blog-gallery'); });
+  var group = null;
+  loose.forEach(function (fig) {
+    /* A shortcode alone in a paragraph may come wrapped in <p> (or, as the browser parses <p><figure>, between empty
+       ones): the wrapper is what sits among the post's blocks, and empty paragraphs between figures are dropped. */
+    var outer = fig.parentNode && fig.parentNode.tagName === 'P' && fig.parentNode.children.length === 1 ? fig.parentNode : fig;
+    var empty = function (el) { return el && el.tagName === 'P' && !el.children.length && !el.textContent.trim(); };
+    var prev = outer.previousElementSibling;
+    while (empty(prev)) { var gone = prev; prev = prev.previousElementSibling; gone.remove(); }
+    while (empty(outer.nextElementSibling)) outer.nextElementSibling.remove();
+    if (!group || group.key !== fig.dataset.gallery || prev !== group.last) {
+      var g = doc.createElement('div');
+      var layout = /^(stacked|grid|carousel|slideshow)$/.test(fig.dataset.layout) ? fig.dataset.layout : 'stacked';
+      g.className = 'blog-gallery blog-gallery--' + layout + (fig.dataset.align ? ' align-' + fig.dataset.align : '');
+      g.dataset.layout = layout;
+      outer.parentNode.insertBefore(g, outer);
+      group = { key: fig.dataset.gallery, el: g, last: g };
+    }
+    group.el.appendChild(fig);
+    if (outer !== fig) outer.remove();
+  });
+  function btn(cls, label, text) {
+    var b = doc.createElement('button');
+    b.type = 'button'; b.className = 'blog-gallery-btn ' + cls; b.setAttribute('aria-label', label); b.textContent = text;
+    return b;
+  }
+  $$('.blog-gallery--carousel, .blog-gallery--slideshow').forEach(function (g) {
+    var items = $$('.blog-gallery-item', g);
+    if (items.length < 2) return;
+    var slideshow = g.dataset.layout === 'slideshow';
+    g.setAttribute('role', 'region');
+    g.setAttribute('aria-roledescription', slideshow ? 'slideshow' : 'carousel');
+    g.setAttribute('aria-label', slideshow ? 'Slideshow' : 'Carousel');
+    g.tabIndex = 0;
+    items.forEach(function (it, i) { it.setAttribute('aria-label', (i + 1) + ' of ' + items.length); it.setAttribute('aria-roledescription', 'slide'); });
+    var prevB = btn('blog-gallery-prev', 'Previous image', '\u2039'), nextB = btn('blog-gallery-next', 'Next image', '\u203a');
+    var count = doc.createElement('span');
+    count.className = 'blog-gallery-count'; count.setAttribute('aria-live', 'polite');
+    var nav = doc.createElement('div');
+    nav.className = 'blog-gallery-nav';
+    nav.appendChild(prevB); nav.appendChild(count); nav.appendChild(nextB);
+    var cur = 0, track = null, thumbs = [];
+    if (slideshow) {
+      var strip = doc.createElement('div');
+      strip.className = 'blog-gallery-thumbs';
+      items.forEach(function (it, i) {
+        var t = doc.createElement('button'), img = $('img', it), ti = doc.createElement('img');
+        t.type = 'button'; t.className = 'blog-gallery-thumb'; t.setAttribute('aria-label', 'Show image ' + (i + 1));
+        ti.src = img ? img.currentSrc || img.src : ''; ti.alt = ''; ti.loading = 'lazy';
+        t.appendChild(ti);
+        t.addEventListener('click', function () { show(i); });
+        strip.appendChild(t);
+        thumbs.push(t);
+      });
+      g.appendChild(nav); g.appendChild(strip);
+    } else {
+      track = doc.createElement('div');
+      track.className = 'blog-gallery-track';
+      items.forEach(function (it) { track.appendChild(it); });
+      g.appendChild(track); g.appendChild(nav);
+      track.addEventListener('scroll', function () {
+        var left = track.scrollLeft, best = 0;
+        items.forEach(function (it, i) { if (Math.abs(it.offsetLeft - track.offsetLeft - left) < Math.abs(items[best].offsetLeft - track.offsetLeft - left)) best = i; });
+        if (best !== cur) { cur = best; state(); }
+      }, { passive: true });
+    }
+    function state() {
+      prevB.disabled = cur === 0; nextB.disabled = cur === items.length - 1;
+      count.textContent = (cur + 1) + ' / ' + items.length;
+      items.forEach(function (it, i) { it.classList.toggle('is-current', i === cur); });
+      thumbs.forEach(function (t, i) { t.setAttribute('aria-current', i === cur ? 'true' : 'false'); });
+    }
+    function show(i) {
+      cur = Math.max(0, Math.min(items.length - 1, i));
+      if (track) track.scrollTo({ left: items[cur].offsetLeft - track.offsetLeft });
+      state();
+    }
+    prevB.addEventListener('click', function () { show(cur - 1); });
+    nextB.addEventListener('click', function () { show(cur + 1); });
+    g.addEventListener('keydown', function (e) {
+      if (e.target.closest('a, input, textarea')) return;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); show(cur - 1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); show(cur + 1); }
+    });
+    state();
+  });
 })();

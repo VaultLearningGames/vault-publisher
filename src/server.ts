@@ -1,6 +1,5 @@
 import { serve } from '@hono/node-server';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { createApp } from './app.ts';
 import { createVerifier } from './auth.ts';
 import { loadConfig } from './config.ts';
@@ -12,6 +11,7 @@ import { syncStudiosFile } from './studios-file.ts';
 import { Analytics } from './analytics/ga.ts';
 import { buildCatalog } from './catalog.ts';
 import { clearPreviewTemp, hugoRunner, SitePreviewer } from './portal/site-preview.ts';
+import { resolveSiteDir } from './site-dir.ts';
 
 const config = loadConfig();
 const db = new Db(config.dbPath);
@@ -35,18 +35,20 @@ const production =
       })
     : null;
 
-// Listing previews are rendered here, with the website's templates: Hugo on the site source in the image.
-const sitePreview = existsSync(join(config.siteDir, 'hugo.toml'))
+// Listing and blog previews are rendered here, with the website's templates: Hugo on the vault-site source (the pinned
+// copy in the image, the enclosing vault-site checkout in development, or SITE_DIR: site-dir.ts).
+let siteDir: string | null = null;
+try { siteDir = resolveSiteDir(); } catch (err) { console.error(`previews: ${(err as Error).message}; /_preview/ answers 503`); }
+const sitePreview = siteDir
   ? new SitePreviewer({
-      siteDir: config.siteDir,
+      siteDir,
       siteUrl: config.siteUrl,
       portalUrl: config.portalUrl,
       hugo: hugoRunner(config.hugoBin),
       catalog: () => buildCatalog(db, config.prodPublicUrl),
     })
   : null;
-if (sitePreview) void clearPreviewTemp();
-else console.error(`listing previews: no site source at ${config.siteDir}; /_preview/ answers 503`);
+if (sitePreview) { console.log(`previews: site source at ${siteDir}`); void clearPreviewTemp(); }
 
 const app = createApp({
   db,
@@ -69,6 +71,14 @@ const app = createApp({
     baseUrl: config.portalUrl,
     vaultAdmins: config.vaultAdmins,
     supportUrl: config.supportUrl,
+    stagingSyncUtcHour: config.stagingSyncUtcHour,
+    deployStatus: {
+      token: config.deployStatusGithubToken,
+      environment: config.deployEnvironment,
+      stagingBranch: config.deployStatusStagingBranch,
+      productionBranch: config.deployStatusProductionBranch,
+      siteBranch: process.env.VAULT_SITE_BRANCH?.trim() || undefined,
+    },
   },
   previewRetentionDays: config.previewRetentionDays,
   siteUrl: config.siteUrl,

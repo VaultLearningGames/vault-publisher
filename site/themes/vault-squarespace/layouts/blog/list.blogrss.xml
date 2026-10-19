@@ -1,0 +1,2 @@
+{{- /* /blog/rss.xml: the newest listed posts (partials/blog/feed.html). */ -}}
+{{- partial "blog/feed.html" (dict "posts" (where ((hugo.Data.blog | default dict).posts | default slice) "listed" true)) -}}

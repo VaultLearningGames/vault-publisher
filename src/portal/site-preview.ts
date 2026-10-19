@@ -1,5 +1,7 @@
 // Rendering a listing preview as the website would show it: Hugo, run in this process's container against the site
-// source (site/, carried in the image), with the published catalog and the previewed game put in its place.
+// source (the vault-site repository: the pinned copy in the image, or the checkout the portal is a submodule of; see
+// site-dir.ts), with the published catalog and the previewed game put in its place. Builds run in a temporary copy;
+// the site source itself is never written to.
 //
 // The page is then served from the portal (listing-preview.ts: GET /_preview/TOKEN/ and /v1/listing-previews/TOKEN),
 // not from the site, so:
@@ -11,15 +13,17 @@
 // At most MAX_BUILDS Hugo runs at a time (others wait), each killed after HUGO_TIMEOUT_MS; a rendered page is kept
 // per token for CACHE_MS (the portal issues a new token for every Preview click).
 import { spawn } from 'node:child_process';
-import { cp, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, relative, resolve, sep } from 'node:path';
+import { resolveSiteDir } from '../site-dir.ts';
 
 export const HUGO_TIMEOUT_MS = 25_000;
 export const CACHE_MS = 3 * 60_000;
 export const MAX_BUILDS = 2;
 export const TOKEN_RE = /^[A-Za-z0-9_-]{16,128}$/;
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const BLOG_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const TMP_PREFIX = 'vault-preview-';
 
 // No allow-same-origin: the page runs in an opaque origin, apart from the portal's (see the note above).
@@ -60,6 +64,11 @@ export interface CatalogLike {
 export interface PreviewInput {
   game: { slug: string };
   studios?: { slug: string }[] | null;
+}
+// A blog post to preview: its slug and its whole index.md.
+export interface BlogPreviewInput {
+  slug: string;
+  markdown: string;
 }
 export interface RenderedPage {
   status: 200 | 500;
@@ -120,8 +129,9 @@ export function mergeCatalog(catalog: CatalogLike, input: PreviewInput): Catalog
 }
 
 export interface SitePreviewOptions {
-  // The site source: hugo.toml, content/, data/, layouts/, themes/ and preview/hugo.preview.toml.
-  siteDir: string;
+  // The site source: hugo.toml, content/, data/, layouts/, themes/ and preview/hugo.preview.toml. Default:
+  // resolveSiteDir() (site-dir.ts).
+  siteDir?: string;
   // The public site (https://vaultlearninggames.org): Hugo's baseURL, and where the page's assets load from.
   siteUrl: string;
   // This portal: the site's forms post to it, as in the site build.
@@ -147,7 +157,7 @@ export class SitePreviewer {
       hugo: hugoRunner(), timeoutMs: HUGO_TIMEOUT_MS, maxBuilds: MAX_BUILDS, cacheMs: CACHE_MS, now: () => Date.now(),
       log: (line) => console.log(`preview: ${line}`),
       ...options,
-      siteDir: resolve(options.siteDir),
+      siteDir: resolve(options.siteDir ?? resolveSiteDir()),
       siteUrl: options.siteUrl.replace(/\/+$/, ''),
       portalUrl: options.portalUrl.replace(/\/+$/, ''),
     };
@@ -193,6 +203,40 @@ export class SitePreviewer {
   }
 
   private async render(input: PreviewInput): Promise<string> {
+    return this.hugoPage(input.game.slug, async (src) => {
+      await writeFile(join(src, 'data', 'catalog.json'), JSON.stringify(mergeCatalog(this.o.catalog(), input)));
+    }, async (out) => {
+      // preview-map.json (layouts/home.previewmap.json, only in preview builds): each catalog slug's page address.
+      const map = JSON.parse(await readFile(join(out, 'preview-map.json'), 'utf8')) as { games?: { slug: string; path: string }[] };
+      const entry = (map.games ?? []).find((g) => g.slug === input.game.slug);
+      if (!entry) throw new Error(`no page for ${input.game.slug} in preview-map.json`);
+      return entry.path;
+    }, { config: `hugo.toml,${join('preview', 'hugo.preview.toml')}` });
+  }
+
+  // A blog post as the site renders it: the post's file (front matter and Markdown, as it would be committed) put at
+  // content/blog/<slug>/index.md in a copy of the site source, built with Hugo, and its page /blog/<slug>/ returned.
+  // Not cached: every Preview click sends the editor's current text. Rejects when the build fails.
+  async blogPage(input: BlogPreviewInput): Promise<string> {
+    if (!BLOG_SLUG_RE.test(input.slug)) throw new Error(`unexpected blog slug ${JSON.stringify(input.slug)}`);
+    const previewConfig = join('preview', 'hugo.preview.toml');
+    const config = await readFile(join(this.o.siteDir, previewConfig)).then(() => `hugo.toml,${previewConfig}`, () => 'hugo.toml');
+    return this.limited(() => this.hugoPage(input.slug, async (src) => {
+      const dir = join(src, 'content', 'blog', input.slug);
+      await rm(dir, { recursive: true, force: true });
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'index.md'), input.markdown);
+    }, async () => `/blog/${input.slug}/`, {
+      // A scheduled post's page too. The site's preview settings are used when it has them.
+      extraArgs: ['--buildFuture'],
+      config,
+    }));
+  }
+
+  // One Hugo build in a temporary copy of the site: `prepare` puts the previewed content in place, `pathOf` names the
+  // page to return (an address in the output, like /blog/x/).
+  private async hugoPage(label: string, prepare: (src: string) => Promise<void>, pathOf: (out: string) => Promise<string>,
+    o: { config: string; extraArgs?: string[] }): Promise<string> {
     const t0 = this.o.now();
     const { siteDir, siteUrl, portalUrl } = this.o;
     const dir = await mkdtemp(join(tmpdir(), TMP_PREFIX));
@@ -202,7 +246,7 @@ export class SitePreviewer {
       // The templates, content and data; of the static files only the stylesheets and scripts (templates read them
       // for their "?v=" hashes). Images and downloads are served by the site, not by a preview.
       await cp(siteDir, src, { recursive: true, filter: (from) => copied(siteDir, from) });
-      await writeFile(join(src, 'data', 'catalog.json'), JSON.stringify(mergeCatalog(this.o.catalog(), input)));
+      await prepare(src);
 
       // Same as the site build (deploy.yml): the site's URL, and the forms posting to this portal. Hugo gets only
       // this environment, none of the portal's own.
@@ -214,16 +258,13 @@ export class SitePreviewer {
         HUGOxPARAMSxFORMSxSUBMIT_GAME: `${portalUrl}/v1/forms/submit-game`,
       };
       await this.o.hugo(['--buildDrafts', '--logLevel', 'warn', '--noBuildLock', '--source', src, '--destination', out,
-        '--cacheDir', join(dir, 'cache'), '--config', `hugo.toml,${join('preview', 'hugo.preview.toml')}`], env, this.o.timeoutMs);
+        '--cacheDir', join(dir, 'cache'), '--config', o.config, ...(o.extraArgs ?? [])], env, this.o.timeoutMs);
 
-      // preview-map.json (layouts/home.previewmap.json, only in preview builds): each catalog slug's page address.
-      const map = JSON.parse(await readFile(join(out, 'preview-map.json'), 'utf8')) as { games?: { slug: string; path: string }[] };
-      const entry = (map.games ?? []).find((g) => g.slug === input.game.slug);
-      if (!entry) throw new Error(`no page for ${input.game.slug} in preview-map.json`);
-      const file = resolve(out, '.' + decodeURIComponent(entry.path), entry.path.endsWith('.html') ? '' : 'index.html');
-      if (!file.startsWith(out + sep)) throw new Error(`page path ${entry.path} is outside the output`);
+      const path = await pathOf(out);
+      const file = resolve(out, '.' + decodeURIComponent(path), path.endsWith('.html') ? '' : 'index.html');
+      if (!file.startsWith(out + sep)) throw new Error(`page path ${path} is outside the output`);
       const html = await readFile(file, 'utf8');
-      this.o.log(`built ${input.game.slug} (${entry.path}) in ${this.o.now() - t0} ms; ${this.running} running, ${this.waiting.length} waiting`);
+      this.o.log(`built ${label} (${path}) in ${this.o.now() - t0} ms; ${this.running} running, ${this.waiting.length} waiting`);
       return withBadge(absolutize(html, siteUrl));
     } finally {
       await rm(dir, { recursive: true, force: true }).catch((err) => this.o.log(`couldn't remove ${dir}: ${err.message}`));

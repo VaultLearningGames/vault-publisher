@@ -60,7 +60,7 @@ describe('the Upload builds page', () => {
   test('viewers can read it but get no upload or monitor forms', async () => {
     const page = await (await h.as('vera', 'none', 'viewer').get('/s/fieldday/register')).text();
     assert.doesNotMatch(page, /id="zip-form"|data-api="\/portal\/api\/s\/fieldday\/monitors"/);
-    assert.match(page, /Only studio maintainers and studio admins can do this/);
+    assert.match(page, /Only studio members with the Edit permission can do this/);
     assert.equal((await h.as('sam').get('/s/fieldday/register')).status, 404);
   });
   test('its script and styles are served', async () => {
@@ -349,9 +349,9 @@ describe('the url_monitors migration is v15 (and site_checks v16 after it)', () 
   const version = (db: Db) => (db.sqlite.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
   const tables = (db: Db) => (db.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
 
-  test('a new database ends at v16 with both tables', () => {
+  test('a new database ends at the latest version with both tables', () => {
     const db = new Db(':memory:');
-    assert.equal(version(db), 16);
+    assert.equal(version(db), 18);
     assert.ok(tables(db).includes('studio_repositories') && tables(db).includes('url_monitors'));
   });
 
@@ -368,7 +368,7 @@ describe('the url_monitors migration is v15 (and site_checks v16 after it)', () 
       main.sqlite.close();
       for (let boot = 0; boot < 2; boot++) { // the upgrade, then an ordinary restart
         const db = new Db(path);
-        assert.equal(version(db), 16);
+        assert.equal(version(db), 18);
         assert.equal(db.studioByRepositoryId('555')!.slug, 'ucalgary');
         const m = saveMonitor(db, { game_id: game.id, url: 'https://games.example.org/quest/', files_from: 'crawl', list_url: null, by: 'user:boss' });
         assert.equal(monitorsForStudio(db, studio.id)[0].id, m.id);

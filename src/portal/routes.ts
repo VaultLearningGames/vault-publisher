@@ -1,6 +1,6 @@
 // The Vault Studio Portal: a server-rendered web UI on the same service and database as the publisher.
-// Sign-in is GitHub OAuth (profile only). Studios control staging; only Vault release managers release,
-// promote and roll back. Studio maintainers can request a release.
+// Sign-in is GitHub OAuth (profile only). Studios control staging; only Vault staff who edit game/studio content
+// release, promote and roll back. Studio members who can request publish request a release (permissions.ts).
 import type { Context, Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { createHash } from 'node:crypto';
@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import type { AppDeps } from '../app.ts';
 import { fail, jsonBody } from '../app.ts';
 import { DEFAULT_SUPPORT_URL, SUPPORT_CHANNEL } from '../config.ts';
-import { studioWebsite, type Build, type Game, type Membership, type Release, type StudioRole, type Studio, type User, type VaultRole } from '../db.ts';
+import { studioWebsite, type Build, type Game, type Membership, type Release, type Studio, type User } from '../db.ts';
+import { hasStudioPermission, hasVaultPermission, isVaultStaff, STUDIO_PERMISSION_LABEL, VAULT_PERMISSIONS, type PermissionHolder, type StudioPermission, type VaultPermission } from '../permissions.ts';
 import { headersFor, isSafeFilePath, isVersionName, sanitizeRefName } from '../paths.ts';
 import { escape, html, raw, type Html } from './html.ts';
 import { listingPieces, registerListingPages, type ListingRow } from './listings.ts';
@@ -22,7 +23,10 @@ import { registerListingMakers } from './listing-makers.ts';
 import { registerImageMigration } from './image-migration.ts';
 import { githubAccount, githubRepository, registerPeople, type GitHubAccountLookup, type GitHubRepositoryLookup } from './people.ts';
 import { buildOrigin, registerUploads } from './uploads.ts';
+import { registerBlogAdmin } from './blog-admin.ts';
 import type { MonitorEnv } from '../url-monitor.ts';
+import { DeployStatusCache, deployBranch, siteDeployBranch, getScheduledDeploy, githubRunsFetcher, settleScheduled, withDeployEta, type DeployStatus, type RunsFetcher, type SettingsStore } from '../deploy-status.ts';
+import { formatDeployEta } from '../deploy-eta.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -38,13 +42,16 @@ export interface PortalConfig {
   sessionSecret?: string;
   // Public base URL of the portal, used for the OAuth callback (https://portal.vaultlearninggames.org).
   baseUrl: string;
-  // GitHub logins that become Vault admins when they sign in (bootstrap).
+  // GitHub logins that hold every Vault permission from when they sign in (bootstrap).
   vaultAdmins: string[];
   // The "Need support?" link (the Slack invitation). Left out: the default; '': no link.
   supportUrl?: string;
+  stagingSyncUtcHour?: number;   // staging only: daily hour (UTC) staging data is replaced from production; default 9
   oauth?: OAuthClient; // injected in tests
   githubAccount?: GitHubAccountLookup; // injected in tests
   githubRepository?: GitHubRepositoryLookup; // injected in tests
+  // The deploy bar (src/deploy-status.ts). No token (and no fetchRuns): no running deploys, only scheduled ones.
+  deployStatus?: { token?: string; environment?: string; stagingBranch?: string; productionBranch?: string; siteBranch?: string; fetchRuns?: RunsFetcher; now?: () => number };
 }
 
 type ReleaseResult = { release: Release; url: string };
@@ -82,8 +89,8 @@ function githubOAuth(clientId: string, clientSecret: string): OAuthClient {
 }
 
 // ---------- formatting ----------
-export const ROLE_LABEL: Record<StudioRole, string> = { viewer: 'Viewer', maintainer: 'Maintainer', admin: 'Studio admin' };
-export const VAULT_LABEL: Record<VaultRole, string> = { none: '—', release_manager: 'Release manager', admin: 'Vault admin' };
+// A membership's studio permissions as text: "View, Edit, Request publish".
+export const studioPermissionText = (ps: readonly StudioPermission[]) => ps.map((p) => STUDIO_PERMISSION_LABEL[p]).join(', ') || '—';
 export function ago(iso: string | null | undefined): string {
   if (!iso) return '—';
   const s = (Date.now() - Date.parse(iso)) / 1000;
@@ -111,6 +118,11 @@ const supportLink = (text: string) => html`<a href="${supportUrl}" target="_blan
 // the portal's own address (PORTAL_URL): the deploy refuses a staging environment whose PORTAL_URL doesn't contain
 // "staging", and a production one whose does. Set by registerPortal, like supportUrl; '' on production.
 let stagingBanner: Html | '' = '';
+// Next daily sync instant (UTC hour) strictly after `now`.
+export function nextStagingSync(now: Date, hour: number): Date {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour));
+  return d.getTime() > now.getTime() ? d : new Date(d.getTime() + 86_400_000);
+}
 export function stagingProductionUrl(baseUrl: string): string | null {
   let u: URL;
   try { u = new URL(baseUrl); } catch { return null; }
@@ -118,18 +130,43 @@ export function stagingProductionUrl(baseUrl: string): string | null {
   const host = u.hostname.replace(/-staging(?=\.)/i, '').replace(/^staging\./i, '');
   return host !== u.hostname && !/staging/i.test(host) ? `${u.protocol}//${host}` : '';
 }
-function stagingBannerFor(baseUrl: string): Html | '' {
+function stagingBannerFor(baseUrl: string, syncHour = 9): Html | '' {
   const prod = stagingProductionUrl(baseUrl);
   if (prod === null) return '';
   return html`<div class="env-banner" role="note" aria-label="This is the staging portal">
     <strong><span aria-hidden="true">⚠</span> Staging portal: for previewing features, not for content.</strong>
-    <span>Settings, game data and anything else saved here apply only to staging, and are overwritten whenever the Vault code changes.
-    Make real changes, and preview them, on the production portal${prod ? html`: <a href="${prod}/">${new URL(prod).host}</a>` : ''}.</span></div>`;
+    <span>Staging is for testing layouts and the portal. Content is written on the production portal and flows down to staging
+    (staging's content is replaced from production, and anything saved here is thrown away). Only code is promoted to production.
+    Make real changes${prod ? html` on <a href="${prod}/">${new URL(prod).host}</a>` : ' on the production portal'}.</span>
+    <span class="env-sync" data-sync-at="${nextStagingSync(nowDate(), syncHour).toISOString()}" role="status"><span aria-hidden="true">⟳</span> Next sync from production (games, listings, blog, settings): <time datetime="${nextStagingSync(nowDate(), syncHour).toISOString()}">${String(syncHour).padStart(2, '0')}:00 UTC</time>, <b class="env-sync-left">daily</b>. Everything saved here is replaced then.</span></div>`;
 }
-interface Nav { user: User; studio?: Studio; memberships: (Membership & { studio_slug: string; studio_name: string })[]; allStudios: Studio[] }
+// The deploy bar, under the staging banner on every page while a deploy of this system runs or one is scheduled by a
+// portal action (public/portal.js fills it in and polls DEPLOY_STATUS_PATH). Set by registerPortal: deployStatus is
+// null when the system can't see its deploys, scheduledStore when there is no database.
+export const DEPLOY_STATUS_PATH = '/portal/deploy-status';
+let deployStatus: DeployStatusCache | null = null;
+let scheduledStore: SettingsStore | null = null;
+let deployNow: (() => number) | undefined;
+const nowDate = () => new Date(deployNow ? deployNow() : Date.now());
+function deployBar(): Html | '' {
+  if (!deployStatus && !scheduledStore) return '';
+  const deploys = deployStatus?.peek()?.deploys ?? [];
+  const now = nowDate();
+  const scheduled = scheduledStore ? withDeployEta(getScheduledDeploy(scheduledStore, now), now) : null;
+  const eta = scheduled?.deployEtaAt ? formatDeployEta(now, new Date(scheduled.deployEtaAt)) : null;
+  const known: DeployStatus = { deploys, scheduled };
+  const shown = deploys.length || scheduled;
+  return html`<div class="deploy-bar" id="deploy-bar" role="status" aria-live="polite" data-src="${DEPLOY_STATUS_PATH}"${shown ? html` data-state="${JSON.stringify(known)}"` : ''}${shown ? '' : ' hidden'}>${scheduled ? html`<div class="deploy-row scheduled"><b${eta ? html` title="${scheduled!.deployEtaAt}"` : ''}>A deploy is scheduled — some recent changes may not be live yet.${eta ? ` ${eta}` : ''}</b></div>` : ''}</div>`;
+}
+// staff: whether the Vault links show (anyone with a Vault permission); vault: their Vault permissions (which Vault
+// links show); studioPermissions: theirs in the current studio (which studio links show).
+interface Nav { user: User; studio?: Studio; memberships: (Membership & { studio_slug: string; studio_name: string })[]; allStudios: Studio[]; staff: boolean; vault: readonly VaultPermission[]; studioPermissions: readonly StudioPermission[] }
 function layout(title: string, nav: Nav | null, body: Html | string, active = ''): string {
   const u = nav?.user;
-  const staff = u && u.vault_role !== 'none';
+  const staff = !!nav?.staff;
+  const vault = (p: VaultPermission) => !!nav?.vault.includes(p);
+  // Upload builds: studio.edit, or vault.content.edit (Vault uploads for studios).
+  const uploads = vault('vault.content.edit') || !!nav?.studioPermissions.includes('studio.edit');
   const studios = staff ? nav!.allStudios.map((s) => ({ slug: s.slug, name: s.name })) : (nav?.memberships ?? []).map((m) => ({ slug: m.studio_slug, name: m.studio_name }));
   const cur = nav?.studio;
   const side = nav ? html`
@@ -144,22 +181,23 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
         ${cur ? html`
           <a href="/s/${cur.slug}" class="${active === 'studio' ? 'on' : ''}">Games</a>
           <a href="/s/${cur.slug}/files" class="${active === 'files' ? 'on' : ''}">Files</a>
-          <a href="/s/${cur.slug}/register" class="${active === 'register' ? 'on' : ''}">Upload builds</a>
+          ${uploads ? html`<a href="/s/${cur.slug}/register" class="${active === 'register' ? 'on' : ''}">Upload builds</a>` : ''}
           <a href="/s/${cur.slug}/analytics" class="${active === 'studio-analytics' ? 'on' : ''}">Analytics</a>
           <a href="/s/${cur.slug}/members" class="${active === 'members' ? 'on' : ''}">Members</a>` : ''}
         ${staff ? html`
           <div class="nav-sep">Vault</div>
-          <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
-          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Game Catalog</a>
-          <a href="/vault/site-checks" class="${active === 'site-checks' ? 'on' : ''}">Site checks</a>
           <a href="/vault/analytics" class="${active === 'analytics' ? 'on' : ''}">Analytics</a>
+          <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
+          <a href="/vault/site-checks" class="${active === 'site-checks' ? 'on' : ''}">Site checks</a>
+          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Games</a>
           <a href="/vault/studios" class="${active === 'vault-studios' ? 'on' : ''}">Studios</a>
-          <a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>
-          <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>` : ''}
+          ${vault('vault.users.maintain') ? html`<a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>` : ''}
+          <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>
+          ${vault('vault.blog.edit') ? html`<a href="/portal/blog" class="${active === 'blog' ? 'on' : ''}">Blog</a>` : ''}` : ''}
       </nav>
       <div class="side-foot">
         ${supportUrl ? html`<p class="support">${supportLink('Need support?')} <span>Join our Slack, then the <b>${SUPPORT_CHANNEL}</b> channel.</span></p>` : ''}
-        <div class="me">${u!.avatar_url ? html`<img src="${u!.avatar_url}&s=48" alt="" width="24" height="24">` : ''}<span><b>${u!.login}</b>${staff ? html`<br><span class="muted">${VAULT_LABEL[u!.vault_role]}</span>` : ''}</span></div>
+        <div class="me">${u!.avatar_url ? html`<img src="${u!.avatar_url}&s=48" alt="" width="24" height="24">` : ''}<span><b>${u!.login}</b>${staff ? html`<br><span class="muted">Vault staff</span>` : ''}</span></div>
         <form method="post" action="/logout"><button class="btn sm" type="submit">Sign out</button></form>
       </div>
     </aside>` : '';
@@ -167,7 +205,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
 <meta name="robots" content="noindex, nofollow"><title>${escape(title)} · Vault Studio Portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="/assets/portal.css?v=${assetVersion}"></head><body${stagingBanner ? ' class="staging"' : ''}>${stagingBanner}
+<link rel="stylesheet" href="/assets/portal.css?v=${assetVersion}"></head><body${stagingBanner ? ' class="staging"' : ''}>${stagingBanner}${deployBar()}
 <div class="${nav ? 'shell' : 'shell solo'}">${side}<main id="main">${body}</main></div>
 <script src="/assets/portal.js?v=${assetVersion}" defer></script></body></html>`;
 }
@@ -185,7 +223,23 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const secure = cfg.baseUrl.startsWith('https://');
   const admins = new Set(cfg.vaultAdmins.map((l) => l.toLowerCase()));
   supportUrl = cfg.supportUrl ?? DEFAULT_SUPPORT_URL;
-  stagingBanner = stagingBannerFor(cfg.baseUrl);
+  stagingBanner = stagingBannerFor(cfg.baseUrl, cfg.stagingSyncUtcHour);
+  const ds = cfg.deployStatus;
+  const deployFrom = deployBranch({ isStaging: stagingProductionUrl(cfg.baseUrl) !== null, environment: ds?.environment, stagingBranch: ds?.stagingBranch, productionBranch: ds?.productionBranch });
+  const fetchRuns = ds?.fetchRuns ?? (ds?.token ? githubRunsFetcher(ds.token) : null);
+  const siteFrom = siteDeployBranch({ isStaging: stagingProductionUrl(cfg.baseUrl) !== null, environment: ds?.environment, siteBranch: ds?.siteBranch });
+  deployStatus = fetchRuns && deployFrom ? new DeployStatusCache(fetchRuns, deployFrom, { now: ds?.now, siteBranch: siteFrom ?? undefined }) : null;
+  scheduledStore = db;
+  deployNow = ds?.now;
+  const deployCache = deployStatus;
+  // Public, like the bar (it shows on the sign-in page too): which deploys run, links to their runs, and whether one is
+  // scheduled.
+  app.get(DEPLOY_STATUS_PATH, async (c) => {
+    const deploys = deployCache ? (await deployCache.get()).deploys : [];
+    const now = nowDate();
+    const body: DeployStatus = { deploys, scheduled: withDeployEta(settleScheduled(db, deploys, now), now) };
+    return c.json(body, 200, { 'Cache-Control': 'no-store' });
+  });
 
   // Browsers that reach the portal on the service's default *.run.app address are sent to the portal's
   // real address (GitHub sign-in only returns there). The API and health check keep answering on both.
@@ -201,12 +255,13 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
 
   // Static assets, read once at startup.
   const asset = (name: string) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
-  const css = asset('portal.css'), js = asset('portal.js'), logoPng = asset('vault-logo.png');
-  assetVersion = createHash('sha256').update(css).update(js).update(logoPng).digest('hex').slice(0, 10);
+  const css = asset('portal.css'), js = asset('portal.js'), logoPng = asset('vault-logo.png'), loginGames = asset('login-games.webp');
+  assetVersion = createHash('sha256').update(css).update(js).update(logoPng).update(loginGames).digest('hex').slice(0, 10);
   const immutable = 'public, max-age=31536000, immutable';
   app.get('/assets/portal.css', (c) => c.body(css, 200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': immutable }));
   app.get('/assets/portal.js', (c) => c.body(js, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': immutable }));
   app.get('/assets/vault-logo.png', (c) => c.body(logoPng, 200, { 'Content-Type': 'image/png', 'Cache-Control': immutable }));
+  app.get('/assets/login-games.webp', (c) => c.body(loginGames, 200, { 'Content-Type': 'image/webp', 'Cache-Control': immutable }));
 
   // ---------- identity & permissions ----------
   function currentUser(c: Context): User | null {
@@ -214,24 +269,29 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const uid = verifySession(getCookie(c, SESSION_COOKIE), cfg.sessionSecret);
     return uid === null ? null : db.userById(uid) ?? null;
   }
-  const isStaff = (u: User) => u.vault_role !== 'none';
-  const canRelease = (u: User) => u.vault_role === 'release_manager' || u.vault_role === 'admin';
-  const isVaultAdmin = (u: User) => u.vault_role === 'admin';
-  const roleIn = (u: User, s: Studio) => db.roleIn(s.id, u.login);
-  const canView = (u: User, s: Studio) => isStaff(u) || !!roleIn(u, s);
-  const canRequest = (u: User, s: Studio) => canRelease(u) || ['maintainer', 'admin'].includes(roleIn(u, s) ?? '');
-  // Switching between approved releases (make current / roll back): Vault release staff always; studio
-  // maintainers and admins unless Vault has frozen the game.
-  const canSwitch = (u: User, s: Studio, g: Game) => canRelease(u) || (!g.frozen_at && ['maintainer', 'admin'].includes(roleIn(u, s) ?? ''));
-  const canManageMembers = (u: User, s: Studio) => isVaultAdmin(u) || roleIn(u, s) === 'admin';
-  // Deleting a game from Vault: its studio's admins and Vault staff.
-  const canDeleteGame = (u: User, s: Studio) => isStaff(u) || roleIn(u, s) === 'admin';
-  const navFor = (u: User, studio?: Studio): Nav => ({ user: u, studio, memberships: db.membershipsForLogin(u.login), allStudios: db.studios() });
+  // Permissions (permissions.ts), looked up once per user object (one request).
+  const held = new WeakMap<User, PermissionHolder>();
+  const holder = (u: User) => { let p = held.get(u); if (!p) held.set(u, p = db.permissionsOf(u.login)); return p; };
+  const vaultCan = (u: User, p: VaultPermission) => hasVaultPermission(holder(u), p);
+  const studioCan = (u: User, s: Studio, p: StudioPermission) => hasStudioPermission(holder(u), s.id, p);
+  const isStaff = (u: User) => isVaultStaff(holder(u));
+  const isMember = (u: User, s: Studio) => studioCan(u, s, 'studio.view');
+  const canView = (u: User, s: Studio) => isStaff(u) || isMember(u, s);
+  const canRelease = (u: User) => vaultCan(u, 'vault.content.edit');
+  const canRequest = (u: User, s: Studio) => canRelease(u) || studioCan(u, s, 'studio.request_publish');
+  // Switching between approved releases (make current / roll back): vault.content.edit always; studio.request_publish
+  // unless Vault has frozen the game.
+  const canSwitch = (u: User, s: Studio, g: Game) => canRelease(u) || (!g.frozen_at && studioCan(u, s, 'studio.request_publish'));
+  const canManageMembers = (u: User, s: Studio) => vaultCan(u, 'vault.users.maintain') || studioCan(u, s, 'studio.maintain_users');
+  // Deleting a game from Vault: vault.content.edit, or studio.edit in its studio.
+  const canDeleteGame = (u: User, s: Studio) => canRelease(u) || studioCan(u, s, 'studio.edit');
+  const navFor = (u: User, studio?: Studio): Nav => ({ user: u, studio, memberships: db.membershipsForLogin(u.login), allStudios: db.studios(),
+    staff: isStaff(u), vault: holder(u).vault_permissions, studioPermissions: studio ? holder(u).studio_permissions.get(studio.id) ?? [] : [] });
   const actor = (u: User) => `user:${u.login}`;
   // Site listings (listings.ts): shown with each game, since a game is its listing and/or its CDN game.
   const listingHelpers = { db, deps, page: (c: Context, t: string, b: Html, o?: { studio?: Studio; active?: string; status?: number }) => page(c, t, b, o),
     denied: (c: Context, m: string, st?: number) => denied(c, m, st), signedIn: (c: Context) => signedIn(c), studioFor: (c: Context, u: User) => studioFor(c, u),
-    apiUser: (c: Context) => apiUser(c), actor, isStaff, canRelease, isVaultAdmin, roleIn };
+    apiUser: (c: Context) => apiUser(c), actor, isStaff, isMember, vaultCan, studioCan };
   const LP = listingPieces(listingHelpers);
   // The "Upload builds" page (/s/:studio/register), zip uploads and URL monitors.
   const UP = registerUploads(app, listingHelpers);
@@ -277,17 +337,22 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   app.get('/login', (c) => {
     if (currentUser(c)) return c.redirect('/');
     const next = c.req.query('next') ?? '/';
-    const body = html`<div class="login">
+    // The games artwork from https://vaultlearninggames.org/sq/img/site/games-ca9fcd_hu_3db183ebbf20ed04.webp (vendored as
+    // public/login-games.webp), drawn twice so the column scrolls without a seam; decorative, so hidden from assistive tech.
+    const games = html`<img src="/assets/login-games.webp?v=${assetVersion}" alt="" aria-hidden="true" class="login-games" width="1000" height="2000" decoding="async">`;
+    // Centred in whatever viewport space is left under the banners (CSS only, so it recentres on resize/rotation).
+    const body = html`<div class="vault-login-page"><div class="login-page">
+      <div class="login-art" aria-hidden="true"><div class="login-games-track">${games}${games}</div></div>
+      <div class="login login-card vault-login-card">
       <div class="brand big">${logo()}</div>
       <h1>Studio Portal</h1>
-      <p>Publish your games to classrooms. Your studio controls testing on staging; Vault reviews every release.</p>
       ${configured
-        ? html`<a class="btn pri big" href="/auth/github?next=${encodeURIComponent(next)}">Sign in with GitHub</a>
-               <p class="small muted">We only read your GitHub name and picture.</p>`
+        ? html`<a class="btn pri big" href="/auth/github?next=${encodeURIComponent(next)}">Sign in with GitHub</a>`
         : html`<p class="fix">Sign-in isn’t set up yet: the GitHub OAuth app and session secret are missing.</p>`}
       ${c.req.query('error') ? html`<p class="err">${c.req.query('error')}</p>` : ''}
       ${supportUrl ? html`<p class="small muted">Need support? ${supportLink('Join our Slack')} and ask in the <b>${SUPPORT_CHANNEL}</b> channel.</p>` : ''}
-    </div>`;
+      </div>
+    </div></div>`;
     return c.html(layout('Sign in', null, body));
   });
 
@@ -311,12 +376,13 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       return c.redirect('/login?error=' + encodeURIComponent((err as Error).message));
     }
     const user = db.upsertUser(profile);
-    if (admins.has(user.login.toLowerCase()) && user.vault_role !== 'admin') db.setVaultRole(user.id, 'admin');
-    const invited = db.takeVaultInvite(user.login);
-    if (invited && user.vault_role === 'none') {
-      db.setVaultRole(user.id, invited);
-      db.audit(actor(user), 'vault.role', user.login, { role: invited, from: 'none', invited: true });
+    // The configured Vault admins (VAULT_ADMINS) always hold every Vault permission. Permissions given before someone's
+    // first sign-in are already theirs (they're kept by login); the old vault_role column catches up here.
+    if (admins.has(user.login.toLowerCase())) {
+      const from = db.setVaultPermissions(user.login, VAULT_PERMISSIONS, 'system:vault-admins');
+      if (from) db.audit(actor(user), 'vault.permissions', user.login, { permissions: VAULT_PERMISSIONS, from, configured: true });
     }
+    db.syncVaultRole(user.login);
     db.audit(actor(user), 'portal.sign_in', user.login);
     setCookie(c, SESSION_COOKIE, signSession(user.id, cfg.sessionSecret!), { httpOnly: true, secure, sameSite: 'Lax', path: '/', maxAge: SESSION_DAYS * 86400 });
     return c.redirect(next);
@@ -331,9 +397,11 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   app.get('/', (c) => {
     const u = signedIn(c);
     if (u instanceof Response) return u;
+    // Vault staff land on Analytics (also after signing in without a next page); studio members keep their studios.
+    if (isStaff(u)) return c.redirect('/vault/analytics');
     const mine = db.membershipsForLogin(u.login);
-    if (mine.length === 1 && !isStaff(u)) return c.redirect(`/s/${mine[0].studio_slug}`);
-    const studios = isStaff(u) ? db.studios() : db.studios().filter((s) => mine.some((m) => m.studio_id === s.id));
+    if (mine.length === 1) return c.redirect(`/s/${mine[0].studio_slug}`);
+    const studios = db.studios().filter((s) => mine.some((m) => m.studio_id === s.id));
     if (!studios.length) {
       return page(c, 'Welcome', html`${head(`Welcome, ${u.name || u.login}`, 'You’re signed in, but you aren’t a member of any studio yet.')}
         <div class="card"><p>Ask your studio’s admin (or Vault) to add your GitHub username: <code>${u.login}</code></p></div>`);
@@ -343,10 +411,10 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       const released = games.filter((g) => db.currentRelease(g.id)).length;
       return html`<tr><td class="proj"><a href="/s/${s.slug}"><b>${s.name}</b></a><span>${s.slug}</span></td>
         <td class="r num">${games.length}</td><td class="r num">${released}</td>
-        <td>${roleIn(u, s) ? ROLE_LABEL[roleIn(u, s)!] : html`<span class="muted">Vault staff</span>`}</td></tr>`;
+        <td>${isMember(u, s) ? studioPermissionText(holder(u).studio_permissions.get(s.id) ?? []) : html`<span class="muted">Vault staff</span>`}</td></tr>`;
     });
     return page(c, 'Studios', html`${head('Studios', 'Choose a studio.')}
-      <div class="tbl-wrap"><table><thead><tr><th>Studio</th><th class="r">Games</th><th class="r">Live for classrooms</th><th>Your role</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+      <div class="tbl-wrap"><table><thead><tr><th>Studio</th><th class="r">Games</th><th class="r">Live for classrooms</th><th>Your permissions</th></tr></thead><tbody>${rows}</tbody></table></div>`);
   });
 
   // ---------- studio dashboard ----------
@@ -381,7 +449,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
         <td>${cur ? html`<span class="rel">${cur.version}</span> <span class="muted small">${ago(cur.approved_at)}</span>` : html`<span class="muted small">—</span>`}</td></tr>`;
     });
     const body = html`${head(s.name, html`Every ${s.name} game on Vault. Games are hosted at their <b>web address</b> until they move to the <b>Vault CDN</b>: staging is yours to test on, production is what classrooms play, released by Vault.`,
-      html`<a class="btn" href="/s/${s.slug}/register">Upload builds</a>`)}
+      canRelease(u) || studioCan(u, s, 'studio.edit') ? html`<a class="btn" href="/s/${s.slug}/register">Upload builds</a>` : '')}
       <div class="kpis four">
         <div class="kpi"><div class="v">${entries.length}</div><div class="l">Games</div></div>
         <div class="kpi"><div class="v">${onCdn}</div><div class="l">Hosted on the Vault CDN</div></div>
@@ -492,7 +560,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
           <div class="card"><h2>Staging · test versions <small>every build you upload · branches and uploads are kept 90 days after their last change</small></h2>
             ${builds.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Version</th><th>Commit</th><th>Size</th><th>Published</th><th>Preview</th><th></th></tr></thead><tbody>${buildRows}</tbody></table></div>`
               : html`<p class="muted">Nothing on staging yet. <a href="/s/${s.slug}/register">Upload a build</a>: from GitHub, as a .zip, or from a web address.</p>`}${UP.monitorNote(s, g)}</div>
-          <div class="card"><h2>Production · released versions <small>immutable; only Vault releases new versions${g.frozen_at ? '; frozen by Vault' : '; maintainers choose which approved version is current'}</small></h2>
+          <div class="card"><h2>Production · released versions <small>immutable; only Vault releases new versions${g.frozen_at ? '; frozen by Vault' : '; members who can request publish choose which approved version is current'}</small></h2>
             ${releases.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Release</th><th>Status</th><th>Built from</th><th>Approved</th><th>Link</th><th></th></tr></thead><tbody>${relRows}</tbody></table></div>`
               : html`<p class="muted">Nothing released yet.${request ? ' Choose “Request release” on a test version above.' : ''}</p>`}</div>
           ${requests.length ? html`<div class="card"><h2>Release requests</h2><div class="tbl-wrap"><table><thead><tr><th>Version</th><th>Build</th><th>Status</th><th>Requested</th><th></th></tr></thead><tbody>${reqRows}</tbody></table></div></div>` : ''}
@@ -512,9 +580,9 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
               <button class="btn danger">Delete game</button><span class="err" role="status" aria-live="polite"></span></form></div>` : ''}
           <div class="card small"><h2>How releasing works</h2><ol class="tight">
             <li><a href="/s/${s.slug}/register">Upload a build</a> (a push from GitHub, a .zip, or a monitored web address); it appears above as a test version. From GitHub, a version tag like <code>v1.2</code> is best.</li>
-            <li>Test it on staging, then ${release ? html`choose <b>Release…</b>` : request ? html`choose <b>Request release…</b>` : 'a maintainer requests a release'}.</li>
+            <li>Test it on staging, then ${release ? html`choose <b>Release…</b>` : request ? html`choose <b>Request release…</b>` : 'a member who can request publish requests a release'}.</li>
             <li>Vault copies that exact build to production and makes it current. Earlier releases stay available for rollback.</li>
-            <li>Maintainers can switch between approved releases or roll back at any time, unless Vault has frozen the game or withdrawn a release.</li></ol></div>
+            <li>Members who can request publish can switch between approved releases or roll back at any time, unless Vault has frozen the game or withdrawn a release.</li></ol></div>
         </div>`;
     const dialogs = html`${release ? html`<dialog id="withdraw"><form data-api="${api}/withdraw" class="dlg" data-then="reload">
         <h2>Withdraw a release</h2>
@@ -637,7 +705,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
 
   app.post('/portal/api/s/:studio/g/:game/release', async (c) => {
     const u = apiUser(c);
-    if (!canRelease(u)) fail(403, 'Only Vault release managers can release.');
+    if (!canRelease(u)) fail(403, 'Only Vault staff who can edit game/studio content can release.');
     const { studio, game } = apiStudioGame(c, u);
     const b = await jsonBody(c);
     const out = await deps.approveRelease(studio, game, versionOf(b.version), refOf(b.ref), actor(u));
@@ -649,9 +717,9 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const u = apiUser(c);
     const { studio, game } = apiStudioGame(c, u);
     if (!canSwitch(u, studio, game)) {
-      fail(403, game.frozen_at && roleIn(u, studio) && roleIn(u, studio) !== 'viewer'
+      fail(403, game.frozen_at && studioCan(u, studio, 'studio.request_publish')
         ? `Vault has frozen ${game.slug}${game.frozen_note ? ` (${game.frozen_note})` : ''}; ask Vault to change the current release.`
-        : 'Only maintainers can change the current release.');
+        : 'Only studio members who can request publish can change the current release.');
     }
     return c.json({ ok: true, ...(await deps.promoteRelease(studio, game, versionOf((await jsonBody(c)).version), actor(u))) });
   });
@@ -659,7 +727,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   // Vault: withdraw a release so it can't be made current (or restore it). Body: { ref: version, note, restore? }
   app.post('/portal/api/s/:studio/g/:game/withdraw', async (c) => {
     const u = apiUser(c);
-    if (!canRelease(u)) fail(403, 'Only Vault release managers can withdraw releases.');
+    if (!canRelease(u)) fail(403, 'Only Vault staff who can edit game/studio content can withdraw releases.');
     const { studio, game } = apiStudioGame(c, u);
     const b = await jsonBody(c);
     const r = db.release(game.id, versionOf(b.ref));
@@ -683,7 +751,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   app.post('/portal/api/s/:studio/g/:game/delete', async (c) => {
     const u = apiUser(c);
     const { studio, game } = apiStudioGame(c, u);
-    if (!canDeleteGame(u, studio)) fail(403, 'Only studio admins and Vault staff can delete games.');
+    if (!canDeleteGame(u, studio)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can delete games.');
     const b = await jsonBody(c);
     if (typeof b.confirm !== 'string' || b.confirm.trim() !== game.slug) fail(400, `Type ${game.slug} to confirm.`);
     const prefix = `${studio.slug}/${game.slug}/`;
@@ -700,7 +768,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   // Vault: freeze a game so only Vault can switch its current release (e.g. during a study). Body: { frozen, note }
   app.post('/portal/api/s/:studio/g/:game/freeze', async (c) => {
     const u = apiUser(c);
-    if (!canRelease(u)) fail(403, 'Only Vault release managers can freeze games.');
+    if (!canRelease(u)) fail(403, 'Only Vault staff who can edit game/studio content can freeze games.');
     const { studio, game } = apiStudioGame(c, u);
     const b = await jsonBody(c);
     const target = `${studio.slug}/${game.slug}/`;
@@ -719,7 +787,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   app.post('/portal/api/s/:studio/g/:game/request', async (c) => {
     const u = apiUser(c);
     const { studio, game } = apiStudioGame(c, u);
-    if (!canRequest(u, studio)) fail(403, 'Only maintainers can request releases.');
+    if (!canRequest(u, studio)) fail(403, 'Only studio members who can request publish can request releases.');
     const b = await jsonBody(c);
     const version = versionOf(b.version), ref = refOf(b.ref);
     const build = db.build(game.id, ref);
@@ -743,7 +811,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
 
   app.post('/portal/api/requests/:id/approve', async (c) => {
     const u = apiUser(c);
-    if (!canRelease(u)) fail(403, 'Only Vault release managers can approve.');
+    if (!canRelease(u)) fail(403, 'Only Vault staff who can edit game/studio content can approve.');
     const { r, g, s } = requestFor(c, u);
     const b = await jsonBody(c);
     await deps.approveRelease(s, g, r.version, r.ref, actor(u));
@@ -754,7 +822,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
 
   app.post('/portal/api/requests/:id/reject', async (c) => {
     const u = apiUser(c);
-    if (!canRelease(u)) fail(403, 'Only Vault release managers can send requests back.');
+    if (!canRelease(u)) fail(403, 'Only Vault staff who can edit game/studio content can send requests back.');
     const { r, g, s } = requestFor(c, u);
     const b = await jsonBody(c);
     const note = typeof b.note === 'string' ? b.note.trim().slice(0, 2000) : '';
@@ -767,7 +835,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   app.post('/portal/api/requests/:id/withdraw', async (c) => {
     const u = apiUser(c);
     const { r, g, s } = requestFor(c, u);
-    if (r.requested_by !== actor(u) && !canManageMembers(u, s)) fail(403, 'Only the requester or a studio admin can withdraw this.');
+    if (r.requested_by !== actor(u) && !canManageMembers(u, s)) fail(403, 'Only the requester or a studio member who maintains users can withdraw this.');
     db.decideReleaseRequest(r.id, 'withdrawn', actor(u), null);
     db.audit(actor(u), 'release.withdraw', `${s.slug}/${g.slug}/${r.version}`);
     return c.json({ ok: true });
@@ -777,7 +845,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   app.post('/portal/api/s/:studio/website', async (c) => {
     const u = apiUser(c);
     const s = db.studioBySlug(c.req.param('studio'));
-    if (!s || !canManageMembers(u, s)) fail(403, 'Only studio admins can change the studio’s website.');
+    if (!s || !canManageMembers(u, s)) fail(403, 'Only studio members who maintain users can change the studio’s website.');
     let website: string | null;
     try { website = studioWebsite((await jsonBody(c)).website); } catch (err) { fail(400, (err as Error).message); }
     if ((s.website || null) !== website) {
@@ -794,5 +862,6 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   registerListingPreview(app, listingHelpers);
   registerListingMakers(app, listingHelpers);
   registerImageMigration(app, listingHelpers);
+  registerBlogAdmin(app, listingHelpers);
   registerPeople(app, { ...listingHelpers, canManageMembers, vaultAdmins: cfg.vaultAdmins, githubAccount: cfg.githubAccount ?? githubAccount, githubRepository: cfg.githubRepository ?? githubRepository });
 }

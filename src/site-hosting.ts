@@ -7,7 +7,8 @@
 //   _redirects  /s/keys-to-the-vault.pdf, the /game-cards/<card> addresses (301 to the game's page), "/wake/" →
 //               "/wake" (301), and the /game-cards filter addresses with "+" or "%2F" in them, which the hosting
 //               would otherwise answer with a redirect to its own spelling; and /cdn/<folder>/ (and its index.html)
-//               for each game played from the Vault CDN, a 302 to its page with the player open (index.cdnredirects.json)
+//               for each game played from the Vault CDN, a 302 to its page with the player open (index.cdnredirects.json);
+//               and each renamed blog post's old address, a 301 to its page (index.blogredirects.json)
 //   robots.txt  everything may be crawled; production's also names the sitemap
 //
 // Every page is served at its Squarespace address, which has no trailing slash (html_handling: drop-trailing-slash
@@ -129,9 +130,12 @@ export interface CardRedirect { from: string; to: string }
 export interface CdnRedirect { from: string; to: string }
 export const CDN_PREFIX = '/cdn';
 
-export interface Redirects { text: string; cards: number; cdn: number; rewrites: number; slashes: number; skippedSlashes: boolean }
+// A renamed blog post: its old address and its page ("/blog/old-slug" → "/blog/new-slug"; site/data/blog.json).
+export interface BlogRedirect { from: string; to: string }
 
-export function redirectsFile(files: string[], cards: CardRedirect[] = [], cdn: CdnRedirect[] = []): Redirects {
+export interface Redirects { text: string; cards: number; cdn: number; blog: number; rewrites: number; slashes: number; skippedSlashes: boolean }
+
+export function redirectsFile(files: string[], cards: CardRedirect[] = [], cdn: CdnRedirect[] = [], blog: BlogRedirect[] = []): Redirects {
   const pages = files.filter((k) => k.endsWith('/index.html')).map((k) => k.slice(0, -'/index.html'.length)).sort();
   // A line is "FROM TO STATUS"; "*" and ":name" in FROM are placeholders. An address that can't be written safely
   // gets no line: the hosting still serves it, after its own redirect (a 307).
@@ -161,13 +165,23 @@ export function redirectsFile(files: string[], cards: CardRedirect[] = [], cdn: 
     seen.set(from, to);
     for (const page of ['', 'index.html', 'iframe.html']) cdnLines.push(`${CDN_PREFIX}${from}${page} ${to}#play 302`);
   }
+  // A renamed blog post's old address: permanent, to the post's page. One whose old address is a page again (another
+  // post took the slug) is that page, and gets no line.
+  const blogLines: string[] = [];
+  const noSlash = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+  for (const r of [...blog].map((b) => ({ from: noSlash(b.from), to: noSlash(b.to) })).sort((a, b) => a.from.localeCompare(b.from))) {
+    if (!/^\/blog\/[a-z0-9-]+$/.test(r.from)) throw new Error(`blog redirect from "${r.from}": not a /blog/<slug> address`);
+    if (!served.has(r.to)) throw new Error(`blog redirect ${r.from} → ${r.to}: the build has no such page`);
+    if (served.has(r.from) || blogLines.some((l) => l.startsWith(`${r.from} `))) continue;
+    blogLines.push(`${r.from} ${r.to} 301`);
+  }
   // Served at once (200) at the address everything links to, instead of a redirect to the hosting's spelling.
   const rewrites = pages.filter((p) => linkedPath(p) !== canonicalPath(p) && plain(linkedPath(p)))
     .map((p) => `/${linkedPath(p)} /${canonicalPath(p)} 200`);
   // "/wake/" → "/wake", permanent (the hosting's own answer is a 307); the same for a card's address.
   const slashes = [...pages.filter((p) => plain(linkedPath(p))).map((p) => `/${linkedPath(p)}/ /${linkedPath(p)} 301`),
-    ...cardLines.map((l) => l.replace(' ', '/ '))];
-  const must = 1 + LEGACY_REDIRECTS.length + cardLines.length + rewrites.length + cdnLines.length;
+    ...cardLines.map((l) => l.replace(' ', '/ ')), ...blogLines.map((l) => l.replace(' ', '/ '))];
+  const must = 1 + LEGACY_REDIRECTS.length + cardLines.length + blogLines.length + rewrites.length + cdnLines.length;
   if (must > MAX_STATIC_REDIRECTS) throw new Error(`_redirects would need ${must} lines; Cloudflare allows ${MAX_STATIC_REDIRECTS}`);
   const fits = must + slashes.length <= MAX_STATIC_REDIRECTS;
   const out = [
@@ -175,11 +189,12 @@ export function redirectsFile(files: string[], cards: CardRedirect[] = [], cdn: 
     PDF_REDIRECT,
     ...LEGACY_REDIRECTS,
     ...cardLines,
+    ...blogLines,
     ...rewrites,
     ...cdnLines,
     ...(fits ? slashes : []),
   ];
-  return { text: out.join('\n') + '\n', cards: cardLines.length, cdn: seen.size, rewrites: rewrites.length, slashes: fits ? slashes.length : 0, skippedSlashes: !fits };
+  return { text: out.join('\n') + '\n', cards: cardLines.length, cdn: seen.size, blog: blogLines.length, rewrites: rewrites.length, slashes: fits ? slashes.length : 0, skippedSlashes: !fits };
 }
 
 // robots.txt. Squarespace's file kept crawlers out of its own machinery only (/config, /api, ?format=json, ...), none
@@ -195,7 +210,8 @@ export function robotsFile(opts: HostingOptions = {}): string {
 // hosting's own files.
 export const CARD_REDIRECTS = 'card-redirects.json';
 export const CDN_REDIRECTS = 'cdn-redirects.json';
-export const HOSTING_FILES = ['_headers', '_redirects', '.assetsignore', CARD_REDIRECTS, CDN_REDIRECTS];
+export const BLOG_REDIRECTS = 'blog-redirects.json';
+export const HOSTING_FILES = ['_headers', '_redirects', '.assetsignore', CARD_REDIRECTS, CDN_REDIRECTS, BLOG_REDIRECTS];
 export async function listFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
   const base = dir.replace(/\/+$/, '');
@@ -208,7 +224,8 @@ export async function listFiles(dir: string): Promise<string[]> {
   return out.sort();
 }
 
-export interface HostingResult { files: number; headerRules: number; cards: number; cdn: number; rewrites: number; slashes: number; skippedSlashes: boolean }
+// blog: only when the build has a blog-redirects.json.
+export interface HostingResult { files: number; headerRules: number; cards: number; cdn: number; blog?: number; rewrites: number; slashes: number; skippedSlashes: boolean }
 
 // Write the hosting files into a build. A build without a home page and a 404 page isn't the site: refuse it, so it
 // is never published.
@@ -220,11 +237,14 @@ export async function writeHostingFiles(dir: string, opts: HostingOptions = {}):
   const cards = await readFile(join(dir, CARD_REDIRECTS), 'utf8').then((t) => JSON.parse(t) as CardRedirect[] | null, () => null) ?? [];
   // Hugo's list of the CDN games' builds (layouts/index.cdnredirects.json); likewise optional.
   const cdn = await readFile(join(dir, CDN_REDIRECTS), 'utf8').then((t) => JSON.parse(t) as CdnRedirect[] | null, () => null) ?? [];
+  // Hugo's list of the renamed blog posts (layouts/index.blogredirects.json); likewise optional.
+  const blogList = await readFile(join(dir, BLOG_REDIRECTS), 'utf8').then((t) => JSON.parse(t) as BlogRedirect[] | null, () => undefined);
+  const blog = blogList ?? [];
   const headers = headersFile(files, opts);
-  const redirects = redirectsFile(files, cards, cdn);
+  const redirects = redirectsFile(files, cards, cdn, blog);
   await writeFile(join(dir, '_headers'), headers);
   await writeFile(join(dir, '_redirects'), redirects.text);
   // Never published: the list the redirects were made from, and a Mac's folder files.
-  await writeFile(join(dir, '.assetsignore'), `${CARD_REDIRECTS}\n${CDN_REDIRECTS}\n.DS_Store\n`);
-  return { files: files.length, headerRules: headers.split('\n').filter((l) => /^(\/|https:)/.test(l)).length, cards: redirects.cards, cdn: redirects.cdn, rewrites: redirects.rewrites, slashes: redirects.slashes, skippedSlashes: redirects.skippedSlashes };
+  await writeFile(join(dir, '.assetsignore'), `${CARD_REDIRECTS}\n${CDN_REDIRECTS}\n${blogList !== undefined ? `${BLOG_REDIRECTS}\n` : ''}.DS_Store\n`);
+  return { files: files.length, headerRules: headers.split('\n').filter((l) => /^(\/|https:)/.test(l)).length, cards: redirects.cards, cdn: redirects.cdn, ...(blogList !== undefined ? { blog: redirects.blog } : {}), rewrites: redirects.rewrites, slashes: redirects.slashes, skippedSlashes: redirects.skippedSlashes };
 }

@@ -23,6 +23,12 @@ disableKinds = ['taxonomy', 'term', 'rss']
     # HUGOxPARAMSxANALYTICSxGOOGLE (production: the property the Squarespace site used).
     google = ""
 
+  [params.blog]
+    # Where the header's Blog link goes: the site's own /blog (content/blog/, built from the portal's /v1/blog). Empty
+    # here, which leaves the link out and keeps every blog page noindex and out of the sitemap (production until the
+    # blog is promoted, local builds); the deploy workflow sets it to /blog on staging, through HUGOxPARAMSxBLOGxURL.
+    url = ""
+
   [params.play]
     # The Play gate (themes/vault-squarespace/layouts/partials/vault-player.html): the smallest play area (CSS pixels:
     # the space Vault's player gives a game below its bar) a game needs, for games whose listing doesn't set its own
@@ -71,5 +77,26 @@ disableKinds = ['taxonomy', 'term', 'rss']
   isPlainText = true
   notAlternative = true
 
+# The blog's feeds: /blog/rss.xml (content/blog/_index.md) and /blog/tag/<tag>/rss.xml (each tag page,
+# content/blog/_content.gotmpl), written by themes/vault-squarespace/layouts/blog/*.blogrss.xml. Not "rss": that kind
+# is disabled above.
+[outputFormats.blogrss]
+  mediaType = 'application/rss+xml'
+  baseName = 'rss'
+  isPlainText = true
+
+# Each renamed blog post's old address and its page (themes/vault-squarespace/layouts/index.blogredirects.json). For
+# the hosting's _redirects (a 301 each); not published.
+[outputFormats.blogredirects]
+  mediaType = 'application/json'
+  baseName = 'blog-redirects'
+  isPlainText = true
+  notAlternative = true
+
 [outputs]
-  home = ['html', 'cardredirects', 'cdnredirects']
+  home = ['html', 'cardredirects', 'cdnredirects', 'blogredirects']
+
+# The templates may read these environment variables (Hugo's defaults plus VAULT_ATTRIBUTION_UTM=off, which stops the
+# player tagging game addresses with Vault's UTM parameters: partials/vault-player.html, assets/js/vault-attribution.js).
+[security.funcs]
+  getenv = ['^HUGO_', '^CI$', '^VAULT_ATTRIBUTION_UTM$']

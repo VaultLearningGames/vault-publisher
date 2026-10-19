@@ -1,0 +1,22 @@
+{{- /* A blog post, /blog/<slug> (.Params.post), or a tag's page, /blog/tag/<tag> (.Params.tag): both from
+       data/blog.json (content/blog/_content.gotmpl). The markup is the portal's former public blog's
+       (src/blog/publicRender.ts), in the site's sections. */ -}}
+{{- define "head" }}
+{{- with .Params.tag }}{{ partial "blog/head.html" (dict "page" $ "feeds" (slice (dict "title" (printf "Vault Learning Games Blog — %s" .name) "path" (printf "/blog/tag/%s/rss.xml" .slug)) (dict "title" "Vault Learning Games Blog" "path" "/blog/rss.xml"))) }}
+{{- else }}{{ partial "blog/head.html" (dict "page" $ "feeds" slice) }}{{ end }}
+{{- end }}
+{{- define "main" }}
+{{- $all := (hugo.Data.blog | default dict).posts | default slice }}
+{{- with .Params.tag }}
+<section class="sq-sec theme-white sq-blog is-first"><div class="blog-grid blog-head"><h1>Posts tagged "{{ .name }}"</h1>{{ partial "blog/filter.html" (dict "active" .slug) }}</div>
+{{- partial "blog/grid.html" (where (where $all "listed" true) "slug" "in" .post_slugs) }}</section>
+{{- else }}
+{{- with .Params.post }}
+<article class="sq-sec theme-white blog-post is-first"><div class="sq-text">
+{{ partial "blog/post-header.html" . }}
+<div class="blog-body">{{ range .blocks }}{{ partial "blog/block.html" . }}{{ end }}</div>
+</div></article>
+{{- partial "blog/post-nav.html" (dict "post" . "all" $all) }}
+{{- end }}
+{{- end }}
+{{- end }}

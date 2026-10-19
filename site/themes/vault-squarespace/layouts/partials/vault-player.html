@@ -118,8 +118,11 @@
   }
 </style>
 <script>{{ (resources.Get "js/play-gate.js").Content | safeJS }}</script>
+<script>{{ (resources.Get "js/vault-attribution.js").Content | safeJS }}</script>
 <script>
 (function () {
+  // VAULT_ATTRIBUTION_UTM=off when the site is built: no UTM tags on game addresses (the referrer policy stays).
+  var UTM = {{ ne (lower (os.Getenv "VAULT_ATTRIBUTION_UTM")) "off" }};
   var LABEL = /^\s*(play( game| now)?|launch game)\s*$/i;
   // Checked 2026-09-25 (see vault-game-inventory.csv): these pages send X-Frame-Options/frame-ancestors,
   // so an iframe would be blank. Each entry is matched as a URL prefix.
@@ -305,6 +308,12 @@
       return u.href;
     } catch (e) { return src; }
   }
+  // Vault as the source in the game's own analytics (GA4, Plausible, ...): utm_source=vault&utm_medium=referral,
+  // the campaign is this game page's slug (assets/js/vault-attribution.js; the studio's own utm_* tags win).
+  function attributed(src) {
+    var slug = location.pathname.replace(/\/+$/, '').split('/').pop();
+    return VaultAttribution.buildAttributedLaunchUrl(src, { gameSlug: slug, surface: 'game_page' }, { base: location.href, enabled: UTM });
+  }
 
   // Load game i into the player.
   function start(i) {
@@ -315,7 +324,8 @@
     frame.className = 'vault-player__frame';
     frame.setAttribute('allow', 'fullscreen; autoplay; gamepad; clipboard-write; accelerometer; gyroscope');
     frame.setAttribute('allowfullscreen', '');
-    frame.setAttribute('referrerpolicy', 'unsafe-url');   // let a game's own analytics see the full page that framed it
+    // A game's own analytics see Vault (the origin, no path) as the referrer whatever the page's own policy is.
+    frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
     frame.setAttribute('title', 'Game');
     fit = null;
     for (var k = 0; k < FIT.length; k++) if (games[i].indexOf(FIT[k][0]) === 0) fit = FIT[k];
@@ -327,7 +337,7 @@
       if (n.length === 6 && n.every(function (v) { return v >= 0; })) fit = [games[i]].concat(n);
     }
     // Fit games are measured at a fixed page size; an #anchor would scroll the page away from those coordinates.
-    frame.src = withReferrer(fit ? games[i].split('#')[0] : games[i]);
+    frame.src = attributed(withReferrer(fit ? games[i].split('#')[0] : games[i]));
     if (fit) {
       frame.classList.add('is-fit');
       frame.style.width = fit[1] + 'px';
@@ -442,7 +452,7 @@
     if (act === 'back') return dismiss();
     if (act === 'fullscreen') (stage.requestFullscreen || stage.webkitRequestFullscreen).call(stage);
     if (gate.tab) {
-      window.open(gate.url, '_blank', 'noopener');
+      window.open(attributed(gate.url), '_blank', 'noopener');
       announce('new-tab');
       return dismiss();
     }
@@ -527,7 +537,11 @@
       try { url = new URL(a.getAttribute('href'), location.href); } catch (e) { continue; }
       if (url.host === location.host || !/^https?:$/.test(url.protocol)) continue;
       // A game that opens in a new tab keeps its link; the Play gate still checks it fits first (the click handler).
-      if (url.hash === '#noembed' || NO_EMBED.some(function (p) { return url.href.indexOf(p) === 0; })) { a.setAttribute('data-vault-tab', ''); continue; }
+      if (url.hash === '#noembed' || NO_EMBED.some(function (p) { return url.href.indexOf(p) === 0; })) {
+        a.setAttribute('data-vault-tab', '');
+        a.setAttribute('href', attributed(url.href));   // the new tab gets Vault's tags too
+        continue;
+      }
       var i = games.push(url.href) - 1;
       a.setAttribute('data-vault-play', i);
       a.setAttribute('href', '#play');

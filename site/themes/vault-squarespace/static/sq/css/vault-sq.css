@@ -408,10 +408,89 @@ picture { display: contents; }
   max-width: 80%; overflow-wrap: break-word;
   font-size: clamp(12px, calc(80cqw / var(--fit, 1)), var(--h3)); }   /* see "Titles that fit" */
 .blog-title a { text-decoration: none; }
+.post-nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; padding: 0 6vw 40px; font: 500 16px/24px var(--meta); }
+.post-nav-next { margin-left: auto; text-align: right; }
+/* The top of a post (partials/blog/post-header.html): tag pills and the byline at the left, the title centred, then
+   the share bar across the full width between thin rules. */
+.blog-post-header { margin: 0 0 32px; }
+.blog-post-tags ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; padding: 0; list-style: none; }
+.blog-post-tags li { min-width: 0; max-width: 100%; }
+.blog-post-tags .blog-pill { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.blog-post-header .blog-post-title { margin: 0 0 24px; text-align: center; font-weight: 700; overflow-wrap: break-word; }
+.blog-byline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 20px; font: 500 16px/24px var(--meta); }
+.blog-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 32px; height: 32px;
+  border-radius: 50%; background: #000; color: #fff; font-size: 14px; line-height: 1; }
+.blog-byline-meta { display: inline-flex; flex-wrap: wrap; gap: 6px; font-size: 14px; opacity: .7; }
+/* The share bar (partials/blog/share.html). Instagram's and Copy link's buttons need the script (vault-sq.js); the
+   share-sheet button shows only where the browser has one. */
+.blog-share { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid rgba(0, 0, 0, .15);
+  border-bottom: 1px solid rgba(0, 0, 0, .15); font: 500 16px/24px var(--meta); }
+.blog-share-spacer { flex: 1 1 0; }
+.blog-share-btn[hidden] { display: none; }
+html:not(.js) .blog-share-btn[data-share="copy"] { display: none; }
+.blog-share-label { margin-right: 4px; }
+.blog-share-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: 1px solid currentColor; border-radius: 50%; background: none; color: inherit; cursor: pointer; text-decoration: none; }
+.blog-share-btn:hover, .blog-share-btn:focus-visible { background: currentColor; }
+.blog-share-btn:hover svg, .blog-share-btn:focus-visible svg { fill: #fff; }
+html:not(.js) .blog-share-btn[data-share="instagram"] { display: none; }
+.blog-share-status { flex-basis: 100%; font-size: 14px; }
+.blog-share-status:empty { display: none; }
+
+/* A post's image collection (partials/blog/block.html, shortcodes/image.html): stacked, grid, carousel or slideshow.
+   The carousel's and slideshow's controls come from vault-sq.js; without it (html:not(.js)) every image shows stacked. */
+.blog-gallery { display: flex; flex-direction: column; gap: 24px; margin: 1.5em 0; }
+.blog-gallery-item { margin: 0; min-width: 0; }
+.blog-gallery-item img { display: block; width: 100%; height: auto; }
+.blog-gallery-link { display: block; }
+.blog-gallery-item figcaption { margin-top: 8px; font-size: .9em; }
+.blog-gallery-title { display: block; font-weight: 600; }
+.blog-gallery-desc { display: block; white-space: pre-line; }
+.blog-gallery--grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 16px; }
+.blog-gallery--grid .blog-gallery-item img { aspect-ratio: 1; object-fit: cover; }
+html.js .blog-gallery--carousel { position: relative; display: block; }
+html.js .blog-gallery--carousel .blog-gallery-track { display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth; scrollbar-width: thin; }
+html.js .blog-gallery--carousel .blog-gallery-item { flex: 0 0 min(80%, 420px); scroll-snap-align: start; }
+html.js .blog-gallery--carousel .blog-gallery-item img { aspect-ratio: 4 / 3; object-fit: cover; }
+html.js .blog-gallery--slideshow { display: block; }
+html.js .blog-gallery--slideshow .blog-gallery-item:not(.is-current) { display: none; }
+.blog-gallery-nav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; }
+.blog-gallery-btn { width: 40px; height: 40px; border: 1px solid currentColor; border-radius: 50%; background: none; color: inherit; cursor: pointer; font-size: 18px; line-height: 1; }
+.blog-gallery-btn:disabled { opacity: .35; cursor: default; }
+.blog-gallery-count { min-width: 5em; text-align: center; font-size: 14px; }
+.blog-gallery-thumbs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+.blog-gallery-thumb { width: 64px; height: 48px; padding: 0; border: 2px solid transparent; background: none; cursor: pointer; opacity: .6; }
+.blog-gallery-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.blog-gallery-thumb[aria-current="true"] { border-color: currentColor; opacity: 1; }
+.blog-gallery:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
 .blog-title a::after { content: " \2192"; }
 .blog-excerpt { margin: 0 10%; font-size: 14.92px; line-height: 1.5; }
 .blog-excerpt p { margin: 0; }
 .blog-more { padding-top: 7.8px; font-size: 14.92px; line-height: 1.5; text-decoration: underline; text-underline-offset: .2em; }
+/* /blog's cards: under the image (an empty frame without one) three lines of one line's height each, tags, date and
+   author, there even when empty, so the titles of a row start at the same height. */
+.blog-img--none { background: #f2f2f2; }
+.blog-card__meta { display: flex; flex-direction: column; gap: 4px; width: 80%; margin: 16.6px 10% 7.8px; font: 500 16px/24px var(--meta); }
+.blog-card__meta > div { height: 24px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.blog-card__tags { display: flex; justify-content: center; gap: 6px; }
+.blog-card__tag { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 10px;
+  border: 1px solid currentColor; border-radius: 999px; font-size: 12px; line-height: 22px; text-decoration: none; }
+.blog-card__tag--more { flex-shrink: 0; border-style: dashed; }
+/* The blog's topics: "All" and the 8 busiest tags as pills in a row, the rest under "+N more"; the current one filled. */
+.blog-grid.blog-head { display: block; padding-bottom: 0; }
+/* /blog has no visible heading: its <h1> is for screen readers only, and the topics start the page. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.blog-head > .sr-only + .blog-filter { margin-top: 0; }
+.blog-filter { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin: 24px 0 0; }
+.blog-filter ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.blog-pill { display: inline-block; padding: 4px 14px; border: 1px solid currentColor; border-radius: 999px;
+  font: 500 14px/20px var(--meta); text-decoration: none; white-space: nowrap; cursor: pointer; }
+.blog-pill:hover, .blog-pill:focus-visible { background: rgba(0, 0, 0, .06); }
+.blog-pill.is-active { background: #000; border-color: #000; color: #fff; }
+.blog-filter__more summary { list-style: none; border-style: dashed; }
+.blog-filter__more summary::-webkit-details-marker { display: none; }
+.blog-filter__more[open] { flex-basis: 100%; }
+.blog-filter__more[open] summary { margin-bottom: 8px; }
 .blog-pages { display: flex; justify-content: space-between; width: 100%; max-width: 1400px; padding: 0 var(--gutter); margin: 6vw auto 3vw; }
 .blog-pages a { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; }
 .blog-older { margin-left: auto; }
@@ -425,11 +504,13 @@ picture { display: contents; }
 }
 @media (min-width: 768px) {
   .blog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 100px; }
-  .blog-meta { margin: 35px 10% 25px; }
+  .blog-meta, .blog-card__meta { margin: 35px 10% 25px; }
   .blog-excerpt, .blog-more { font-size: 14.272px; }
   .blog-more { padding-top: 20px; }
 }
 @media (min-width: 1024px) { .blog-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* /blog and its tag pages (partials/blog/grid.html) stay at three posts to a row: four was too many there. */
+@media (min-width: 1024px) { .blog-grid--posts { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 /* ---------- Submit a Game form ---------- */
 .fb-form { justify-content: flex-start !important; }
@@ -492,3 +573,10 @@ html:not(.js) .sq-form:target .form-done { display: block; }
 .vault-player { --vp-accent: var(--accent) !important; }
 .blog-pages a[hidden], .gg [hidden] { display: none !important; }
 .sqsrte-scaled-text, .sqsrte-scaled-text * { white-space: nowrap !important; }
+
+/* Blog post HTML from the portal's editor: indents (data-indent="1".."4") and block quotes. */
+.sq-text [data-indent="1"] { margin-left: 2em; }
+.sq-text [data-indent="2"] { margin-left: 4em; }
+.sq-text [data-indent="3"] { margin-left: 6em; }
+.sq-text [data-indent="4"] { margin-left: 8em; }
+.blog-post .sq-text blockquote { margin: 1em 0; padding-left: 1em; border-left: 3px solid currentColor; opacity: .85; }

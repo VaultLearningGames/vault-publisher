@@ -3,6 +3,7 @@ import {
   CopyObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -36,6 +37,14 @@ export interface Storage {
   put(key: string, body: Readable | Uint8Array, size: number, headers: ObjectHeaders, signal?: AbortSignal): Promise<void>;
   // Server-side copy within the bucket (nothing passes through this service), replacing the headers.
   copy(srcKey: string, dstKey: string, headers: ObjectHeaders, signal?: AbortSignal): Promise<void>;
+  // Whether an object is stored at exactly `key` (a HEAD request). Optional: objectExists() falls back to list().
+  exists?(key: string, signal?: AbortSignal): Promise<boolean>;
+}
+
+// Whether `key` exists, with the storage's own exists() when it has one, else by listing the key as a prefix.
+export async function objectExists(storage: Storage, key: string, signal?: AbortSignal): Promise<boolean> {
+  if (storage.exists) return storage.exists(key, signal);
+  return (await storage.list(key, signal)).some((o) => o.key === key);
 }
 
 // Folder-style listing over a plain key→size map; used by in-memory storage in tests and the dev preview.
@@ -156,6 +165,17 @@ export function createR2Storage(opts: {
         }),
         { abortSignal: signal },
       );
+    },
+
+    async exists(key, signal) {
+      try {
+        await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }), { abortSignal: signal });
+        return true;
+      } catch (err) {
+        const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+        if (e.name === 'NotFound' || e.$metadata?.httpStatusCode === 404) return false;
+        throw err;
+      }
     },
 
     async deleteKeys(keys, signal) {

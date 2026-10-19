@@ -1,6 +1,7 @@
 {{- /* Site header: logo, navigation, Join Vault button; on phones a burger opens a full-screen menu. */ -}}
 {{- $here := .RelPermalink -}}
 {{- $nav := slice (dict "name" "About" "url" "/about") (dict "name" "Privacy" "url" "/privacy-policy") (dict "name" "Submit a Game" "url" "/submit-a-game") -}}
+{{- with site.Params.blog.url }}{{ $nav = $nav | append (dict "name" "Blog" "url" .) }}{{ end -}}
 <header id="header" class="sq-header theme-black-bold">
   <div class="hdr-inner">
     <a class="hdr-logo" href="/"><img src="{{ "sq/img/site/vault-game-library.png" | relURL }}" alt="Vault Learning Games Library" width="454" height="75"></a>

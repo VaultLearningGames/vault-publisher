@@ -3,6 +3,7 @@ import { beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.ts';
 import { Db, type StudioRole } from '../src/db.ts';
+import { STUDIO_PERMISSIONS, VAULT_PERMISSIONS, type StudioPermission, type VaultPermission } from '../src/permissions.ts';
 import { signSession } from '../src/portal/session.ts';
 import { importListings } from '../src/listings-import.ts';
 import type { Storage } from '../src/storage.ts';
@@ -42,9 +43,11 @@ beforeEach(() => {
 });
 
 const fd = () => db.studioBySlug('fieldday')!;
-function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' = 'none', roles: Record<string, StudioRole> = {}) {
+// vaultRole and roles: old roles (permissions.ts maps them) or the permissions themselves.
+function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' | VaultPermission[] = 'none', roles: Record<string, StudioRole | StudioPermission[]> = {}) {
   const u = db.upsertUser({ github_id: `id-${login}`, login, name: null, avatar_url: null });
-  db.setVaultRole(u.id, vaultRole);
+  if (Array.isArray(vaultRole)) db.setVaultPermissions(login, vaultRole, 'test');
+  else db.setVaultRole(u.id, vaultRole);
   for (const [slug, role] of Object.entries(roles)) db.setMembership(db.studioBySlug(slug)!.id, login, role, 'test');
   const cookie = `vault_session=${signSession(u.id, SECRET)}`;
   return {
@@ -64,50 +67,52 @@ async function signInWithGitHub(code: string) {
   return app.request(`/auth/callback?code=${code}&state=${state}`, { headers: { Cookie: cookie } });
 }
 
-// The six kinds of people every action is checked against.
+// The kinds of people every action is checked against.
 function everyone() {
   db.syncStudios([{ slug: 'other', name: 'Other Studio', github_owner: '', github_owner_id: 'vault:other' }]);
   return {
-    vaultAdmin: as('boss', 'admin'),
-    releaseManager: as('rita', 'release_manager'),
-    studioAdmin: as('ada', 'none', { fieldday: 'admin' }),
-    otherStudioAdmin: as('otto', 'none', { other: 'admin' }),
-    maintainer: as('mia', 'none', { fieldday: 'maintainer' }),
-    viewer: as('vera', 'none', { fieldday: 'viewer' }),
+    vaultAdmin: as('boss', 'admin'),   // every Vault permission
+    contentEditor: as('rita', ['vault.content.edit']),
+    blogEditor: as('bea', ['vault.blog.edit']),
+    userMaintainer: as('uma', ['vault.users.maintain']),
+    studioAdmin: as('ada', 'none', { fieldday: [...STUDIO_PERMISSIONS] }),
+    otherStudioAdmin: as('otto', 'none', { other: [...STUDIO_PERMISSIONS] }),
+    maintainer: as('mia', 'none', { fieldday: ['studio.edit', 'studio.request_publish'] }),
+    viewer: as('vera', 'none', { fieldday: ['studio.view'] }),
     signedOut: anon,
   };
 }
 
 describe('studio members', () => {
-  test('adding someone to a studio: Vault admins and that studio’s admins only', async () => {
+  test('adding someone to a studio: Vault staff who maintain users and that studio’s members who do', async () => {
     const p = everyone();
-    const add = (who: typeof anon, login: string) => who.post('/portal/api/s/fieldday/members', { login, role: 'viewer' });
+    const add = (who: typeof anon, login: string) => who.post('/portal/api/s/fieldday/members', { login, permissions: ['studio.view'] });
     assert.equal((await add(p.vaultAdmin, 'v1')).status, 200);
     assert.equal((await add(p.studioAdmin, 'v2')).status, 200);
-    assert.equal((await add(p.otherStudioAdmin, 'v3')).status, 403);
-    assert.equal((await add(p.maintainer, 'v4')).status, 403);
-    assert.equal((await add(p.viewer, 'v5')).status, 403);
-    assert.equal((await add(p.releaseManager, 'v6')).status, 403);
-    assert.equal((await add(p.signedOut, 'v7')).status, 401);
-    assert.deepEqual(db.memberships(fd().id).map((m) => m.github_login).filter((l) => l.startsWith('v') && l !== 'vera'), ['v1', 'v2']);
+    assert.equal((await add(p.userMaintainer, 'v3')).status, 200);
+    for (const who of [p.otherStudioAdmin, p.maintainer, p.viewer, p.contentEditor, p.blogEditor]) assert.equal((await add(who, 'v4')).status, 403);
+    assert.equal((await add(p.signedOut, 'v5')).status, 401);
+    assert.deepEqual(db.memberships(fd().id).map((m) => m.github_login).filter((l) => l.startsWith('v') && l !== 'vera'), ['v1', 'v2', 'v3']);
   });
 
-  test('changing a role and removing: same rules; audited', async () => {
+  test('changing permissions and removing: same rules; audited', async () => {
     const p = everyone();
-    db.setMembership(fd().id, 'sam', 'viewer', 'test');
-    for (const who of [p.otherStudioAdmin, p.maintainer, p.viewer, p.releaseManager]) {
-      assert.equal((await who.post('/portal/api/s/fieldday/members', { login: 'sam', role: 'admin' })).status, 403);
+    db.setMembership(fd().id, 'sam', ['studio.view'], 'test');
+    for (const who of [p.otherStudioAdmin, p.maintainer, p.viewer, p.contentEditor, p.blogEditor]) {
+      assert.equal((await who.post('/portal/api/s/fieldday/members', { login: 'sam', permissions: STUDIO_PERMISSIONS })).status, 403);
       assert.equal((await who.post('/portal/api/s/fieldday/members/remove', { login: 'sam' })).status, 403);
     }
     assert.equal((await p.signedOut.post('/portal/api/s/fieldday/members/remove', { login: 'sam' })).status, 401);
-    assert.equal(db.roleIn(fd().id, 'sam'), 'viewer');
-    assert.equal((await p.studioAdmin.post('/portal/api/s/fieldday/members', { login: 'sam', role: 'maintainer' })).status, 200);
-    assert.equal(db.roleIn(fd().id, 'sam'), 'maintainer');
+    assert.deepEqual(db.studioPermissionsOf(fd().id, 'sam'), ['studio.view']);
+    assert.equal((await p.studioAdmin.post('/portal/api/s/fieldday/members', { login: 'sam', permissions: ['studio.edit'] })).status, 200);
+    assert.deepEqual(db.studioPermissionsOf(fd().id, 'sam'), ['studio.view', 'studio.edit'], 'Edit implies View');
+    assert.equal(db.roleIn(fd().id, 'sam'), 'maintainer', 'the old column follows');
     assert.equal((await p.studioAdmin.post('/portal/api/s/fieldday/members/remove', { login: 'sam' })).status, 200);
-    assert.equal(db.roleIn(fd().id, 'sam'), undefined);
+    assert.equal(db.membership(fd().id, 'sam'), undefined);
     assert.equal((await p.studioAdmin.post('/portal/api/s/fieldday/members/remove', { login: 'sam' })).status, 404);
     const log = db.recentAudit(5).map((a) => `${a.actor} ${a.action} ${a.target}`);
     assert.deepEqual(log.slice(0, 2), ['user:ada member.remove fieldday:sam', 'user:ada member.set fieldday:sam']);
+    assert.deepEqual(JSON.parse(db.auditFor(['member.set'], 1)[0].detail_json!), { permissions: ['studio.view', 'studio.edit'], from: ['studio.view'], invited: true });
   });
 
   test('the Members page: forms for admins only; invited people are marked', async () => {
@@ -130,7 +135,7 @@ describe('studio members', () => {
 
   test('an invitation becomes a membership the first time that GitHub account signs in', async () => {
     const ada = as('ada', 'none', { fieldday: 'admin' });
-    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: '@NewPerson', role: 'maintainer' })).status, 200);
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: '@NewPerson', permissions: ['studio.edit', 'studio.request_publish'] })).status, 200);
     assert.equal(db.studioSummaries().find((s) => s.slug === 'fieldday')!.invited, 1);
     const cb = await signInWithGitHub('newperson');   // GitHub logins are case-insensitive
     assert.equal(cb.status, 302);
@@ -144,22 +149,22 @@ describe('studio members', () => {
     assert.match(members, /signed in just now/);
   });
 
-  test('a studio admin can’t remove or demote the last signed-in studio admin; Vault admins can', async () => {
+  test('a member can’t remove the last signed-in member who maintains users, or take it from them; Vault staff who maintain users can', async () => {
     const ada = as('ada', 'none', { fieldday: 'admin' });
-    // An invited admin who hasn't signed in doesn't count.
-    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'ghost', role: 'admin' })).status, 200);
-    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'ada', role: 'maintainer' })).status, 409);
+    // An invited one who hasn't signed in doesn't count.
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'ghost', permissions: STUDIO_PERMISSIONS })).status, 200);
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'ada', permissions: ['studio.view', 'studio.edit'] })).status, 409);
     const r = await ada.post('/portal/api/s/fieldday/members/remove', { login: 'ada' });
     assert.equal(r.status, 409);
-    assert.match(((await r.json()) as { error: string }).error, /only studio admin/);
-    // With a second signed-in admin, ada can step down.
-    as('bea', 'none', { fieldday: 'admin' });
-    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'ada', role: 'maintainer' })).status, 200);
-    assert.equal(db.roleIn(fd().id, 'ada'), 'maintainer');
-    // A Vault admin may remove the last one.
-    const boss = as('boss', 'admin');
-    assert.equal((await boss.post('/portal/api/s/fieldday/members/remove', { login: 'bea' })).status, 200);
-    assert.deepEqual(db.signedInAdmins(fd().id), []);
+    assert.match(((await r.json()) as { error: string }).error, /only member of Field Day Lab who maintains users/);
+    // With a second signed-in one, ada can step down.
+    as('bea', 'none', { fieldday: ['studio.maintain_users'] });
+    assert.equal((await ada.post('/portal/api/s/fieldday/members', { login: 'ada', permissions: ['studio.view', 'studio.edit'] })).status, 200);
+    assert.deepEqual(db.studioPermissionsOf(fd().id, 'ada'), ['studio.view', 'studio.edit']);
+    // Vault staff who maintain users may remove the last one.
+    const uma = as('uma', ['vault.users.maintain']);
+    assert.equal((await uma.post('/portal/api/s/fieldday/members/remove', { login: 'bea' })).status, 200);
+    assert.deepEqual(db.signedInUserMaintainers(fd().id), []);
   });
 
   test('bad input is refused', async () => {
@@ -171,117 +176,127 @@ describe('studio members', () => {
 });
 
 describe('Vault People page', () => {
-  test('any Vault staff sees everyone and every invitation; only Vault admins get the forms', async () => {
+  test('Vault staff who maintain users see everyone and every invitation, with the forms; nobody else sees the page', async () => {
     const p = everyone();
     db.setMembership(fd().id, 'invitee', 'maintainer', 'user:ada');
-    const adminPage = await (await p.vaultAdmin.get('/vault/people')).text();
-    assert.match(adminPage, /<h2>Add someone<\/h2>/);
-    assert.match(adminPage, /name="vaultRole"/);
-    assert.match(adminPage, /invitee<\/b><span><span class="pill p-wait">Invited/);
-    assert.match(adminPage, /otto<\/b>[\s\S]*Other Studio/);
-    const rm = await (await p.releaseManager.get('/vault/people')).text();
-    assert.match(rm, /invitee/);
-    assert.doesNotMatch(rm, /<h2>Add someone<\/h2>|data-api/);
-    for (const who of [p.studioAdmin, p.maintainer, p.viewer]) assert.equal((await who.get('/vault/people')).status, 403);
+    for (const who of [p.vaultAdmin, p.userMaintainer]) {
+      const page = await (await who.get('/vault/people')).text();
+      assert.match(page, /<h2>Add someone<\/h2>/);
+      for (const perm of VAULT_PERMISSIONS) assert.match(page, new RegExp(`name="${perm}"`));
+      assert.match(page, /invitee<\/b><span><span class="pill p-wait">Invited/);
+      assert.match(page, /otto<\/b>[\s\S]*Other Studio/);
+      assert.match(await (await who.get('/vault/analytics')).text(), /href="\/vault\/people"/);
+    }
+    for (const who of [p.contentEditor, p.blogEditor, p.studioAdmin, p.maintainer, p.viewer]) assert.equal((await who.get('/vault/people')).status, 403);
+    assert.doesNotMatch(await (await p.contentEditor.get('/')).text(), /href="\/vault\/people"/);
     assert.equal((await p.signedOut.get('/vault/people')).status, 302);
   });
 
-  test('adding someone with a Vault role: now if they have signed in, at first sign-in otherwise', async () => {
+  test('adding someone with Vault permissions: theirs now if they have signed in, from their first sign-in otherwise', async () => {
     const p = everyone();
     const add = (body: unknown) => p.vaultAdmin.post('/portal/api/vault/members', body);
-    assert.equal((await add({ login: 'nobody' })).status, 400, 'needs a studio or a Vault role');
-    assert.equal((await add({ login: 'vera', vaultRole: 'king' })).status, 400);
-    // Signed in already: the role applies now; a studio and role can come along.
-    assert.equal((await add({ login: 'vera', vaultRole: 'release_manager', studio: 'other', role: 'maintainer' })).status, 200);
-    assert.equal(db.userByLogin('vera')!.vault_role, 'release_manager');
-    assert.equal(db.roleIn(db.studioBySlug('other')!.id, 'vera'), 'maintainer');
-    assert.equal((await add({ login: 'boss', vaultRole: 'none', studio: 'other', role: 'viewer' })).status, 200, 'own studio role is fine');
-    assert.equal((await add({ login: 'boss', vaultRole: 'release_manager' })).status, 400, 'not your own Vault role');
-    // Not signed in yet: a Vault-only invitation shows on People and applies at first sign-in.
-    assert.equal((await add({ login: 'Newbie', vaultRole: 'admin' })).status, 200);
-    assert.match(await (await p.vaultAdmin.get('/vault/people')).text(), /Newbie<\/b><span><span class="pill p-wait">Invited[\s\S]*<option value="admin" selected>Vault admin<\/option>[\s\S]*<span class="muted">\(at first sign-in\)/);
+    assert.equal((await add({ login: 'nobody' })).status, 400, 'needs a studio or a Vault permission');
+    assert.equal((await add({ login: 'vera', 'vault.king': true })).status, 400);
+    // Signed in already: the permissions apply now; a studio and its permissions can come along.
+    assert.equal((await add({ login: 'vera', 'vault.content.edit': true, studio: 'other', 'studio.edit': true })).status, 200);
+    assert.deepEqual(db.vaultPermissionsOf('vera'), ['vault.content.edit']);
+    assert.equal(db.userByLogin('vera')!.vault_role, 'release_manager', 'the old column follows');
+    assert.deepEqual(db.studioPermissionsOf(db.studioBySlug('other')!.id, 'vera'), ['studio.view', 'studio.edit']);
+    assert.equal((await add({ login: 'boss', studio: 'other', 'studio.view': true })).status, 200, 'own studio permissions are fine');
+    assert.equal((await add({ login: 'boss', 'vault.blog.edit': true })).status, 400, 'not your own Vault permissions');
+    // Not signed in yet: shows on People and applies at first sign-in.
+    assert.equal((await add({ login: 'Newbie', 'vault.users.maintain': true, 'vault.content.edit': true, 'vault.blog.edit': true })).status, 200);
+    assert.match(await (await p.vaultAdmin.get('/vault/people')).text(), /Newbie<\/b><span><span class="pill p-wait">Invited[\s\S]*name="vault\.users\.maintain" checked[\s\S]*<span class="muted small">\(at first sign-in\)/);
     assert.equal((await signInWithGitHub('newbie')).status, 302);
+    assert.deepEqual(db.vaultPermissionsOf('newbie'), VAULT_PERMISSIONS);
     assert.equal(db.userByLogin('newbie')!.vault_role, 'admin');
-    assert.equal(db.vaultInvites().length, 0);
-    assert.equal((await p.releaseManager.post('/portal/api/vault/members', { login: 'x', vaultRole: 'admin' })).status, 403);
+    for (const who of [p.contentEditor, p.blogEditor, p.studioAdmin]) assert.equal((await who.post('/portal/api/vault/members', { login: 'x', 'vault.blog.edit': true })).status, 403);
+    assert.equal((await p.userMaintainer.post('/portal/api/vault/members', { login: 'x', 'vault.blog.edit': true })).status, 200);
   });
 
-  test('someone who hasn’t signed in: their Vault role is shown, changed and removed in the table like anyone’s', async () => {
+  test('someone who hasn’t signed in: their Vault permissions are shown, changed and removed in the table like anyone’s', async () => {
     const p = everyone();
-    const set = (body: unknown, who = p.vaultAdmin) => who.post('/portal/api/vault/invites', body);
+    const set = (body: unknown, who = p.vaultAdmin) => who.post('/portal/api/vault/permissions', body);
     const row = (page: string, login: string) => page.slice(page.indexOf(`<b>${login}</b>`), page.indexOf('</tr>', page.indexOf(`<b>${login}</b>`)));
     const people = async (who = p.vaultAdmin) => (await who.get('/vault/people')).text();
-    const waiting = () => Object.fromEntries(db.vaultInvites().map((v) => [v.github_login, v.vault_role]));
-    // Invited to a studio only: a Vault role can be given from their row, before they ever sign in.
+    const VAULT_CHECKED = /name="vault\.[a-z.]+" checked/;
+    // Invited to a studio only: Vault permissions can be given from their row, before they ever sign in.
     db.setMembership(fd().id, 'invitee', 'maintainer', 'user:ada');
-    assert.match(row(await people(), 'invitee'), /data-api="\/portal\/api\/vault\/invites"[^]*name="login" value="invitee"[^]*<option value="none" selected>No Vault role/);
+    assert.match(row(await people(), 'invitee'), /data-api="\/portal\/api\/vault\/permissions"[^]*name="login" value="invitee"/);
+    assert.doesNotMatch(row(await people(), 'invitee'), VAULT_CHECKED);
     assert.doesNotMatch(row(await people(), 'invitee'), /at first sign-in/);
-    assert.equal((await set({ login: 'invitee', role: 'release_manager' })).status, 200);
-    assert.deepEqual(waiting(), { invitee: 'release_manager' });
-    assert.match(row(await people(), 'invitee'), /<option value="release_manager" selected>Release manager<\/option>[^]*\(at first sign-in\)/);
-    // Changed, then removed; the login's capitalization doesn't matter.
-    assert.equal((await set({ login: 'Invitee', role: 'admin' })).status, 200);
-    assert.deepEqual(waiting(), { invitee: 'admin' });
-    assert.match(row(await people(p.releaseManager), 'invitee'), /Vault admin <span class="muted">\(at first sign-in\)/, 'other Vault staff see it, without the form');
-    assert.doesNotMatch(await people(p.releaseManager), /data-api/);
-    assert.equal((await set({ login: 'invitee', role: 'none' })).status, 200);
-    assert.deepEqual(waiting(), {});
-    assert.match(row(await people(), 'invitee'), /<option value="none" selected>/, 'still invited to the studio');
-    assert.deepEqual(db.auditFor(['vault.invite'], 10).map((a) => JSON.parse(a.detail_json!)).reverse(),
-      [{ role: 'release_manager', from: 'none' }, { role: 'admin', from: 'release_manager' }, { role: 'none', from: 'admin' }]);
+    assert.deepEqual(await (await set({ login: 'invitee', permissions: ['vault.content.edit'] })).json(), { ok: true, pending: true });
+    assert.deepEqual(db.vaultPermissionsOf('invitee'), ['vault.content.edit']);
+    assert.match(row(await people(), 'invitee'), /name="vault\.content\.edit" checked[^]*\(at first sign-in\)/);
+    // Changed (from the editor's checkboxes), then removed; the login's capitalization doesn't matter.
+    assert.equal((await set({ login: 'Invitee', 'vault.blog.edit': 'on' })).status, 200);
+    assert.deepEqual(db.vaultPermissionsOf('invitee'), ['vault.blog.edit']);
+    assert.match(row(await people(p.userMaintainer), 'invitee'), /name="vault\.blog\.edit" checked[^]*\(at first sign-in\)/);
+    assert.equal((await set({ login: 'invitee', permissions: [] })).status, 200);
+    assert.deepEqual(db.vaultPermissionsOf('invitee'), []);
+    assert.doesNotMatch(row(await people(), 'invitee'), VAULT_CHECKED, 'still invited to the studio');
+    assert.match(row(await people(), 'invitee'), /Invited/);
+    assert.deepEqual(db.auditFor(['vault.permissions'], 10).map((a) => JSON.parse(a.detail_json!)).reverse(), [
+      { permissions: ['vault.content.edit'], from: [], invited: true },
+      { permissions: ['vault.blog.edit'], from: ['vault.content.edit'], invited: true },
+      { permissions: [], from: ['vault.blog.edit'], invited: true },
+    ]);
     // A Vault-only invitation that is removed leaves nothing: the person is off the page.
-    assert.equal((await p.vaultAdmin.post('/portal/api/vault/members', { login: 'Newbie', vaultRole: 'admin' })).status, 200);
-    assert.match(row(await people(), 'Newbie'), /name="login" value="Newbie"[^]*<option value="admin" selected>/);
-    assert.equal((await set({ login: 'newbie', role: 'none' })).status, 200);
+    assert.equal((await p.vaultAdmin.post('/portal/api/vault/members', { login: 'Newbie', 'vault.content.edit': true })).status, 200);
+    assert.match(row(await people(), 'Newbie'), /name="login" value="Newbie"[^]*name="vault\.content\.edit" checked/);
+    assert.equal((await set({ login: 'newbie', permissions: [] })).status, 200);
     assert.doesNotMatch(await people(), /Newbie/);
     assert.equal((await signInWithGitHub('newbie')).status, 302);
-    assert.equal(db.userByLogin('newbie')!.vault_role, 'none', 'a removed role isn’t applied at sign-in');
-    // The role that is waiting when they sign in is the one they get.
-    assert.equal((await set({ login: 'invitee', role: 'release_manager' })).status, 200);
+    assert.equal(db.userByLogin('newbie')!.vault_role, 'none', 'removed permissions aren’t given at sign-in');
+    // What they hold when they sign in is what they have.
+    assert.equal((await set({ login: 'invitee', permissions: ['vault.content.edit'] })).status, 200);
     assert.equal((await signInWithGitHub('invitee')).status, 302);
+    assert.deepEqual(db.vaultPermissionsOf('invitee'), ['vault.content.edit']);
     assert.equal(db.userByLogin('invitee')!.vault_role, 'release_manager');
-    assert.deepEqual(waiting(), {});
-    assert.match(row(await people(), 'invitee'), /data-api="\/portal\/api\/vault\/users\/\d+\/role"[^]*<option value="release_manager" selected>/);
-    // A page drawn before they signed in still works: the role changes now, and nothing is left waiting.
-    assert.deepEqual(await (await set({ login: 'invitee', role: 'admin' })).json(), { ok: true, pending: false });
+    assert.doesNotMatch(row(await people(), 'invitee'), /at first sign-in/);
+    assert.deepEqual(await (await set({ login: 'invitee', permissions: VAULT_PERMISSIONS })).json(), { ok: true, pending: false });
     assert.equal(db.userByLogin('invitee')!.vault_role, 'admin');
-    assert.deepEqual(waiting(), {});
-    // Vault admins only; a real role and username; never your own.
-    assert.equal((await set({ login: 'x', role: 'admin' }, p.releaseManager)).status, 403);
-    assert.equal((await set({ login: 'x', role: 'admin' }, p.studioAdmin)).status, 403);
-    assert.equal((await set({ login: 'x', role: 'king' })).status, 400);
-    assert.equal((await set({ login: 'not a login!', role: 'admin' })).status, 400);
-    assert.equal((await set({ login: 'boss', role: 'none' })).status, 400);
-    assert.deepEqual(waiting(), {});
+    // Vault staff who maintain users only; real permissions and username; never your own.
+    assert.equal((await set({ login: 'x', permissions: ['vault.blog.edit'] }, p.contentEditor)).status, 403);
+    assert.equal((await set({ login: 'x', permissions: ['vault.blog.edit'] }, p.studioAdmin)).status, 403);
+    assert.equal((await set({ login: 'x', permissions: ['vault.king'] })).status, 400);
+    assert.equal((await set({ login: 'x', 'vault.king': true })).status, 400);
+    assert.equal((await set({ login: 'not a login!', permissions: ['vault.blog.edit'] })).status, 400);
+    assert.equal((await set({ login: 'boss', permissions: [] })).status, 400);
+    assert.deepEqual(db.vaultPermissionsOf('x'), []);
   });
 
-  test('Vault admins add anyone to any studio there, and change or remove any membership', async () => {
+  test('Vault staff who maintain users add anyone to any studio there, and change or remove any membership', async () => {
     const p = everyone();
     const add = (who: typeof anon, body: unknown) => who.post('/portal/api/vault/members', body);
-    assert.equal((await add(p.vaultAdmin, { studio: 'other', login: 'zed', role: 'admin' })).status, 200);
-    assert.equal(db.roleIn(db.studioBySlug('other')!.id, 'zed'), 'admin');
-    for (const who of [p.releaseManager, p.studioAdmin, p.otherStudioAdmin, p.maintainer, p.viewer]) {
-      assert.equal((await add(who, { studio: 'other', login: 'x', role: 'viewer' })).status, 403);
+    assert.equal((await add(p.vaultAdmin, { studio: 'other', login: 'zed', ...Object.fromEntries(STUDIO_PERMISSIONS.map((x) => [x, true])) })).status, 200);
+    assert.deepEqual(db.studioPermissionsOf(db.studioBySlug('other')!.id, 'zed'), STUDIO_PERMISSIONS);
+    assert.equal((await add(p.userMaintainer, { studio: 'other', login: 'zoe', 'studio.view': true })).status, 200);
+    for (const who of [p.contentEditor, p.blogEditor, p.studioAdmin, p.otherStudioAdmin, p.maintainer, p.viewer]) {
+      assert.equal((await add(who, { studio: 'other', login: 'x', 'studio.view': true })).status, 403);
     }
-    assert.equal((await add(p.signedOut, { studio: 'other', login: 'x', role: 'viewer' })).status, 401);
-    assert.equal((await add(p.vaultAdmin, { studio: 'nope', login: 'x', role: 'viewer' })).status, 404);
-    // The per-membership forms on People use each studio's member API, which Vault admins may use for any studio.
-    assert.equal((await p.vaultAdmin.post('/portal/api/s/other/members', { login: 'otto', role: 'viewer' })).status, 200);
-    assert.equal((await p.vaultAdmin.post('/portal/api/s/other/members/remove', { login: 'zed' })).status, 200);
-    assert.equal(db.roleIn(db.studioBySlug('other')!.id, 'zed'), undefined);
+    assert.equal((await add(p.signedOut, { studio: 'other', login: 'x', 'studio.view': true })).status, 401);
+    assert.equal((await add(p.vaultAdmin, { studio: 'nope', login: 'x', 'studio.view': true })).status, 404);
+    // The per-membership forms on People use each studio's member API, which they may use for any studio.
+    assert.equal((await p.userMaintainer.post('/portal/api/s/other/members', { login: 'otto', 'studio.view': true })).status, 200);
+    assert.equal((await p.userMaintainer.post('/portal/api/s/other/members/remove', { login: 'zed' })).status, 200);
+    assert.equal(db.membership(db.studioBySlug('other')!.id, 'zed'), undefined);
   });
 
-  test('Vault roles: Vault admins only, not their own', async () => {
+  test('Vault permissions: Vault staff who maintain users only, not their own', async () => {
     const p = everyone();
-    const rita = db.users().find((u) => u.login === 'rita')!;
-    for (const who of [p.releaseManager, p.studioAdmin, p.maintainer, p.viewer]) assert.equal((await who.post(`/portal/api/vault/users/${rita.id}/role`, { role: 'admin' })).status, 403);
-    assert.equal((await p.vaultAdmin.post(`/portal/api/vault/users/${rita.id}/role`, { role: 'none' })).status, 200);
-    assert.equal(db.userById(rita.id)!.vault_role, 'none');
+    const set = (who: typeof anon, login: string, permissions: readonly string[]) => who.post('/portal/api/vault/permissions', { login, permissions });
+    for (const who of [p.contentEditor, p.blogEditor, p.studioAdmin, p.maintainer, p.viewer]) assert.equal((await set(who, 'rita', VAULT_PERMISSIONS)).status, 403);
+    assert.deepEqual(db.vaultPermissionsOf('rita'), ['vault.content.edit']);
+    assert.equal((await set(p.userMaintainer, 'rita', [])).status, 200);
+    assert.equal(db.userByLogin('rita')!.vault_role, 'none');
+    assert.equal((await set(p.userMaintainer, 'uma', VAULT_PERMISSIONS)).status, 400);
+    assert.equal((await set(p.signedOut, 'rita', [])).status, 401);
   });
 });
 
 describe('Vault Studios page', () => {
-  test('lists every studio with its counts and origin; staff only; the create form for Vault admins', async () => {
+  test('lists every studio with its counts and origin; staff only; the create form for those who edit game/studio content', async () => {
     const p = everyone();
     db.setMembership(fd().id, 'invitee', 'viewer', 'test');
     const page = await (await p.vaultAdmin.get('/vault/studios')).text();
@@ -290,15 +305,17 @@ describe('Vault Studios page', () => {
     assert.match(page, /New studio/);
     assert.match(page, /\+1 invited/);
     assert.match(page, /studios\.json/);
-    const rm = await (await p.releaseManager.get('/vault/studios')).text();
-    assert.doesNotMatch(rm, /New studio/);
-    assert.equal((await p.releaseManager.get('/vault/studios/fieldday')).status, 200);
+    assert.match(await (await p.contentEditor.get('/vault/studios')).text(), /New studio/);
+    for (const who of [p.blogEditor, p.userMaintainer]) {
+      assert.doesNotMatch(await (await who.get('/vault/studios')).text(), /New studio/);
+      assert.equal((await who.get('/vault/studios/fieldday')).status, 200);
+    }
     for (const who of [p.studioAdmin, p.maintainer, p.viewer]) {
       assert.equal((await who.get('/vault/studios')).status, 403);
       assert.equal((await who.get('/vault/studios/fieldday')).status, 403);
     }
     assert.equal((await p.signedOut.get('/vault/studios')).status, 302);
-    assert.match(await (await p.vaultAdmin.get('/')).text(), /href="\/vault\/studios"/);
+    assert.match(await (await p.vaultAdmin.get('/vault')).text(), /href="\/vault\/studios"/);
   });
 
   test('Vault admins create studios with a GitHub organization or without one', async () => {
@@ -313,8 +330,8 @@ describe('Vault Studios page', () => {
     assert.equal(db.recentAudit(1)[0].action, 'studio.create');
     // The new studio's admin can then manage it.
     const ann = as('ann', 'none', { lgl: 'admin' });
-    assert.equal((await ann.post('/portal/api/s/lgl/members', { login: 'bob', role: 'viewer' })).status, 200);
-    assert.equal((await ann.post('/portal/api/s/fieldday/members', { login: 'bob', role: 'viewer' })).status, 403);
+    assert.equal((await ann.post('/portal/api/s/lgl/members', { login: 'bob', permissions: ['studio.view'] })).status, 200);
+    assert.equal((await ann.post('/portal/api/s/fieldday/members', { login: 'bob', permissions: ['studio.view'] })).status, 403);
   });
 
   test('studio creation is validated', async () => {
@@ -342,16 +359,19 @@ describe('Vault Studios page', () => {
     assert.equal(db.studioBySlug('new'), undefined);
   });
 
-  test('only Vault admins create or edit studios', async () => {
+  test('only Vault staff who edit game/studio content create or edit studios', async () => {
     const p = everyone();
     const body = { name: 'New', slug: 'new', website: '', github: '' };
-    for (const who of [p.releaseManager, p.studioAdmin, p.otherStudioAdmin, p.maintainer, p.viewer]) {
+    for (const who of [p.blogEditor, p.userMaintainer, p.studioAdmin, p.otherStudioAdmin, p.maintainer, p.viewer]) {
       assert.equal((await who.post('/portal/api/vault/studios', body)).status, 403);
       assert.equal((await who.post('/portal/api/vault/studios/other', { name: 'Hacked', website: '', github: '' })).status, 403);
     }
     assert.equal((await p.signedOut.post('/portal/api/vault/studios', body)).status, 401);
     assert.equal(db.studioBySlug('new'), undefined);
     assert.equal(db.studioBySlug('other')!.name, 'Other Studio');
+    assert.equal((await p.contentEditor.post('/portal/api/vault/studios', body)).status, 200);
+    assert.equal((await p.contentEditor.post('/portal/api/vault/studios/new', { name: 'Renamed', website: '', github: '' })).status, 200);
+    assert.equal(db.studioBySlug('new')!.name, 'Renamed');
   });
 
   test('Vault admins edit a portal studio’s name, website and GitHub organization; audited', async () => {

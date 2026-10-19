@@ -5,7 +5,8 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   {{- range .Pages }}
   {{- /* (.Permalink is empty for a section that is never rendered: /games) */}}
-  {{- if and .Permalink (not (or (eq .Layout "home") .Sitemap.Disable)) }}
+  {{- /* (blog pages that are noindex are left out: partials/blog/noindex.html) */}}
+  {{- if and .Permalink (not (or (eq .Layout "home") .Sitemap.Disable (and (eq .Section "blog") (partial "blog/noindex.html" .)))) }}
   <url>
     <loc>{{ partial "sq/canonical.html" . | htmlEscape | safeHTML }}</loc>
     {{- if not .Lastmod.IsZero }}

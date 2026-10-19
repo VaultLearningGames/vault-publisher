@@ -1,0 +1,4 @@
+{{- /* /blog/tag/<tag>/rss.xml: the newest listed posts with that tag (partials/blog/feed.html). */ -}}
+{{- with .Params.tag -}}
+{{- partial "blog/feed.html" (dict "tag" . "posts" (where (where ((hugo.Data.blog | default dict).posts | default slice) "listed" true) "slug" "in" .post_slugs)) -}}
+{{- end -}}

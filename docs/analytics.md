@@ -68,6 +68,10 @@ domain and the same game page addresses. So, with standard fields only (no custo
 * **Top games by page views** (site and studio views): when no game has plays in the range, the top-games card
   ranks the games by their pages' views this period, with their Play-button clicks. Pages that aren't a published
   listing's (of the studio, on its page) are left out.
+* **Load more** (top games, by plays or by page views): the card shows the first 10 games; when there are more, its
+  Load more button asks `/portal/analytics/top-games` (`?studio=`, the page's range, `offset`, `limit` 1–100, default
+  10) for the next ones, ranked by the same figure then by slug, until every game is listed. The answer is
+  `{ items, offset, total, hasMore }`, behind the same access as the page.
 
 A custom range is at most three years (and its comparison as long again); the Data API's reports aren't limited by the property's data-retention setting (only explorations are). Locally, `GA_FAKE=history node scripts/dev-portal.ts` shows a property with page
 views and no play events.

@@ -1,25 +1,33 @@
 # One-time setup
 
 Vault runs two complete, separate systems. They share code and nothing else: each has its own site, portal and
-deployer, database, R2 buckets, keys and GitHub OAuth app. Both the portal and the website are in this repository
-and deploy together (`.github/workflows/deploy.yml`): the portal to Cloud Run, the website (`site/`, static files)
-to Cloudflare's static hosting (a Worker with files and no script).
+deployer, database, R2 buckets, keys and GitHub OAuth app. The portal (this repository) deploys to Cloud Run
+(`.github/workflows/deploy.yml`). The website is **not** in this repository: it is the static Hugo site in
+`VaultLearningGames/vault-site`, which its own *Deploy (site)* workflow builds and publishes to Cloudflare's static
+hosting (a Worker with files and no script). The portal only writes Markdown and the catalog that site is built
+from. The old `site/` folder here is retired and ignored (a board card removes it); where this page below still says
+`site/`, read `vault-site`, and treat the Cloud Run/R2-era steps as history.
 
 | | Production | Staging |
 |---|---|---|
-| Public site (`site/`) | `vaultlearninggames.org` → Worker `vault-site` (still Squarespace until launch) | `vaultlearninggames-staging.org` → Worker `vault-site-staging` (see [The website on Cloudflare static hosting](#the-website-on-cloudflare-static-hosting) for the state of the move from R2) |
+| Public site (`vault-site` repo) | `vaultlearninggames.org` → Worker `vault-site` (still Squarespace until launch) | `vaultlearninggames-staging.org` → Worker `vault-site-staging` (see [The website on Cloudflare static hosting](#the-website-on-cloudflare-static-hosting) for the state of the move from R2) |
 | Portal and deployer (this repo) | `portal.vaultlearninggames.org` → `vault-publisher` | `portal.vaultlearninggames-staging.org` → `vault-publisher-staging` |
 | Studios' test builds | `builds.vaultlearninggames.org` → R2 `builds-vaultlearninggames` | `builds.vaultlearninggames-staging.org` → `builds-vaultlearninggames-staging` |
 | Releases | `cdn.vaultlearninggames.org` → R2 `cdn-vaultlearninggames` | `cdn.vaultlearninggames-staging.org` → `cdn-vaultlearninggames-staging` |
-| Database (Litestream) | GCS `PROJECT-vault-publisher-db` | GCS `PROJECT-vault-publisher-staging-db`, first seeded from production's |
+| Database (Litestream) | GCS `PROJECT-vault-publisher-db` | GCS `PROJECT-vault-publisher-staging-db`, a disposable copy of production's, replaced from it daily and on demand ([Re-seeding staging's database](#re-seeding-stagings-database)) |
 | Deployed from | the `production` branch | `main` |
 
-Studios only ever use production. Staging is where Vault tries the next version; only
+Studios only ever use production. Staging is throwaway: it is for testing the portal's code, the site's layouts and the
+process (never content), and everything on it can be discarded. Content is made on production and flows to staging, not
+the other way. Staging is where Vault tries the next version; only
 `VaultLearningGames/vault-publisher-test` publishes to it.
 
+The staging banner also counts down to the next daily sync from production (`STAGING_SYNC_UTC_HOUR`, default 9, UTC; the
+re-seed job must run at that hour). The countdown is only a display: the re-seed job itself is a separate card.
+
 The staging portal says so on every page, signed in or not: a banner at the top that can't be closed, saying that what
-is saved there (settings, game data, listings) applies only to staging and is overwritten whenever the Vault code
-changes, and that real changes are made and previewed on the production portal. The portal decides from its own
+is saved there (settings, game data, listings) is thrown away: staging is for testing layouts and the portal, content is written on the production portal and flows
+down to staging (never up), and only code is promoted. Real changes are made on the production portal. The portal decides from its own
 address: `PORTAL_URL` containing `staging` (the deploy already refuses a staging `PORTAL_URL` without it, and a
 production one with it), so there is nothing to set.
 
@@ -105,7 +113,7 @@ gcloud iam service-accounts create vault-publisher-staging --display-name "vault
 gcloud storage buckets create gs://$PROJECT-vault-publisher-staging-db --location=$REGION --uniform-bucket-level-access
 gcloud storage buckets update gs://$PROJECT-vault-publisher-staging-db --versioning
 gcloud storage buckets add-iam-policy-binding gs://$PROJECT-vault-publisher-staging-db --member=serviceAccount:$SA --role=roles/storage.objectAdmin
-# Read-only on production's database, only to seed staging's first start (docker-entrypoint.sh).
+# Read-only on production's database, only to seed staging from it (docker-entrypoint.sh: the first start and every re-seed).
 gcloud storage buckets add-iam-policy-binding gs://$PROJECT-vault-publisher-db --member=serviceAccount:$SA --role=roles/storage.objectViewer
 
 newsecret vault-publisher-staging-r2-builds-access-key-id        # builds-vaultlearninggames-staging token
@@ -224,7 +232,8 @@ rclone copy r2:cdn-vaultlearninggames-staging r2:builds-vaultlearninggames --pro
 5. Add `https://builds.vaultlearninggames.org` to the CORS allowlists of game servers that test builds call (Aqualab's
    save server, OpenGameData logging if it checks origins).
 
-Then deploy staging: push to `main`. On its first start it seeds its database from production's.
+Then deploy staging: push to `main`. On its first start it seeds its database from production's, and from then on
+[Re-seed staging's database](#re-seeding-stagings-database) replaces it with production's every day.
 
 ## 6. Custom domains
 
@@ -300,6 +309,13 @@ hour, and a filled `company_website` honeypot field is accepted but not written.
 submitted values; each saved submission adds a `form.submit` audit entry (form and site only).
 
 ## The website on Cloudflare static hosting
+
+> **Retired parts.** Everything in this section that builds or deploys from `site/`, `site:build`,
+> `src/site-hosting.ts`, `cloudflare/site/` or this repository's deploy workflow now lives in vault-site (its
+> README and `.github/workflows/deploy.yml`). The Worker names, hostnames, cutover and cleanup steps are still the
+> record of how the hosting was set up. The 2026-10-02 state below is out of date: vault-site deploys staging from its
+> `staging` branch; `production` does not exist yet. Staging content is throwaway (reset from production), see
+> [vault-site](vault-site.md).
 
 The website (`site/`) is a few hundred static files. The deploy workflow builds them and publishes the build to the
 system's **Worker** (`vault-site-staging`, `vault-site`) as Workers Static Assets: Cloudflare stores the files and
@@ -640,13 +656,76 @@ back in a rollback).
 
 ### Rebuilding the site when listings change
 
-Publishing a listing changes `/v1/catalog`, not the site: someone runs *Deploy (portal and site)* with *Rebuild the
-site only* (README, [The website](../README.md#the-website)). Not built yet: the portal starting that run itself.
-Two ways it could: (a) the portal calls GitHub's `workflow_dispatch` for `deploy.yml` (`site_only=true`) a couple of
+Publishing a listing changes `/v1/catalog`, not the site: someone runs vault-site's *Deploy (site)* (README, [The website](../README.md#the-website)). Not built yet: the portal starting that run itself.
+Two ways it could: (a) the portal calls GitHub's `workflow_dispatch` for vault-site's `deploy.yml` a couple of
 minutes after the last publish, unpublish or featured change, which needs a GitHub credential with *Actions: write*
 on this repository in Secret Manager; or (b) a scheduled workflow that compares the catalog with the one the
 published site was built from (a hash published as a file of the site) and rebuilds only when they differ, which
 needs no new credential and is at most one schedule interval late.
+
+### The blog: posts as Markdown in vault-site
+
+Blog posts live in `VaultLearningGames/vault-site` as `content/blog/<slug>/index.md` on the system's branch (the
+staging portal: `staging`; the production portal: `production`), read and written by the portal's blog editor through
+GitHub's API (`src/site-content/`, `src/blog/siteRepo.ts`, `src/site-repo/`). Every commit is made by the
+`vault-portal-bot` user and ends with a `Portal-User: <login>` trailer naming the editor. Save, Publish,
+Unpublish, a slug rename (new folder, `/blog/<old>/` added to `aliases`, the post's CDN images moved to
+`site/<new slug>/`) and Delete are each one commit; the file's SHA as loaded is the conflict check (409). Autosaves
+are not commits: they are kept in the portal's database (`blog_scratch`) until the next Save. Each commit to vault-site
+runs that repository's own workflow (Hugo build and publish); the portal no longer builds or rebuilds the blog, has no
+`/v1/blog`, and sends `/blog/...` to `SITE_URL`. The editor's Preview builds the post with Hugo on the site source at
+`SITE_DIR`. Settings, read when the blog is first used (without a token the blog pages say the repository isn't
+connected):
+
+| Variable | Default | |
+|---|---|---|
+| `VAULT_SITE_GITHUB_TOKEN` | (none: required) | `vault-portal-bot`'s fine-grained token for vault-site only: *Contents: Read and write*, *Metadata: Read*; one per system |
+| `VAULT_SITE_REPO` | `VaultLearningGames/vault-site` | |
+| `VAULT_SITE_BRANCH` | `production` when `SITE_REBUILD_ENVIRONMENT` is `production`, else `staging` | the branch posts are read from and committed to; a commit there deploys that site |
+| `VAULT_SITE_BLOG_DIR` | `content/blog` | |
+| `VAULT_SITE_API_BASE` | `https://api.github.com` | |
+| `SITE_COMMIT_AUTHOR_NAME` | `vault-portal-bot` | the commits' author and committer |
+| `SITE_COMMIT_AUTHOR_EMAIL` | `vault-portal-bot@users.noreply.github.com` | |
+| `SITE_PUBLISHING_ENABLED` | on | `false` (or `0`, `no`, `off`) refuses every write to vault-site at once (503 `publishing_disabled`); reads still work |
+
+The one-time setup only people can do (the bot user, its tokens, branch protection) is in
+[ops-checklist.md](ops-checklist.md).
+
+### The deploy bar
+
+Every portal page shows a bar while a deploy of that system runs (README, [The deploy bar](../README.md#the-deploy-bar)).
+The portal reads the runs of *Deploy (portal)* (this repository) and *Deploy (site)* (vault-site) from GitHub
+Actions. `VAULT_SITE_GITHUB_TOKEN` can't (it is *Contents* only), so the bar has its own token: a fine-grained token
+on the VaultLearningGames organization with **Actions: Read-only** on `vault-publisher` and `vault-site` and nothing
+else. Settings:
+
+| Variable | Default | |
+|---|---|---|
+| `DEPLOY_STATUS_GITHUB_TOKEN` | (none: no bar) | the token above; empty or unset turns the bar off |
+| `DEPLOY_STATUS_STAGING_BRANCH` | `main` | the branch whose runs are the staging portal's deploys |
+| `DEPLOY_STATUS_PRODUCTION_BRANCH` | `production` | the branch whose runs are the production portal's deploys |
+| `DEPLOY_ESTIMATE_MINUTES` | `10` | how long after a deploy is scheduled the bar says it should be done (a positive whole number) |
+
+vault-site's *Deploy (site)* runs are read on the branch the portal commits to there (`VAULT_SITE_BRANCH`, else
+`staging` or `production`), not on these.
+
+Which system a portal is: staging when its `PORTAL_URL` is a staging address (the one that shows the staging banner),
+production when it isn't and `SITE_REBUILD_ENVIRONMENT` (set by `deploy.yml`) is `production`; anything else (a local
+portal, the tests) shows no bar. The answer is cached for 15 s; when GitHub can't be read the last answer stands for
+2 minutes, then no bar.
+
+Staging (once, **before** the change that adds it to `deploy.yml` is deployed: Cloud Run refuses a revision whose
+secret doesn't exist):
+
+```bash
+printf 'token: '; read -rs v; echo; printf '%s' "$v" | gcloud secrets create vault-publisher-staging-deploy-status-token --data-file=-; unset v
+gcloud secrets add-iam-policy-binding vault-publisher-staging-deploy-status-token \
+  --member=serviceAccount:vault-publisher-staging@PROJECT.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+```
+
+(The service account is the staging environment's `PUBLISHER_SERVICE_ACCOUNT`.)
+`deploy.yml` passes it to staging only. Production, later: create `vault-publisher-deploy-status-token` the same way,
+then make the `DEPLOY_STATUS_GITHUB_TOKEN` line in `deploy.yml` apply to both systems.
 
 ## 9. Pilot
 
@@ -657,6 +736,55 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
 - a newer Unity game with Brotli (`.br`) files also loads;
 - Aqualab's save server accepts requests from the new origin (CORS);
 - deleting the branch removes the preview.
+
+## Re-seeding staging's database
+
+Staging's data is always a copy of production's: content is made on production and flows to staging, and whatever
+was saved on staging (test games, settings, listings) is discarded. The workflow *Re-seed staging's database*
+(`.github/workflows/reseed-staging.yml`) does it every day at 09:17 UTC, and on demand:
+
+```bash
+gh workflow run reseed-staging.yml -R VaultLearningGames/vault-publisher
+```
+
+How it works, with no new permission or secret:
+
+1. The workflow, in the `staging` environment, refuses to run unless `SERVICE` is `vault-publisher-staging`,
+   `LITESTREAM_BUCKET` and `PORTAL_URL` are staging's and `LITESTREAM_SEED_BUCKET` isn't. As the deploy account
+   (which already deploys staging) it sets one variable on staging's Cloud Run service,
+   `LITESTREAM_RESEED=<run id>-<attempt>`: a new revision of the same image. It shares the staging deploy's
+   concurrency group, so it never runs during a deploy.
+2. The new revision's `docker-entrypoint.sh` sees an id its database doesn't have, deletes the local copy of staging's
+   database, restores production's (`gcs://$LITESTREAM_SEED_BUCKET/publisher.db`) in its place and records the id in
+   the copy (table `staging_reseed`, `src/staging-reseed.ts`). Litestream then replicates the copy to staging's bucket
+   as a new generation, which is what later restores pick. Production's bucket is only read: staging's service
+   account has `roles/storage.objectViewer` on it (2.2) and nothing more, and the restore writes only the local file.
+3. Restarts of that revision restore staging's replica, find the id and keep what testers did since. A replica
+   without it (an older generation written by the outgoing instance) is re-seeded again. The next deploy drops the
+   variable (it overwrites the service's variables), so nothing is re-seeded until the next run.
+4. If production's replica can't be read, the new revision fails to start and the running one keeps serving; the
+   workflow fails. It then checks `PORTAL_URL/health`.
+
+The entrypoint also refuses a re-seed when `LITESTREAM_BUCKET` isn't staging's, so the variable set on production by
+mistake stops the start instead of touching anything.
+
+**Checking a re-seed.** Before, add something to staging only (a studio or a game's listing), and note a row that
+exists only on production (production's newest `audit_log` row, newer than staging's last re-seed). Note production's
+replica: `gcloud storage ls -l -r gs://$PROJECT-vault-publisher-db/publisher.db > /tmp/prod-before.txt`. Run the
+workflow, then:
+
+```bash
+litestream restore -o /tmp/staging.db gcs://$PROJECT-vault-publisher-staging-db/publisher.db
+sqlite3 /tmp/staging.db 'select * from staging_reseed'                      # this run's id
+sqlite3 /tmp/staging.db "select slug from studios where slug = 'THE-STAGING-ONLY-ONE'"   # nothing
+sqlite3 /tmp/staging.db 'select id, action from audit_log order by id desc limit 1'    # production's newest row
+gcloud storage ls -l -r gs://$PROJECT-vault-publisher-db/publisher.db > /tmp/prod-after.txt
+diff /tmp/prod-before.txt /tmp/prod-after.txt   # production changes only with its own writes, never a staging_reseed
+```
+
+(Production may have written new WAL segments of its own in between; what matters is that nothing was deleted and its
+database has no `staging_reseed` table: `litestream restore -o /tmp/prod.db gcs://$PROJECT-vault-publisher-db/publisher.db`
+then `sqlite3 /tmp/prod.db "select name from sqlite_master where name = 'staging_reseed'"` prints nothing.)
 
 ## Operating notes
 
@@ -674,9 +802,9 @@ Add the caller workflow from the README to a branch of `fielddaylab/wake`, push,
 
 - **Restore test:** `litestream restore -o /tmp/check.db gcs://PROJECT-vault-publisher-db/publisher.db`, then
   `sqlite3 /tmp/check.db 'select * from audit_log order by id desc limit 5'`.
-- **Refresh staging's data from production:** delete staging's replica
-  (`gcloud storage rm -r gs://PROJECT-vault-publisher-staging-db/publisher.db`) and redeploy staging. Staging's copies of
-  production previews and releases are records only; their files aren't in staging's buckets.
+- **Refresh staging's data from production:** run *Re-seed staging's database*
+  (`gh workflow run reseed-staging.yml`); see [Re-seeding staging's database](#re-seeding-stagings-database).
+  Staging's copies of production previews and releases are records only; their files aren't in staging's buckets.
 - **Deploys** briefly run the old and new instance together. Writes are rare (one per push), but avoid
   deploying while a large batch of game builds is publishing.
 - **The portal's "Need support?" link** (the sidebar's foot and the sign-in page) invites people to the Slack workspace

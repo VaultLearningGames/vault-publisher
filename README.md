@@ -13,8 +13,9 @@ The portal publishes web game builds to Vault Learning Games:
 - **Releases** (Vault releases them): `https://cdn.vaultlearninggames.org/STUDIO/GAME/` → the current release
 
 Studios manage games, members and release requests at **https://portal.vaultlearninggames.org**. The staging portal
-(`portal.vaultlearninggames-staging.org`) is for previewing features: a banner on every page says that what is saved
-there is overwritten whenever the code changes ([docs/setup.md](docs/setup.md)).
+(`portal.vaultlearninggames-staging.org`) is for testing layouts and the portal, never content: a banner on every page says that
+content is written on production and flows down to staging, anything saved there is thrown away, and only code is promoted. Its database is replaced with a copy of
+production's every day and on demand (`gh workflow run reseed-staging.yml`; [docs/setup.md](docs/setup.md#re-seeding-stagings-database)).
 
 ## Site checks dashboard
 
@@ -67,7 +68,7 @@ this version reaches the `production` branch) shows its badges as not found.
 | `public/setup.js` | Upload builds page: workflow snippets, and reading and uploading a zip in the browser |
 | `src/{releases,storage,paths,config,forms,catalog,game-checks}.ts` | Domain logic |
 | `src/studios-file.ts` | `studios.json` at startup: studios and the repositories assigned to them |
-| `src/portal/site-preview.ts` | Listing previews: runs Hugo on `site/` with the previewed game in the catalog, and returns its page |
+| `src/portal/site-preview.ts`, `src/site-dir.ts` | Listing and blog previews: runs Hugo on a temporary copy of vault-site (found by `resolveSiteDir()`) with the previewed game or post in place, and returns its page |
 | `src/site-hosting.ts`, `scripts/site-hosting.ts` | The static hosting's `_headers`, `_redirects` and `robots.txt`, written into the built site (`site/public`) |
 | `cloudflare/site/` | The site's hosting: `wrangler.jsonc` (one Worker per system, files only), the pinned wrangler, `check.sh` |
 | `scripts/site-check.ts` | Checks a served copy of the site against its build: every address, redirects, 404 page, headers, and each page's canonical address, title and structured data |
@@ -96,6 +97,7 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `GET /v1/admin/listings` · `POST /v1/admin/listings/{import,migrate-images,move,update}` · `GET`/`POST /v1/admin/image-variants` | [Admin tasks](#admin-tasks): the Vault-admin listing operations, for workflows |
 | | `GET /v1/releases/:studio/:game[/check]` | Read-only: a game's releases, or pre-flight check of a release run |
 | | `GET /v1/catalog` | Public: site listings, studios, featured games |
+| | `GET /v1/blog` | Public: the blog's public posts, tags and old-slug redirects, for the site build |
 | | `GET /v1/site-checks/badge/:name` | Public: the [dashboard](#site-checks-dashboard)'s badges (`all`, `when`, or a check's name) from the latest site checks run, as shields.io endpoint JSON; counts only |
 | Google ID token | `POST /v1/tasks/cleanup` | Nightly: expire stale previews, then check URL monitors for up to 100 s (Cloud Scheduler) |
 | | `POST /v1/tasks/monitors` | Check every URL monitor (up to 12 min) |
@@ -107,10 +109,19 @@ Common: JSON `{ error, detail }` errors; 4 MB body limit on `/v1/*`; every mutat
 | | `POST /portal/api/s/:studio/uploads` + `/:id/finalize` | A zip uploaded in the portal: presigned PUTs per file, then record the test build |
 | | `POST /portal/api/s/:studio/monitors[/:id/check\|delete]` | URL monitors: register (and copy now), check now, stop |
 | | `POST /portal/api/s/:studio/members[?]` | Studio members add/remove, website URL |
-| | `POST /portal/api/vault/…` | Vault-admin: studios CRUD, a studio's `repositories` (add/remove), users/roles, listings import, featured |
+| | `POST /portal/api/vault/…` | Vault staff: studios CRUD, a studio's `repositories` (add/remove), listings import, featured (`vault.content.edit`); people and Vault `permissions` (`vault.users.maintain`) |
 | Public (token) | `GET /_preview/:token/` · `GET /v1/listing-previews/:token` | An unsaved listing preview, rendered as the website's page (the second answers the preview's JSON to `Accept: application/json`) |
 
-**Admin-lane** routes (`/v1/admin/*`) additionally require the token's repository to be the admin repo running in the protected environment; **portal mutations** require a signed-in Vault-admin session.
+**Admin-lane** routes (`/v1/admin/*`) additionally require the token's repository to be the admin repo running in the protected environment; **portal mutations** require a signed-in session holding the route's permission.
+
+Portal permissions (`src/permissions.ts`, the single source of truth) are two fixed sets. **Vault staff** (by GitHub
+login, so they can be given before a first sign-in; `VAULT_ADMINS` always hold all three): `vault.users.maintain`
+(*Maintain users*: People, everyone's Vault permissions, every studio's members), `vault.content.edit` (*Edit game/studio
+content*: any studio's games and listings, approving releases and publishing, studios) and `vault.blog.edit` (*Edit blog
+posts*: the whole blog). **Studio members**, per membership: `studio.view` (*View*), `studio.edit` (*Edit*: listings,
+uploads, deleting games), `studio.request_publish` (*Request publish*: release requests, submitting listings, switching
+between approved releases) and `studio.maintain_users` (*Maintain users*: members and the studio's website). Every studio
+permission implies *View*; anything outside the sets is refused with 400.
 
 Vault also runs a separate staging copy of all of this (site, portal, test builds, releases) on
 `vaultlearninggames-staging.org` for trying new versions. Studios never need it. See [docs/setup.md](docs/setup.md).
@@ -276,13 +287,13 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   draft, so it reaches the site through the same review. The site must handle both site paths and absolute https URLs
   for `hero_image`, `thumb_image` and `screenshots`. `_vault-assets/` belongs to Vault: switching releases and rollback
   leave it alone, and a build containing a top-level `_vault-assets/` folder can't be released.
-* Vault publishes them from **Vault → Game Catalog**, sends them back with a note, or takes the game off the site.
+* Vault publishes them from **Vault → Games**, sends them back with a note, or takes the game off the site.
 * Vault staff's editor has one **Save and Publish Changes** button (saves the draft and publishes it); studio members
   have **Save and Submit for Review**: every studio save goes to Vault for review.
 * **Preview** shows the editor's unsaved edits as the website would: the form is cleaned up as a save would (nothing
   is saved), turned into the game object `/v1/catalog` would publish and kept for 30 minutes (in memory) under a
-  random token. The portal renders the page itself at `PORTAL/_preview/TOKEN/`: it runs Hugo on `site/` (the same
-  templates as the live site, carried in the image) with the published catalog and that game put in its place, makes
+  random token. The portal renders the page itself at `PORTAL/_preview/TOKEN/`: it runs Hugo on vault-site (the same
+  templates as the live site; the image carries the commit pinned in `vault-site.ref`) with the published catalog and that game put in its place, makes
   the page's addresses absolute to the site (`SITE_URL`), so its CSS, scripts and images load from the live site, and
   adds a "Preview — not published" badge.
   * At most two Hugo builds run at once (others wait), each stopped after 25 s; a rendered page is kept per token for
@@ -310,11 +321,11 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   carries the studio's website as `url`, and `studios` lists every studio with a game on the site or named as a
   maker of one (`slug`, `name`, `url`) so the site can link maker names. Studio admins set the website on their
   **Members** page.
-* **Vault → Game Catalog** is one table of every site listing: its site status, where it plays from, whether it's
-  featured, and whether it still loads.
-  * **Availability** columns show the latest daily check by `check-games.yml` (see
-    [docs/setup.md](docs/setup.md#operating-notes)): result (hover for why), response time, and when (linking the
-    GitHub run). Each game's page shows its latest result too.
+* **Vault → Games** is one table of every site listing: where it plays from, whether it's featured, and whether it
+  still loads. **Add Game** (top right) adds a draft listing in any studio without leaving the page.
+  * **Testing Status** shows the latest daily check by `check-games.yml` (see
+    [docs/setup.md](docs/setup.md#operating-notes)): the result (hover for why). Each game's page shows its latest
+    result too.
   * **Featured** is a checkbox for the home page's Featured Games section (at most 9). Release managers tick it; a
     featured game then gets a sequence number (the home page shows them in ascending sequence, ties by title), an
     optional home-page description (short Markdown) and an optional image. Unticking keeps the description and image
@@ -455,37 +466,91 @@ The bucket can't be listed, so the copy takes the files from where the source bu
 
 ## The website
 
-`site/` is the public site (vaultlearninggames.org): Hugo, theme `vault-squarespace` (the replica of the Squarespace
-design). It came from `VaultLearningGames/vault-hugo-rebuild` (branch `original-squarespace-design`), which is no
-longer where the site is edited or deployed from. Details of the theme: [site/README.md](site/README.md).
+The public site (vaultlearninggames.org) is a **static Hugo site** whose source is
+[`VaultLearningGames/vault-site`](https://github.com/VaultLearningGames/vault-site) (theme `vault-squarespace`). The
+`site/` folder in this repository is retired, ignored by every deploy, and being removed: never edit it.
+
+**How the portal makes the site.** The portal writes content, never pages. Editing a blog post in the portal commits
+Markdown (`content/blog/<slug>/index.md`) to vault-site as `vault-portal-bot`; game pages come from the portal's
+`GET /v1/catalog`. vault-site's *Deploy (site)* workflow runs Hugo over the Markdown, templates and catalog, and
+publishes the resulting static files to Cloudflare. Nothing is rendered per request.
+
+**Production is where content is made; staging is throwaway.** Real posts and listings are written on the
+*production* portal, which commits to vault-site's `production` branch. The staging portal and site
+(`vaultlearninggames-staging.org`) exist only to test portal code, layouts and the process: staging content is
+disposable, is replaced from production on a schedule, and is never promoted. Only code (templates, styles, portal
+changes) goes staging → production, by a reviewed pull request that CI fails if it touches `content/blog` or
+`content/tags`.
 
 * **Game pages come from the portal**, not from files: `npm run site:catalog` saves this system's `GET /v1/catalog`
   to `site/data/catalog.json` (not in git), and `site/content/games/_content.gotmpl` turns each listing into a page.
-* **Build:** `VAULT_PORTAL=https://portal.vaultlearninggames-staging.org npm run site:build` → `site/public`
+* **The blog is Markdown in `VaultLearningGames/vault-site`** (`content/blog/<slug>/index.md`), which the portal's blog
+  editor commits to as `vault-portal-bot`, on the system's branch (`staging` or `production`; docs/setup.md, "The
+  blog"; docs/vault-site.md, "Who does what"). vault-site's own workflow builds and publishes it. The portal has no
+  `/v1/blog` any more, so `npm run site:catalog` leaves this copy's blog empty.
+* **Local build (legacy, uses the retired `site/`; build in vault-site instead):** `VAULT_PORTAL=https://portal.vaultlearninggames-staging.org npm run site:build` → `site/public`
   (catalog, `hugo`, `site/scripts/squarespace-paths.mjs` for the `/game-cards/category|tag/…` addresses, then
   `scripts/site-hosting.ts` for the hosting's `_headers` and `_redirects`).
   `npm run site:dev` serves it on http://localhost:1313. Game images are on the Vault CDN; `site/` holds only the
   theme's own files (17 MB, mostly the Squarespace snapshot images) and `static/files/keys-to-the-vault.pdf`.
-* **Deploy:** the [deploy workflow](.github/workflows/deploy.yml) does it with the portal, from the same commit: build
-  the site from that system's catalog (the forms post to that system's portal, through the
-  `HUGOxPARAMSxFORMSx…` overrides), check the build under the hosting's own runtime (`cloudflare/site/check.sh`),
-  deploy the portal image (which carries `site/` and Hugo for previews), then `wrangler deploy` publishes the build
-  to the system's Worker as static files: `main` → `vault-site-staging`, `production` → `vault-site`
-  (`cloudflare/site/wrangler.jsonc`). Cloudflare serves the files itself, with the build's `404.html` for a missing
+* **Deploy:** the website is built and published ONLY by VaultLearningGames/vault-site (its *Deploy (site)* workflow:
+  push to its `staging` / `production` branch, or Run workflow), to `vault-site-staging` / `vault-site`. This
+  repository's [deploy workflow](.github/workflows/deploy.yml) deploys the portal image only (which carries the pinned
+  vault-site and Hugo for previews: [Previews and vault-site](#previews-and-vault-site)) and never publishes to a site
+  Worker. The flow is portal → commit to vault-site → vault-site build → Cloudflare. The build (forms post to that system's
+  portal through the `HUGOxPARAMSxFORMSx…` overrides) is checked under the hosting's own runtime (`cloudflare/site/check.sh`) Cloudflare serves the files itself, with the build's `404.html` for a missing
   address; the build's `_headers` and `_redirects` (`src/site-hosting.ts`) carry the cache lifetimes, `noindex`,
   CORS and redirects. Hostnames are attached to a Worker once, by an admin
   ([docs/setup.md](docs/setup.md#the-website-on-cloudflare-static-hosting)).
 * **Check a build locally:** `npm run site:build`, `npm ci --prefix cloudflare/site` (once), `npm run site:check`.
 * **When listings change** (published, edited, taken off the site, featured) the site must be rebuilt, though no
-  code changed: **Actions → Deploy (portal and site) → Run workflow**, choose the system and tick *Rebuild the site
-  only*, or `gh workflow run deploy.yml -f environment=staging -f site_only=true`. It builds and publishes the site
-  and doesn't touch the portal.
+  code changed: **vault-site → Actions → Deploy (site) → Run workflow**, choose the system, or
+  `gh workflow run deploy.yml -R VaultLearningGames/vault-site -f environment=staging`.
 * **Addresses built in scripts** must be absolute (`absURL`): a preview is served from the portal, and only addresses
   in HTML attributes and CSS `url()` are rewritten to the site.
 
 The new design (theme `vault-theme`) is not here: it stays in `vault-hugo-rebuild` (`main`), deployed by that
 repository's workflow to Cloud Run `vault-site-staging` (`new-design.vaultlearninggames-staging.org`), and renders its
 own previews from this portal's JSON.
+
+## Previews and vault-site
+
+The website's source is its own repository, [VaultLearningGames/vault-site](https://github.com/VaultLearningGames/vault-site)
+(Hugo at the repository root; this repository is its `portal/` submodule). `site/` here is retired (removal is
+planned) and unused by the image. The portal renders previews from vault-site, found by `src/site-dir.ts` (`resolveSiteDir()`) in this order:
+`SITE_DIR` (must be a Hugo site, or the portal says so and previews answer 503), the folder above this repository when
+it is a Hugo site (the `vault-site/portal` checkout), then `/app/vault-site` (the image). Every build runs in a
+temporary copy; the site source is never written to.
+
+* **The image** fetches vault-site at build time (Dockerfile, stage `site`) at the ref in **`vault-site.ref`** (or
+  `--build-arg VAULT_SITE_REF=…`), drops its `.git` and `portal/`, and sets `SITE_DIR=/app/vault-site`. vault-site is
+  private, so the deploy workflow checks it out into `vault-site-src/` first, with the repository secret
+  `VAULT_SITE_READ_TOKEN` (read access to vault-site); the Dockerfile copies that folder. For a local image build, clone
+  vault-site into `vault-site-src/` and check out the ref yourself.
+* **Updating the vault-site pin:** put the vault-site commit (all 40 characters: `git -C ../ rev-parse HEAD` from the
+  submodule layout) on the first non-comment line of `vault-site.ref`, commit, and the next deploy carries it. An
+  abbreviated SHA works but makes the build fetch the whole history. Previews then render with that commit's templates.
+* **Developing:** clone vault-site with `--recurse-submodules` (or `git submodule update --init` in it), work in
+  `vault-site/portal`, and `node scripts/dev-portal.ts` previews with the enclosing vault-site. In a standalone clone
+  of this repository set `SITE_DIR=/path/to/vault-site`; without either, the dev portal falls back to `site/`.
+* **The blog export** (done once, when the blog moved): `node scripts/export-blog.ts --db data/publisher.db --out
+  ../vault-site` (dry run; add `--yes` to write, or use `--github --yes` to commit through the Contents API) writes
+  each post of the old blog tables to `content/blog/<slug>/index.md`, with its tags and old slugs (as `aliases`). It
+  never overwrites a file, so running it again changes nothing. The tables themselves are then retired: the portal
+  renames them `retired_blog_*` at startup (`Db.retireBlogTables`; nothing reads them but the export).
+* The companion change in vault-site (the submodule and its clone/dev notes): [docs/vault-site.md](docs/vault-site.md).
+
+## The deploy bar
+
+While a deploy of this system runs (*Deploy (portal)* here, or *Deploy (site)* in vault-site), every portal
+page shows a slim bar under the staging banner: "Deploying: about N min left" and a progress bar, the expected time
+being the median of that workflow's last 5 successful runs (3 min portal, 2 min site when there are none). Past it,
+"taking longer than usual"; a run that fails says "Deploy failed" with a link to it for 10 minutes. A run counts when
+it is on the system's branch: `main` for staging, `production` for production. The portal reads GitHub Actions with
+`DEPLOY_STATUS_GITHUB_TOKEN` (*Actions: read* on both repositories), at most once every 15 s
+(`src/deploy-status.ts`, `GET /portal/deploy-status`); the page asks every 15 s only while the bar shows, and keeps
+its last answer while the portal restarts. No token, or GitHub not answering: no bar. Setup:
+[docs/setup.md](docs/setup.md#the-deploy-bar).
 
 ## Site checks
 
@@ -501,8 +566,9 @@ spelling, the limits of the measurements and what it costs (nothing on the porta
 ## Develop
 
 Node 24, no build step: `npm install && npm test` (with Hugo installed, the tests also render a real preview from
-`site/`). Preview the portal with example data: `node scripts/dev-portal.ts` (its Preview button renders `site/`
-locally, with CSS and images from the staging site).
+`site/`). Preview the portal with example data: `node scripts/dev-portal.ts` (its Preview button renders vault-site
+locally, as found by `src/site-dir.ts`, with CSS and images from the staging site; see
+[Previews and vault-site](#previews-and-vault-site)).
 The portal's "Need support?" link (sidebar foot and sign-in page) is `SUPPORT_URL`: by default the invitation to the
 Slack workspace, where people join `#vault-game-publishing-support`; `none` hides it.
 Deployment and cloud setup: [docs/setup.md](docs/setup.md).

@@ -3,6 +3,7 @@ import type { Readable } from 'node:stream';
 import { createApp, type AppDeps } from '../src/app.ts';
 import type { Verifier } from '../src/auth.ts';
 import { Db } from '../src/db.ts';
+import type { VaultPermission } from '../src/permissions.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import { signSession } from '../src/portal/session.ts';
 import { browseKeys, type Storage } from '../src/storage.ts';
@@ -44,9 +45,11 @@ export function portalHarness(extra: Partial<AppDeps> = {}) {
     ...extra, ...more,
   });
   const h = { db, production, app: createApp(deps()), rebuild(more: Partial<AppDeps> = {}) { h.app = createApp(deps(more)); } };
-  const as = (login: string, vaultRole: 'none' | 'release_manager' | 'admin' = 'none', studioRole?: 'viewer' | 'maintainer' | 'admin') => {
+  // vaultRole: an old role (permissions.ts maps it) or the Vault permissions themselves.
+  const as = (login: string, vaultRole: 'none' | 'release_manager' | 'admin' | VaultPermission[] = 'none', studioRole?: 'viewer' | 'maintainer' | 'admin') => {
     const u = db.upsertUser({ github_id: `id-${login}`, login, name: null, avatar_url: null });
-    db.setVaultRole(u.id, vaultRole);
+    if (Array.isArray(vaultRole)) db.setVaultPermissions(login, vaultRole, 'test');
+    else db.setVaultRole(u.id, vaultRole);
     if (studioRole) db.setMembership(db.studioBySlug('fieldday')!.id, login, studioRole, 'test');
     const headers = { Cookie: `vault_session=${signSession(u.id, SECRET)}`, 'X-Requested-With': 'vault-portal' };
     return {

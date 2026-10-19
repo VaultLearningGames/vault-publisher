@@ -1,0 +1,28 @@
+{{- /* The links under a post to the previous (older) and next (newer) post: (dict "post" . "all" $posts). Only a listed
+       post published by now counts, ordered by published_at, then slug; the current post's place is its own
+       published_at, so an unlisted post links to its neighbours too. A post without a date gets no links. */ -}}
+{{- $cur := .post -}}
+{{- $prev := false -}}{{ $prevT := 0 -}}
+{{- $next := false -}}{{ $nextT := 0 -}}
+{{- with $cur.published_at -}}
+{{- $ct := (time .).UnixMilli -}}
+{{- $now := now.UnixMilli -}}
+{{- range where $.all "listed" true -}}
+  {{- if and .published_at (ne .slug $cur.slug) -}}
+    {{- $t := (time .published_at).UnixMilli -}}
+    {{- if le $t $now -}}
+      {{- if or (lt $t $ct) (and (eq $t $ct) (lt .slug $cur.slug)) -}}
+        {{- if or (not $prev) (gt $t $prevT) (and (eq $t $prevT) (gt .slug $prev.slug)) }}{{ $prev = . }}{{ $prevT = $t }}{{ end -}}
+      {{- else -}}
+        {{- if or (not $next) (lt $t $nextT) (and (eq $t $nextT) (lt .slug $next.slug)) }}{{ $next = . }}{{ $nextT = $t }}{{ end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if or $prev $next }}
+<nav class="sq-sec theme-white post-nav" aria-label="Post navigation">
+{{- with $prev }}<a class="post-nav-prev" rel="prev" href="{{ printf "/blog/%s" .slug }}">← Previous: {{ .title }}</a>{{ end }}
+{{- with $next }}<a class="post-nav-next" rel="next" href="{{ printf "/blog/%s" .slug }}">Next: {{ .title }} →</a>{{ end -}}
+</nav>
+{{- end -}}

@@ -5,6 +5,11 @@ import type { RefType } from './paths.ts';
 import type { ListingFields } from './listings.ts';
 import type { GameCheck, GameCheckRun } from './game-checks.ts';
 import type { CheckName, SiteCheckRun } from './site-checks.ts';
+import {
+  legacyStudioRole, legacyVaultRole, normalizeStudioPermissions, normalizeVaultPermissions, studioPermissionsForLegacyRole,
+  vaultPermissionsForLegacyRole, STUDIO_PERMISSIONS, VAULT_PERMISSIONS, type LegacyStudioRole, type LegacyVaultRole,
+  PermissionError, type PermissionHolder, type StudioPermission, type VaultPermission,
+} from './permissions.ts';
 
 // Plain SQL with no SQLite-only features, so a later move to Postgres is a driver swap.
 // Each entry is applied once, in order; PRAGMA user_version tracks progress.
@@ -275,6 +280,57 @@ const MIGRATIONS = [
     created_at  TEXT NOT NULL
   );
   `,
+  // v17: blog (src/blog/). blocks is a JSON array validated by src/blog/blocks.ts. Join rows and redirects are deleted
+  // explicitly by src/blog/repo.ts, so nothing depends on foreign-key enforcement. IF NOT EXISTS keeps a re-run a no-op.
+  `
+  CREATE TABLE IF NOT EXISTS blog_posts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug           TEXT NOT NULL UNIQUE,
+    title          TEXT NOT NULL,
+    blocks         TEXT NOT NULL DEFAULT '[]',
+    excerpt        TEXT NOT NULL DEFAULT '',
+    featured_image TEXT,
+    author         TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'private' CHECK (status IN ('published', 'private')),
+    published_at   TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS blog_posts_status_published ON blog_posts (status, published_at);
+  CREATE TABLE IF NOT EXISTS blog_tags (
+    id   INTEGER PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS blog_post_tags (
+    post_id INTEGER NOT NULL REFERENCES blog_posts (id) ON DELETE CASCADE,
+    tag_id  INTEGER NOT NULL REFERENCES blog_tags (id) ON DELETE CASCADE,
+    PRIMARY KEY (post_id, tag_id)
+  );
+  CREATE TABLE IF NOT EXISTS blog_slug_redirects (
+    old_slug   TEXT PRIMARY KEY,
+    post_id    INTEGER NOT NULL REFERENCES blog_posts (id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS blog_slug_redirects_post ON blog_slug_redirects (post_id);
+  `,
+  // v18: moving a post’s images when its slug changes (the old src/blog/slugMove.ts; unused since the blog moved to
+  // vault-site). keys_json is the old object keys the move
+  // copied; 'cleanup_pending' means the post points at the new keys and the old ones still need deleting.
+  `
+  CREATE TABLE IF NOT EXISTS blog_slug_moves (
+    id         INTEGER PRIMARY KEY,
+    post_id    INTEGER NOT NULL REFERENCES blog_posts (id) ON DELETE CASCADE,
+    old_slug   TEXT NOT NULL,
+    new_slug   TEXT NOT NULL,
+    status     TEXT NOT NULL CHECK (status IN ('copying', 'cleanup_pending', 'done', 'failed')),
+    keys_json  TEXT NOT NULL DEFAULT '[]',
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS blog_slug_moves_post_status ON blog_slug_moves (post_id, status);
+  `,
 ];
 
 export interface Listing {
@@ -305,6 +361,13 @@ export interface Studio {
 }
 
 export type StudioSource = 'file' | 'import' | 'portal';
+
+// A studio's own GitHub organization, or null when it has none (empty or blank). There is no fallback: a studio
+// without one never borrows another studio's organization.
+export function studioGithubOrg(s: { github_owner?: string | null } | null | undefined): string | null {
+  const org = typeof s?.github_owner === 'string' ? s.github_owner.trim() : '';
+  return org || null;
+}
 
 // A repository assigned to a studio: it publishes for that studio whatever organization owns it.
 export interface StudioRepository {
@@ -431,8 +494,8 @@ export interface Release {
   withdrawn_note?: string | null;
 }
 
-export type VaultRole = 'none' | 'release_manager' | 'admin';
-export type StudioRole = 'viewer' | 'maintainer' | 'admin';
+// The old role names, for fixtures and scripts that still speak roles (permissions.ts maps them).
+export type { LegacyStudioRole as StudioRole, LegacyVaultRole as VaultRole } from './permissions.ts';
 
 export interface User {
   id: number;
@@ -440,7 +503,8 @@ export interface User {
   login: string;
   name: string | null;
   avatar_url: string | null;
-  vault_role: VaultRole;
+  // The old Vault role, kept in step with the user's Vault permissions for older images (permissions.ts).
+  vault_role: LegacyVaultRole;
   last_login_at: string | null;
 }
 
@@ -448,7 +512,9 @@ export interface Membership {
   id: number;
   studio_id: number;
   github_login: string;
-  role: StudioRole;
+  // The old studio role, kept in step with permissions for older images (permissions.ts).
+  role: LegacyStudioRole;
+  permissions: StudioPermission[];
   added_by: string;
   created_at: string;
 }
@@ -505,6 +571,8 @@ export interface StaleBuild {
 }
 
 const now = () => new Date().toISOString();
+// The old blog tables (v17, v18), children first so an empty one can be dropped (Db.retireBlogTables).
+const BLOG_TABLES = ['blog_slug_moves', 'blog_slug_redirects', 'blog_post_tags', 'blog_tags', 'blog_posts'];
 const GAME_CHECKS_KEPT = 120;
 const SITE_CHECKS_KEPT = 60;
 
@@ -517,6 +585,82 @@ export class Db {
     // WAL is required by Litestream; busy_timeout covers Litestream's brief checkpoint locks.
     this.sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;');
     this.migrate();
+    this.retireBlogTables();
+    this.ensurePermissions();
+  }
+
+  // The permissions (permissions.ts) that replaced the old roles. Done here rather than as a numbered migration so the
+  // schema version stays where older images expect it (as retireBlogTables), and additive: the old columns and tables
+  // stay, so an older image still runs against the database (the way back).
+  //   staff_permissions: Vault permissions by GitHub login, so they can be given before someone first signs in.
+  //   memberships.permissions: each membership's studio permissions, as a JSON list (NULL: a membership an older image
+  //   wrote, read from its role).
+  // Each is converted once, when it is created. There are no real grants to keep (only test accounts), so the
+  // conversion is deliberately coarse: Vault staff, Vault invites and the old Blog maintainers get every Vault
+  // permission (Blog maintainers only blog.edit), and every membership gets every studio permission.
+  ensurePermissions(): void {
+    const table = (t: string) => !!this.sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
+    const column = (t: string, c: string) => (this.sqlite.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).some((r) => r.name === c);
+    const freshStaff = !table('staff_permissions');
+    const freshMembers = !column('memberships', 'permissions');
+    if (!freshStaff && !freshMembers) return;
+    const allStudio = JSON.stringify(STUDIO_PERMISSIONS);
+    this.sqlite.exec('BEGIN');
+    try {
+      if (freshStaff) {
+        this.sqlite.exec(`CREATE TABLE staff_permissions (
+          github_login TEXT NOT NULL COLLATE NOCASE,
+          permission   TEXT NOT NULL CHECK (permission IN (${VAULT_PERMISSIONS.map((p) => `'${p}'`).join(', ')})),
+          added_by     TEXT NOT NULL,
+          created_at   TEXT NOT NULL,
+          PRIMARY KEY (github_login, permission)
+        )`);
+        const grant = this.sqlite.prepare("INSERT OR IGNORE INTO staff_permissions (github_login, permission, added_by, created_at) VALUES (?, ?, 'system:permissions', ?)");
+        const staff = [
+          ...(this.sqlite.prepare("SELECT login FROM users WHERE vault_role <> 'none'").all() as { login: string }[]).map((r) => r.login),
+          ...(this.sqlite.prepare('SELECT github_login FROM vault_invites').all() as { github_login: string }[]).map((r) => r.github_login),
+        ];
+        for (const login of staff) for (const p of VAULT_PERMISSIONS) grant.run(login, p, now());
+        this.sqlite.exec("UPDATE users SET vault_role = 'admin' WHERE vault_role <> 'none'");
+        if (table('vault_permissions')) {
+          for (const r of this.sqlite.prepare("SELECT github_login FROM vault_permissions WHERE permission = 'blog.maintain'").all() as { github_login: string }[]) {
+            grant.run(r.github_login, 'vault.blog.edit', now());
+          }
+        }
+      }
+      if (freshMembers) {
+        this.sqlite.exec('ALTER TABLE memberships ADD COLUMN permissions TEXT');
+        this.sqlite.prepare("UPDATE memberships SET permissions = ?, role = 'admin'").run(allStudio);
+      }
+      this.sqlite.exec('COMMIT');
+    } catch (err) {
+      this.sqlite.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  // The blog moved to Markdown in vault-site (src/blog/siteRepo.ts; the posts were exported by scripts/export-blog.ts),
+  // so the old blog tables (v17, v18) are retired: renamed to retired_<name>, data and all, which nothing reads but the
+  // export. Done here rather than as a numbered migration so the schema version stays where older images expect it;
+  // a rename keeps it reversible (ALTER TABLE retired_blog_posts RENAME TO blog_posts). Idempotent: a table already
+  // retired is left alone, and an empty one recreated beside its retired copy (a database replayed through v17) is
+  // dropped. Foreign keys between them follow the renames.
+  retireBlogTables(): void {
+    const exists = (t: string) => !!this.sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
+    const tables = BLOG_TABLES.filter((t) => exists(t));
+    if (!tables.length) return;
+    this.sqlite.exec('BEGIN');
+    try {
+      for (const t of tables) {
+        if (!exists(`retired_${t}`)) this.sqlite.exec(`ALTER TABLE ${t} RENAME TO retired_${t}`);
+        else if (!this.sqlite.prepare(`SELECT 1 FROM ${t} LIMIT 1`).get()) this.sqlite.exec(`DROP TABLE ${t}`);
+        else console.error(`db: ${t} has rows and retired_${t} exists too; both are left as they are`);
+      }
+      this.sqlite.exec('COMMIT');
+    } catch (err) {
+      this.sqlite.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   private migrate() {
@@ -549,7 +693,7 @@ export class Db {
     for (const s of studios) {
       const taken = bySlug.get(s.slug) as { github_owner_id: string } | undefined;
       if (taken && taken.github_owner_id !== s.github_owner_id) { skipped.push(s.slug); continue; }
-      upsert.run(s.slug, s.name, s.github_owner, s.github_owner_id, now(), source);
+      upsert.run(s.slug, s.name, studioGithubOrg(s) ?? '', s.github_owner_id, now(), source);
     }
     return { skipped };
   }
@@ -557,12 +701,12 @@ export class Db {
   // A studio a Vault admin creates in the portal. The caller checks that the slug and owner id are free.
   createStudio(s: Omit<Studio, 'id' | 'source'>): Studio {
     this.sqlite.prepare(`INSERT INTO studios (slug, name, github_owner, github_owner_id, website, created_at, source) VALUES (?, ?, ?, ?, ?, ?, 'portal')`)
-      .run(s.slug, s.name, s.github_owner, s.github_owner_id, s.website ?? null, now());
+      .run(s.slug, s.name, studioGithubOrg(s) ?? '', s.github_owner_id, s.website ?? null, now());
     return this.studioBySlug(s.slug)!;
   }
 
   updateStudio(id: number, s: Pick<Studio, 'name' | 'github_owner' | 'github_owner_id'>) {
-    this.sqlite.prepare('UPDATE studios SET name = ?, github_owner = ?, github_owner_id = ? WHERE id = ?').run(s.name, s.github_owner, s.github_owner_id, id);
+    this.sqlite.prepare('UPDATE studios SET name = ?, github_owner = ?, github_owner_id = ? WHERE id = ?').run(s.name, studioGithubOrg(s) ?? '', s.github_owner_id, id);
   }
 
   // Remove a studio by its own primary key, never by GitHub owner id: a studio that shares its owner id with
@@ -932,68 +1076,130 @@ export class Db {
     return this.sqlite.prepare('SELECT * FROM users ORDER BY login COLLATE NOCASE').all() as unknown as User[];
   }
 
-  setVaultRole(userId: number, role: VaultRole) {
-    this.sqlite.prepare('UPDATE users SET vault_role = ? WHERE id = ?').run(role, userId);
+  // ----- portal: permissions (permissions.ts) -----
+  // Someone's Vault permissions, by GitHub login (signed in or not).
+  vaultPermissionsOf(login: string): VaultPermission[] {
+    const rows = this.sqlite.prepare('SELECT permission FROM staff_permissions WHERE github_login = ?').all(login) as { permission: VaultPermission }[];
+    return VAULT_PERMISSIONS.filter((p) => rows.some((r) => r.permission === p));
+  }
+  // Everyone's Vault permissions, by login (as first given), for Vault's People page.
+  staffPermissions(): Map<string, { github_login: string; permissions: VaultPermission[] }> {
+    const out = new Map<string, { github_login: string; permissions: VaultPermission[] }>();
+    const rows = this.sqlite.prepare('SELECT github_login, permission FROM staff_permissions ORDER BY github_login COLLATE NOCASE').all() as { github_login: string; permission: VaultPermission }[];
+    for (const r of rows) {
+      const k = r.github_login.toLowerCase();
+      const e = out.get(k) ?? { github_login: r.github_login, permissions: [] };
+      e.permissions = VAULT_PERMISSIONS.filter((p) => p === r.permission || e.permissions.includes(p));
+      out.set(k, e);
+    }
+    return out;
+  }
+  // Replaces someone's Vault permissions (validated: throws PermissionError). Returns what they had, or null when
+  // nothing changed. Keeps the old users.vault_role in step, for older images.
+  setVaultPermissions(login: string, permissions: readonly VaultPermission[], by: string): VaultPermission[] | null {
+    const to = normalizeVaultPermissions(permissions);
+    const from = this.vaultPermissionsOf(login);
+    if (from.length === to.length && from.every((p) => to.includes(p))) return null;
+    this.sqlite.exec('BEGIN');
+    try {
+      for (const p of from) if (!to.includes(p)) this.sqlite.prepare('DELETE FROM staff_permissions WHERE github_login = ? AND permission = ?').run(login, p);
+      for (const p of to) if (!from.includes(p)) this.sqlite.prepare('INSERT INTO staff_permissions (github_login, permission, added_by, created_at) VALUES (?, ?, ?, ?)').run(login, p, by, now());
+      this.syncVaultRole(login);
+      this.sqlite.exec('COMMIT');
+    } catch (err) {
+      this.sqlite.exec('ROLLBACK');
+      throw err;
+    }
+    return from;
+  }
+  // The old users.vault_role, from the user's Vault permissions.
+  syncVaultRole(login: string) {
+    this.sqlite.prepare('UPDATE users SET vault_role = ? WHERE login = ? COLLATE NOCASE').run(legacyVaultRole(this.vaultPermissionsOf(login)), login);
+  }
+  // Fixtures and scripts written with the old roles: the role's permissions (permissions.ts vaultPermissionsForLegacyRole).
+  setVaultRole(userId: number, role: LegacyVaultRole) {
+    const u = this.userById(userId);
+    if (u) this.setVaultPermissions(u.login, vaultPermissionsForLegacyRole(role), 'system:role');
+  }
+  // The old table of Vault roles waiting for someone's first sign-in. Nothing writes it any more (Vault permissions are
+  // given by login); its rows were converted by ensurePermissions.
+  vaultInvites(): { github_login: string; vault_role: LegacyVaultRole; added_by: string; created_at: string }[] {
+    return this.sqlite.prepare('SELECT * FROM vault_invites ORDER BY github_login COLLATE NOCASE').all() as unknown as
+      { github_login: string; vault_role: LegacyVaultRole; added_by: string; created_at: string }[];
   }
 
-  // Vault roles waiting for someone's first sign-in.
-  vaultInvites(): { github_login: string; vault_role: VaultRole; added_by: string; created_at: string }[] {
-    return this.sqlite.prepare('SELECT * FROM vault_invites ORDER BY github_login COLLATE NOCASE').all() as unknown as
-      { github_login: string; vault_role: VaultRole; added_by: string; created_at: string }[];
+  // Someone's permissions everywhere: what the portal checks (permissions.ts hasVaultPermission, hasStudioPermission).
+  permissionsOf(login: string): PermissionHolder {
+    const studio_permissions = new Map<number, StudioPermission[]>();
+    for (const m of this.membershipsForLogin(login)) studio_permissions.set(m.studio_id, m.permissions);
+    return { vault_permissions: this.vaultPermissionsOf(login), studio_permissions };
   }
-  setVaultInvite(login: string, role: VaultRole, by: string) {
-    if (role === 'none') this.sqlite.prepare('DELETE FROM vault_invites WHERE github_login = ?').run(login);
-    else this.sqlite.prepare(`INSERT INTO vault_invites (github_login, vault_role, added_by, created_at) VALUES (?, ?, ?, ?)
-                              ON CONFLICT (github_login) DO UPDATE SET vault_role = excluded.vault_role, added_by = excluded.added_by`)
-      .run(login, role, by, now());
-  }
-  // Removes and returns the Vault role waiting for this login, if any.
-  takeVaultInvite(login: string): VaultRole | undefined {
-    const row = this.sqlite.prepare('SELECT vault_role FROM vault_invites WHERE github_login = ?').get(login) as { vault_role: VaultRole } | undefined;
-    if (row) this.sqlite.prepare('DELETE FROM vault_invites WHERE github_login = ?').run(login);
-    return row?.vault_role;
+
+  private membershipOf<T extends { role: LegacyStudioRole; permissions: unknown }>(row: T): T & { permissions: StudioPermission[] } {
+    let permissions: StudioPermission[];
+    try {
+      permissions = row.permissions == null ? studioPermissionsForLegacyRole(row.role) : normalizeStudioPermissions(JSON.parse(String(row.permissions)));
+    } catch {
+      permissions = studioPermissionsForLegacyRole(row.role);
+    }
+    return { ...row, permissions };
   }
 
   memberships(studioId: number): Membership[] {
-    return this.sqlite
+    return (this.sqlite
       .prepare('SELECT * FROM memberships WHERE studio_id = ? ORDER BY github_login COLLATE NOCASE')
-      .all(studioId) as unknown as Membership[];
+      .all(studioId) as unknown as Membership[]).map((m) => this.membershipOf(m));
   }
 
   membershipsForLogin(login: string): (Membership & { studio_slug: string; studio_name: string })[] {
-    return this.sqlite
+    return (this.sqlite
       .prepare(`SELECT m.*, s.slug AS studio_slug, s.name AS studio_name FROM memberships m JOIN studios s ON s.id = m.studio_id
                 WHERE m.github_login = ? ORDER BY s.name`)
-      .all(login) as unknown as (Membership & { studio_slug: string; studio_name: string })[];
+      .all(login) as unknown as (Membership & { studio_slug: string; studio_name: string })[]).map((m) => this.membershipOf(m));
   }
 
-  roleIn(studioId: number, login: string): StudioRole | undefined {
-    const row = this.sqlite.prepare('SELECT role FROM memberships WHERE studio_id = ? AND github_login = ?').get(studioId, login) as
-      | { role: StudioRole }
-      | undefined;
-    return row?.role;
+  membership(studioId: number, login: string): Membership | undefined {
+    const row = this.sqlite.prepare('SELECT * FROM memberships WHERE studio_id = ? AND github_login = ?').get(studioId, login) as Membership | undefined;
+    return row && this.membershipOf(row);
+  }
+  // Someone's studio permissions in one studio ([] when they aren't a member).
+  studioPermissionsOf(studioId: number, login: string): StudioPermission[] {
+    return this.membership(studioId, login)?.permissions ?? [];
+  }
+  // The old role, as kept in step with the membership's permissions.
+  roleIn(studioId: number, login: string): LegacyStudioRole | undefined {
+    return this.membership(studioId, login)?.role;
   }
 
-  setMembership(studioId: number, login: string, role: StudioRole, addedBy: string) {
+  // Adds someone to a studio, or replaces their permissions there (validated: throws PermissionError; implications
+  // applied). An old role (fixtures, scripts) is given its permissions. The old role column is kept in step.
+  setMembership(studioId: number, login: string, permissions: readonly StudioPermission[] | LegacyStudioRole, addedBy: string) {
+    const ps = normalizeStudioPermissions(typeof permissions === 'string' ? studioPermissionsForLegacyRole(permissions) : permissions);
+    if (!ps.length) throw new PermissionError('A member needs at least one studio permission.');
     this.sqlite
-      .prepare(`INSERT INTO memberships (studio_id, github_login, role, added_by, created_at) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (studio_id, github_login) DO UPDATE SET role = excluded.role`)
-      .run(studioId, login, role, addedBy, now());
+      .prepare(`INSERT INTO memberships (studio_id, github_login, role, permissions, added_by, created_at) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (studio_id, github_login) DO UPDATE SET role = excluded.role, permissions = excluded.permissions`)
+      .run(studioId, login, legacyStudioRole(ps), JSON.stringify(ps), addedBy, now());
   }
 
   // Every membership with its studio, for Vault's People page.
   allMemberships(): (Membership & { studio_slug: string; studio_name: string })[] {
-    return this.sqlite
+    return (this.sqlite
       .prepare(`SELECT m.*, s.slug AS studio_slug, s.name AS studio_name FROM memberships m JOIN studios s ON s.id = m.studio_id
                 ORDER BY m.github_login COLLATE NOCASE, s.name`)
-      .all() as unknown as (Membership & { studio_slug: string; studio_name: string })[];
+      .all() as unknown as (Membership & { studio_slug: string; studio_name: string })[]).map((m) => this.membershipOf(m));
   }
 
-  // A studio's admins who have signed in at least once (invited admins don't count: they may never arrive).
+  // A studio's members with studio.maintain_users who have signed in at least once (invited ones don't count: they
+  // may never arrive).
+  signedInUserMaintainers(studioId: number): string[] {
+    const signedIn = new Set((this.sqlite.prepare(`SELECT m.github_login FROM memberships m WHERE m.studio_id = ?
+        AND EXISTS (SELECT 1 FROM users u WHERE u.login = m.github_login COLLATE NOCASE)`).all(studioId) as { github_login: string }[]).map((r) => r.github_login));
+    return this.memberships(studioId).filter((m) => signedIn.has(m.github_login) && m.permissions.includes('studio.maintain_users')).map((m) => m.github_login);
+  }
+  // The old name (studio admins), for fixtures.
   signedInAdmins(studioId: number): string[] {
-    return (this.sqlite.prepare(`SELECT m.github_login FROM memberships m WHERE m.studio_id = ? AND m.role = 'admin'
-        AND EXISTS (SELECT 1 FROM users u WHERE u.login = m.github_login COLLATE NOCASE)`).all(studioId) as { github_login: string }[])
-      .map((r) => r.github_login);
+    return this.signedInUserMaintainers(studioId);
   }
 
   userByLogin(login: string): User | undefined {

@@ -13,6 +13,7 @@ import { registerPortal, type PortalConfig } from './portal/routes.ts';
 import type { SitePreviewer } from './portal/site-preview.ts';
 import { registerForms, type FormsConfig } from './forms.ts';
 import { registerAdminTasks } from './admin-tasks.ts';
+import type { SiteContentClient } from './site-content/index.ts';
 import {
   headersFor,
   isSafeFilePath,
@@ -49,10 +50,14 @@ export interface AppDeps {
   // Where the editor's Preview buttons open an unsaved listing preview, ADDRESS/_preview/TOKEN/: this portal (which
   // renders it with sitePreview) and any site that still renders its own. None hides the buttons.
   previewSites?: PreviewSite[];
-  // Renders a listing preview with the website's templates (Hugo on site/). Without it /_preview/TOKEN/ answers 503.
-  sitePreview?: Pick<SitePreviewer, 'page'> | null;
+  // Renders a listing preview (and the blog editor's post preview) with the website's templates (Hugo on the site
+  // source). Without it /_preview/TOKEN/ and the blog preview answer 503.
+  sitePreview?: (Pick<SitePreviewer, 'page'> & Partial<Pick<SitePreviewer, 'blogPage'>>) | null;
   // Google Analytics for the analytics pages (analytics/ga.ts). Left out: not connected.
   analytics?: Analytics;
+  // The blog's posts in the vault-site repository (site-content/github-client.ts). Left out: a client configured from
+  // the environment (VAULT_SITE_*) on first use. Injected in tests.
+  siteContent?: SiteContentClient | null;
   // Injected in tests (image migration downloads).
   fetch?: typeof fetch;
   // How URL monitors fetch a studio's hosted game (net-guard.ts: public addresses only). Injected in tests.
@@ -77,7 +82,7 @@ const MAX_RELEASE_BUDGET_SECONDS = 280;
 // so by then every request the old switch made has already been given up on.
 export const SWITCH_STALE_MS = 5 * 60_000;
 
-export function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 413 | 503, message: string, detail?: unknown): never {
+export function fail(status: 400 | 401 | 403 | 404 | 409 | 410 | 413 | 415 | 503, message: string, detail?: unknown): never {
   throw new HTTPException(status, { res: Response.json({ error: message, detail }, { status }) });
 }
 
@@ -449,6 +454,12 @@ export function createApp(deps: AppDeps) {
     c.header('Cache-Control', 'public, max-age=60');
     return c.json(buildCatalog(db, deps.prodPublicUrl));
   });
+
+  // The public blog is the website's (built by Hugo from the vault-site repository), not the portal's: old portal
+  // addresses go to the site.
+  const toSite = (c: Context) => (deps.siteUrl ? c.redirect(`${deps.siteUrl.replace(/\/+$/, '')}${new URL(c.req.url).pathname}`, 301) : c.notFound());
+  app.get('/blog', toSite);
+  app.get('/blog/*', toSite);
 
   // Start a preview upload for the branch or tag in the caller's OIDC token.
   // Body: { game, files: [{ path, size }] }. Returns a presigned PUT URL and headers per file.

@@ -1,11 +1,14 @@
 node_modules
-/data/
+/data/*
+# The Squarespace blog import's snapshot is committed (scripts/import-squarespace-blog.ts).
+!/data/blog-import/
 *.db
 *.db-shm
 *.db-wal
 .env
 # The website's build: the catalog is pulled from the portal (npm run site:catalog), the rest is Hugo's output.
 site/data/catalog.json
+site/data/blog.json
 site/public/
 site/resources/
 site/.hugo_build.lock
@@ -15,3 +18,6 @@ site/.hugo_build.lock
 
 # The card pipeline's per-worktree folder; never commit it.
 .dispatch/
+
+# vault-site checkout the image build copies (deploy workflow).
+vault-site-src/

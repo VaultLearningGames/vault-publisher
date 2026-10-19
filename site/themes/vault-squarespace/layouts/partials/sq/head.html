@@ -21,9 +21,14 @@
 <meta property="og:site_name" content="{{ $siteTitle }}">
 <meta property="og:title" content="{{ $fullTitle }}">
 <meta property="og:url" content="{{ $canon }}">
-<meta property="og:type" content="website">
+{{- /* A blog post is an article, and its featured image (if it has one) is what a share shows (partials/blog/share.html). */}}
+{{- $post := .Params.post }}
+{{- $ogImage := "sq/img/site/og-vault-kids.jpg" | absURL }}
+{{- with $post }}{{ with .featured_image }}{{ with .url }}{{ $ogImage = . | absURL }}{{ end }}{{ end }}{{ end }}
+<meta property="og:type" content="{{ if $post }}article{{ else }}website{{ end }}">
 {{- with $desc }}<meta property="og:description" content="{{ . }}">{{ end }}
-<meta property="og:image" content="{{ "sq/img/site/og-vault-kids.jpg" | absURL }}">
+<meta property="og:image" content="{{ $ogImage }}">
+<meta name="twitter:card" content="summary_large_image">
 {{- /* Structured data, as Squarespace gave every page: the site and who publishes it; on a game's page also the page
        itself, with nothing the page doesn't show (its name, description, address and cover image). */}}
 {{- $base := site.BaseURL | strings.TrimSuffix "/" }}

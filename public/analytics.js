@@ -100,3 +100,37 @@
   setInterval(refresh, 60000);
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') refresh(); });
 })();
+
+// Top games: Load more asks for the next page (offset: the rows shown) and appends its rows, skipping any already
+// shown; the button goes once every game is listed. A failed request says so and leaves the button to try again.
+(function () {
+  if (!window.fetch) return;
+  var buttons = document.querySelectorAll('[data-more]');
+  Array.prototype.forEach.call(buttons, function (btn) {
+    var card = btn.closest('.ga-games'), body = card.querySelector('tbody'), status = btn.parentNode.querySelector('[role=status]');
+    var busy = false;
+    btn.addEventListener('click', function () {
+      if (busy) return;
+      busy = true; btn.disabled = true; btn.textContent = 'Loading…'; status.textContent = '';
+      var url = btn.getAttribute('data-more'), shown = body.querySelectorAll('tr').length;
+      url += (url.indexOf('?') < 0 ? '?' : '&') + 'offset=' + shown + '&limit=' + btn.getAttribute('data-limit');
+      fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'vault-portal', Accept: 'application/json' } })
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function (d) {
+          var have = {};
+          Array.prototype.forEach.call(body.querySelectorAll('tr[data-slug]'), function (tr) { have[tr.getAttribute('data-slug')] = true; });
+          var t = document.createElement('tbody');
+          d.items.forEach(function (g) {
+            if (have[g.slug]) return;
+            have[g.slug] = true;
+            t.innerHTML = g.html;
+            if (t.firstElementChild) body.appendChild(t.firstElementChild);
+          });
+          if (!d.hasMore || !d.items.length) btn.parentNode.removeChild(btn);
+          status.textContent = body.querySelectorAll('tr').length + ' of ' + d.total + ' games';
+        })
+        .catch(function () { status.textContent = 'Couldn’t load more games. Try again.'; })
+        .then(function () { busy = false; btn.disabled = false; btn.textContent = 'Load more'; });
+    });
+  });
+})();

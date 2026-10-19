@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { createApp } from '../src/app.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db, type StudioRole } from '../src/db.ts';
+import type { VaultPermission } from '../src/permissions.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
 import { signSession } from '../src/portal/session.ts';
 import { syncStudiosFile, type StudiosFileEntry } from '../src/studios-file.ts';
@@ -87,9 +88,11 @@ async function publish(token: string, game: string) {
   return json.url as string;
 }
 const studio = (slug: string) => db.studioBySlug(slug)!;
-function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' = 'none', roles: Record<string, StudioRole> = {}) {
+// vaultRole: an old role (permissions.ts maps it) or the Vault permissions themselves.
+function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' | VaultPermission[] = 'none', roles: Record<string, StudioRole> = {}) {
   const u = db.upsertUser({ github_id: `id-${login}`, login, name: null, avatar_url: null });
-  db.setVaultRole(u.id, vaultRole);
+  if (Array.isArray(vaultRole)) db.setVaultPermissions(login, vaultRole, 'test');
+  else db.setVaultRole(u.id, vaultRole);
   for (const [slug, role] of Object.entries(roles)) db.setMembership(studio(slug).id, login, role, 'test');
   const cookie = `vault_session=${signSession(u.id, SECRET)}`;
   return {
@@ -301,7 +304,7 @@ describe('studios.json repositories at startup', () => {
       for (let boot = 0; boot < 2; boot++) {       // the migration start, then an ordinary restart
         const started = new Db(path);
         syncStudiosFile(started, shipped, log);
-        assert.equal((started.sqlite.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 16); // v14 studio_repositories, v15 url_monitors, v16 site_checks
+        assert.equal((started.sqlite.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 18); // v14 studio_repositories, v15 url_monitors, v16 site_checks
         assert.equal(started.studioByOwnerId(ORG)!.slug, 'vault');
         assert.equal(started.studioBySlug('mit-education-arcade')!.github_owner_id, 'vault:mit-education-arcade');
         assert.equal(started.studioBySlug('ucalgary')!.github_owner_id, 'vault:ucalgary');
@@ -345,14 +348,15 @@ describe('the Vault studio page: repositories that publish for this studio', () 
   function everyone() {
     return {
       vaultAdmin: as('boss', 'admin'),
-      releaseManager: as('rita', 'release_manager'),
+      releaseManager: as('rita', 'release_manager'),   // vault.content.edit
+      otherStaff: as('bea', ['vault.blog.edit', 'vault.users.maintain']),
       studioAdmin: as('ada', 'none', { ucalgary: 'admin' }),
       viewer: as('vera', 'none', { ucalgary: 'viewer' }),
       signedOut: { post: (path: string, body: unknown = {}) => app.request(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' }, body: JSON.stringify(body) }) },
     };
   }
 
-  test('Vault staff see the list; only Vault admins get the forms; studios.json ones are read-only', async () => {
+  test('Vault staff see the list; only those who edit game/studio content get the forms; studios.json ones are read-only', async () => {
     const p = everyone();
     db.bindRepository({ repository_id: '555', repository: 'VaultLearningGames/Public-Game', studio_id: studio('ucalgary').id, created_by: 'user:boss', source: 'portal' });
     const page = await (await p.vaultAdmin.get('/vault/studios/ucalgary')).text();
@@ -363,18 +367,19 @@ describe('the Vault studio page: repositories that publish for this studio', () 
     assert.equal(page.split(`data-api="${api}/remove"`).length - 1, 1);         // only the portal's one can be removed
     assert.match(page, /name="id" value="555"/);
     assert.doesNotMatch(page, /name="id" value="679805874"/);
-    const rm = await (await p.releaseManager.get('/vault/studios/ucalgary')).text();
-    assert.match(rm, /VaultLearningGames\/hosted-transformation-quest/);
-    assert.doesNotMatch(rm, new RegExp(`data-api="${api}`));
+    assert.match(await (await p.releaseManager.get('/vault/studios/ucalgary')).text(), new RegExp(`data-api="${api}"`));
+    const other = await (await p.otherStaff.get('/vault/studios/ucalgary')).text();
+    assert.match(other, /VaultLearningGames\/hosted-transformation-quest/);
+    assert.doesNotMatch(other, new RegExp(`data-api="${api}`));
     assert.equal((await p.studioAdmin.get('/vault/studios/ucalgary')).status, 403);
     // A studio with an organization says its other repositories publish to it too.
     assert.match(await (await p.vaultAdmin.get('/vault/studios/vault')).text(), /Every other repository in <b>VaultLearningGames<\/b>/);
   });
 
-  test('only Vault admins add or remove', async () => {
+  test('only Vault staff who edit game/studio content add or remove', async () => {
     const p = everyone();
     db.bindRepository({ repository_id: '555', repository: 'VaultLearningGames/Public-Game', studio_id: studio('ucalgary').id, created_by: 'user:boss', source: 'portal' });
-    for (const who of [p.releaseManager, p.studioAdmin, p.viewer]) {
+    for (const who of [p.otherStaff, p.studioAdmin, p.viewer]) {
       assert.equal((await who.post(api, { repository: 'VaultLearningGames/private-game', id: '777' })).status, 403);
       assert.equal((await who.post(`${api}/remove`, { id: '555' })).status, 403);
     }
@@ -382,7 +387,7 @@ describe('the Vault studio page: repositories that publish for this studio', () 
     assert.equal((await p.signedOut.post(`${api}/remove`, { id: '555' })).status, 401);
     assert.equal(db.repositoryBinding('777'), undefined);
     assert.ok(db.repositoryBinding('555'));
-    assert.equal((await p.vaultAdmin.post(`${api}/remove`, { id: '555' })).status, 200);
+    assert.equal((await p.releaseManager.post(`${api}/remove`, { id: '555' })).status, 200);
     assert.equal(db.repositoryBinding('555'), undefined);
   });
 

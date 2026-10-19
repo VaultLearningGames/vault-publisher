@@ -4,6 +4,7 @@ import type { Readable } from 'node:stream';
 import { createApp } from '../src/app.ts';
 import type { GitHubIdentity, Verifier } from '../src/auth.ts';
 import { Db } from '../src/db.ts';
+import type { VaultPermission } from '../src/permissions.ts';
 import { fieldsFromPage, shortText } from '../src/listings-import.ts';
 import { changedFields, normalize, problems } from '../src/listings.ts';
 import type { ObjectHeaders } from '../src/paths.ts';
@@ -56,9 +57,11 @@ beforeEach(async () => {
   await app.request(`/v1/previews/${j.upload_id}/finalize`, { method: 'POST', headers: { Authorization: 'Bearer wake' } });
 });
 
-function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' = 'none', studioRole?: 'viewer' | 'maintainer' | 'admin') {
+// vaultRole: an old role (permissions.ts maps it) or the Vault permissions themselves.
+function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' | VaultPermission[] = 'none', studioRole?: 'viewer' | 'maintainer' | 'admin') {
   const u = db.upsertUser({ github_id: `id-${login}`, login, name: null, avatar_url: null });
-  db.setVaultRole(u.id, vaultRole);
+  if (Array.isArray(vaultRole)) db.setVaultPermissions(login, vaultRole, 'test');
+  else db.setVaultRole(u.id, vaultRole);
   if (studioRole) db.setMembership(db.studioBySlug('fieldday')!.id, login, studioRole, 'test');
   const cookie = `vault_session=${signSession(u.id, SECRET)}`;
   return {
@@ -320,7 +323,7 @@ describe('import from the Hugo prototype', () => {
     ];
     const overrides = { ztype: { studio: 'PhobosLab', play_url: 'https://zty.pe/' }, crowds: { fit: '1920,1024,0,0,800,600' } };
     const boss = as('boss', 'admin');
-    assert.equal((await as('rm', 'release_manager').post('/portal/api/vault/listings/import', { pages: JSON.stringify(pages) })).status, 403, 'admins only');
+    assert.equal((await as('bea', ['vault.blog.edit', 'vault.users.maintain']).post('/portal/api/vault/listings/import', { pages: JSON.stringify(pages) })).status, 403, 'Vault staff who edit game/studio content only');
     const res = await boss.post('/portal/api/vault/listings/import', { pages: JSON.stringify(pages), overrides: JSON.stringify({ overrides }) });
     const r = (await res.json()) as any;
     assert.deepEqual(r.created.sort(), ['crowds', 'wake', 'ztype']);
@@ -339,7 +342,7 @@ describe('import from the Hugo prototype', () => {
   });
 });
 
-describe('Vault → Game Catalog: one table with featured games and availability', () => {
+describe('Vault → Games: one table with featured games and availability', () => {
   const F = '/portal/api/vault/featured';
   type Entry = { slug: string; blurb: string; image: string; sequence: number };
   const full = async () => (await (await app.request('/v1/catalog')).json()) as { featured: Entry[] };
@@ -376,12 +379,17 @@ describe('Vault → Game Catalog: one table with featured games and availability
     assert.match(row('draft-only'), /name="featured"\s+disabled/, 'only games on the site can be featured');
     assert.match(page, /name="sequence" value="1"/, 'a featured game has its editor');
     assert.equal((page.match(/name="sequence"/g) ?? []).length, 1);
-    assert.match(row('wake'), /title="The play address loaded"[^]*Passing[^]*0\.2 s[^]*actions\/runs\/42/);
+    assert.match(row('wake'), /title="The play address loaded"[^]*Passing/);
+    assert.doesNotMatch(row('wake'), /0\.2 s|actions\/runs\/42/, 'no Response or Checked columns');
     assert.match(row('bloom'), /title="HTTP 404 Not Found"[^]*Failure/);
-    assert.match(row('draft-only'), /<td class="muted">—<\/td>/, 'no result: dashes');
+    assert.match(row('draft-only'), /title="No check has seen this game yet"[^]*Needs Review/, 'no result yet: Needs Review');
+    assert.match(page, /<th>Studio<\/th><th>Featured<\/th><th>Hosted by<\/th><th>Testing Status<\/th><th>Last edit<\/th>/);
+    for (const gone of ['<th>Site</th>', '<th class="r">Response</th>', '<th>Checked</th>']) assert.ok(!page.includes(gone), gone);
+    assert.match(page, /data-open="add-game">Add Game<\/button>/);
+    assert.match(page, /<dialog id="add-game"><form data-api="\/portal\/api\/vault\/listings"/);
     assert.match(page, /Waiting for Vault|No site changes are waiting/);
-    assert.match(page, /<h1>Game Catalog<\/h1>/);
-    assert.match(page, /<a href="\/vault\/listings" class="on">Game Catalog<\/a>/, 'the Vault nav entry, at the same address');
+    assert.match(page, /<h1>Games<\/h1>/);
+    assert.match(page, /<a href="\/vault\/listings" class="on">Games<\/a>/, 'the Vault nav entry, at the same address');
     assert.doesNotMatch(page, /Site games/);
     assert.doesNotMatch(page, /Import from the Hugo site prototype|listings\/import/, 'the import has no form on the page; its API stays');
     for (const gone of ['On the CDN (', 'CDN release ready', 'Unpublished changes', 'Not on the site</a>', 'show=']) assert.ok(!page.includes(gone), gone);
@@ -392,6 +400,18 @@ describe('Vault → Game Catalog: one table with featured games and availability
       assert.equal(r.status, 302, old);
       assert.equal(r.headers.get('location'), '/vault/listings');
     }
+  });
+
+  test('Add Game on Vault → Games adds a draft listing in the chosen studio; Vault staff only', async () => {
+    const boss = as('boss', 'admin');
+    const r = await boss.post('/portal/api/vault/listings', { slug: 'newgame', title: 'New game', studio: 'fieldday' });
+    assert.equal(r.status, 201);
+    assert.deepEqual(await r.json(), { ok: true, slug: 'newgame', url: '/s/fieldday/g/newgame' });
+    assert.equal(db.listing('newgame')!.studio_id, db.studioBySlug('fieldday')!.id);
+    assert.equal((await boss.post('/portal/api/vault/listings', { slug: 'newgame', title: 'Again', studio: 'fieldday' })).status, 409);
+    assert.equal((await boss.post('/portal/api/vault/listings', { slug: 'other', title: 'Other', studio: 'nope' })).status, 400);
+    assert.equal((await as('mia', 'none', 'maintainer').post('/portal/api/vault/listings', { slug: 'sneaky', title: 'Sneaky', studio: 'fieldday' })).status, 403);
+    assert.equal(db.listing('sneaky'), undefined);
   });
 
   test('release managers feature games with a checkbox; the catalog lists them by sequence, then title', async () => {
@@ -525,14 +545,16 @@ describe('Vault admins move a game to another studio', () => {
     assert.equal((await move(boss, 'transformations-quest', 'nowhere', 'ucalgary')).status, 404);
   });
 
-  test('co-makers are kept; only Vault admins can move games', async () => {
+  test('co-makers are kept; only Vault staff who edit game/studio content can move games', async () => {
     const boss = as('boss', 'admin');
     await boss.post(L, { slug: 'shady-sam', title: 'Shady Sam' });
     await boss.post(`${L}/shady-sam`, { makers: 'Field Day Lab\nSomeone Else' });
     assert.equal((await move(as('mia', 'none', 'maintainer'), 'shady-sam', 'ucalgary')).status, 403);
-    assert.equal((await move(as('rita', 'release_manager'), 'shady-sam', 'ucalgary')).status, 403);
-    assert.doesNotMatch(await (await as('rita', 'release_manager').get('/s/fieldday/g/shady-sam')).text(), /Move to this studio/);
-    assert.equal((await move(boss, 'shady-sam', 'ucalgary')).status, 200);
+    const bea = as('bea', ['vault.blog.edit', 'vault.users.maintain']), rita = as('rita', ['vault.content.edit']);
+    assert.equal((await move(bea, 'shady-sam', 'ucalgary')).status, 403);
+    assert.doesNotMatch(await (await bea.get('/s/fieldday/g/shady-sam')).text(), /Move to this studio/);
+    assert.match(await (await rita.get('/s/fieldday/g/shady-sam')).text(), /Move to this studio/);
+    assert.equal((await move(rita, 'shady-sam', 'ucalgary')).status, 200);
     assert.deepEqual(db.listing('shady-sam')!.draft.makers, ['Field Day Lab', 'Someone Else']);
   });
 

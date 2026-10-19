@@ -81,6 +81,7 @@
 .card .tbl-wrap.ga-tight { margin: 0; }
 .ga-off .fix { margin: 0; }
 .ga-foot { margin-top: 18px; }
+.ga-more { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .ga .fix { margin: 10px 0 0; }
 h3.sec small { font: 400 12.5px var(--body); }
 

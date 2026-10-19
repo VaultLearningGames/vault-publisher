@@ -106,8 +106,8 @@ describe('copying site images to the Vault CDN', () => {
     assert.equal(t.db.listing('wake')!.published!.hero_image, `https://prod.test/${key}`);
   });
 
-  test('Vault admins only; needs the site address and the CDN storage; the Game Catalog page has no form for it', async () => {
-    assert.equal((await t.as('rm', 'release_manager').post(M, { base: 'https://site.test' })).status, 403);
+  test('Vault staff who edit game/studio content only; needs the site address and the CDN storage; the Game Catalog page has no form for it', async () => {
+    assert.equal((await t.as('bea', ['vault.blog.edit', 'vault.users.maintain']).post(M, { base: 'https://site.test' })).status, 403);
     assert.equal((await t.as('ada', 'none', 'admin').post(M, { base: 'https://site.test' })).status, 403);
     assert.equal((await t.as('boss', 'admin').post(M, { base: 'ftp://site.test' })).status, 400);
     assert.equal((await t.as('boss', 'admin').post(M, {})).status, 400, 'the site address is required');

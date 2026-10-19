@@ -1,0 +1,15 @@
+{{- /* One post in a grid of posts (the catalog, a tag page): the site's blog-item card. Under the image
+       (an empty frame without one) the meta is always three lines, tags (3 at most, then "+N"), date, author, each
+       there even when empty, so the titles of a row line up. */ -}}
+{{- $href := printf "/blog/%s" .slug -}}
+{{- $tags := .tags | default slice -}}
+<article class="blog-item">{{ with .featured_image }}<a class="blog-img" href="{{ $href }}"><img src="{{ .url }}" alt="{{ .alt }}" loading="lazy"></a>{{ else }}<a class="blog-img blog-img--none" href="{{ $href }}" aria-hidden="true" tabindex="-1"></a>{{ end }}
+      <div class="blog-card__meta">
+        <div class="blog-card__tags">{{ range first 3 $tags }}<a class="blog-card__tag" href="{{ printf "/blog/tag/%s" .slug }}">{{ .name }}</a>{{ end }}{{ if gt (len $tags) 3 }}<span class="blog-card__tag blog-card__tag--more">+{{ sub (len $tags) 3 }}</span>{{ end }}</div>
+        <div class="blog-card__date">{{ partial "blog/date.html" .published_at }}</div>
+        <div class="blog-card__author">{{ with .author.name }}<span class="blog-author">{{ . }}</span>{{ end }}</div>
+      </div>
+      <h1 class="blog-title"><a href="{{ $href }}">{{ .title }}</a></h1>
+      {{ with .excerpt }}<div class="blog-excerpt"><p>{{ . }}</p></div>{{ end }}
+      <a class="blog-more" href="{{ $href }}">Read More</a>
+    </article>

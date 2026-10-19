@@ -41,16 +41,27 @@ export interface Config {
   // Where an unsaved listing preview opens, ADDRESS/_preview/TOKEN/ (listing-preview.ts): this portal, which renders
   // it itself, and any site that still renders its own. The first is the editor's main Preview button.
   previewSites: PreviewSite[];
-  // The website's source (Hugo: hugo.toml, content/, data/, themes/), carried in the image, and the Hugo binary: the
-  // portal renders listing previews from them (portal/site-preview.ts). The pages load their assets from siteUrl.
+  // SITE_DIR as set ('site' when it isn't). The previews' site source is found by site-dir.ts (resolveSiteDir: SITE_DIR,
+  // the enclosing vault-site checkout, or the image's /app/vault-site), not from this. hugoBin is the Hugo binary the
+  // portal renders previews with (portal/site-preview.ts). The pages load their assets from siteUrl.
   siteDir: string;
   hugoBin: string;
   // The portal's "Need support?" link: the invitation to the Slack workspace. '' hides the link.
   supportUrl: string;
+  // Staging only: the UTC hour (0-23) the staging data is replaced from production each day; the staging banner counts down
+  // to it. STAGING_SYNC_UTC_HOUR, default 9. The re-seed job must run at the same hour.
+  stagingSyncUtcHour: number;
   // Google Analytics 4 property the analytics pages read (its numeric id, not the G- measurement id), and its time
   // zone (the property's days). No id: the pages say analytics isn't connected. See docs/analytics.md.
   gaPropertyId?: string;
   gaTimeZone: string;
+  // The deploy bar (src/deploy-status.ts): a GitHub token that can read Actions runs of vault-publisher and vault-site
+  // (Actions: read). None: no bar. Which system this is: the staging banner's PORTAL_URL, or deployEnvironment
+  // (SITE_REBUILD_ENVIRONMENT, set by deploy.yml) "production". The branches each system deploys from.
+  deployStatusGithubToken?: string;
+  deployEnvironment?: string;
+  deployStatusStagingBranch?: string;
+  deployStatusProductionBranch?: string;
 }
 
 // Where "Need support?" sends people, and the channel they're told to join there.
@@ -87,6 +98,11 @@ export function parsePreviewSites(v: string | undefined): PreviewSite[] {
 export function parseGaPropertyId(v: string | undefined): string | undefined {
   const m = (v ?? '').trim().match(/^(?:properties\/)?(\d{4,})$/);
   return m ? m[1] : undefined;
+}
+
+// An on/off variable: 1, true, yes or on (any case) is on; anything else, or unset, is off.
+export function parseFlag(v: string | undefined): boolean {
+  return /^(1|true|yes|on)$/i.test((v ?? '').trim());
 }
 
 function required(name: string): string {
@@ -133,7 +149,12 @@ export function loadConfig(): Config {
     siteDir: process.env.SITE_DIR?.trim() || 'site',
     hugoBin: process.env.HUGO_BIN?.trim() || 'hugo',
     supportUrl: parseSupportUrl(process.env.SUPPORT_URL),
+    stagingSyncUtcHour: (() => { const n = Number(process.env.STAGING_SYNC_UTC_HOUR?.trim()); return Number.isInteger(n) && n >= 0 && n <= 23 ? n : 9; })(),
     gaPropertyId: parseGaPropertyId(process.env.GA_PROPERTY_ID),
     gaTimeZone: process.env.GA_TIMEZONE?.trim() || 'America/Chicago',
+    deployStatusGithubToken: process.env.DEPLOY_STATUS_GITHUB_TOKEN?.trim() || undefined,
+    deployEnvironment: process.env.SITE_REBUILD_ENVIRONMENT?.trim() || undefined,
+    deployStatusStagingBranch: process.env.DEPLOY_STATUS_STAGING_BRANCH?.trim() || undefined,
+    deployStatusProductionBranch: process.env.DEPLOY_STATUS_PRODUCTION_BRANCH?.trim() || undefined,
   };
 }

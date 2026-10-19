@@ -1,2 +1,0 @@
-{{- /* A post's tags as links to their pages: "News, Teachers". */ -}}
-{{- with . }}<span class="blog-cats">{{ range $i, $t := . }}{{ if $i }}, {{ end }}<a href="{{ printf "/blog/tag/%s" $t.slug }}">{{ $t.name }}</a>{{ end }}</span>{{ end -}}

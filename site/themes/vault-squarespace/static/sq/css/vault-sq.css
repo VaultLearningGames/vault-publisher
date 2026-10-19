@@ -410,14 +410,30 @@ picture { display: contents; }
 .blog-title a { text-decoration: none; }
 .post-nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; padding: 0 6vw 40px; font: 500 16px/24px var(--meta); }
 .post-nav-next { margin-left: auto; text-align: right; }
-/* The share links under a post (partials/blog/share.html). Instagram's button needs the script (vault-sq.js). */
-.blog-share { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: 25px 10% 7.8px; font: 500 16px/24px var(--meta); }
+/* The top of a post (partials/blog/post-header.html): tag pills and the byline at the left, the title centred, then
+   the share bar across the full width between thin rules. */
+.blog-post-header { margin: 0 0 32px; }
+.blog-post-tags ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; padding: 0; list-style: none; }
+.blog-post-tags li { min-width: 0; max-width: 100%; }
+.blog-post-tags .blog-pill { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.blog-post-header .blog-post-title { margin: 0 0 24px; text-align: center; font-weight: 700; overflow-wrap: break-word; }
+.blog-byline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 20px; font: 500 16px/24px var(--meta); }
+.blog-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 32px; height: 32px;
+  border-radius: 50%; background: #000; color: #fff; font-size: 14px; line-height: 1; }
+.blog-byline-meta { display: inline-flex; flex-wrap: wrap; gap: 6px; font-size: 14px; opacity: .7; }
+/* The share bar (partials/blog/share.html). Instagram's and Copy link's buttons need the script (vault-sq.js); the
+   share-sheet button shows only where the browser has one. */
+.blog-share { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid rgba(0, 0, 0, .15);
+  border-bottom: 1px solid rgba(0, 0, 0, .15); font: 500 16px/24px var(--meta); }
+.blog-share-spacer { flex: 1 1 0; }
+.blog-share-btn[hidden] { display: none; }
+html:not(.js) .blog-share-btn[data-share="copy"] { display: none; }
 .blog-share-label { margin-right: 4px; }
 .blog-share-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: 1px solid currentColor; border-radius: 50%; background: none; color: inherit; cursor: pointer; text-decoration: none; }
 .blog-share-btn:hover, .blog-share-btn:focus-visible { background: currentColor; }
 .blog-share-btn:hover svg, .blog-share-btn:focus-visible svg { fill: #fff; }
 html:not(.js) .blog-share-btn[data-share="instagram"] { display: none; }
-.blog-share-status { flex-basis: 100%; text-align: center; font-size: 14px; }
+.blog-share-status { flex-basis: 100%; font-size: 14px; }
 .blog-share-status:empty { display: none; }
 
 /* A post's image collection (partials/blog/block.html, shortcodes/image.html): stacked, grid, carousel or slideshow.

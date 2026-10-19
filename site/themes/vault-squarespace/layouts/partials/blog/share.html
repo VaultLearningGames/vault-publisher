@@ -2,7 +2,8 @@
        work without JavaScript; no SDKs, scripts or counts. The same links as src/blog/share.ts (their reference, which
        the tests check). Values are encoded as encodeURIComponent does: urlquery, with its "+" for a space made "%20" (a
        "+" in the value is already "%2B"). Instagram has no web share address: its button opens the browser's share
-       sheet, or else copies the post's address (sq/js/vault-sq.js). */ -}}
+       sheet, or else copies the post's address (sq/js/vault-sq.js). After the networks, "Copy link" and, where the browser has
+       one, its own share sheet: both need the script, so they are hidden without it. */ -}}
 {{- $base := site.BaseURL | strings.TrimSuffix "/" -}}
 {{- $url := printf "%s/blog/%s" $base .slug -}}
 {{- $u := replace (urlquery $url) "+" "%20" -}}
@@ -21,4 +22,7 @@
 {{- $svg := printf `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">%s</svg>` .icon | safeHTML }}
 {{- if .href }}<a class="blog-share-btn" href="{{ .href | safeURL }}" target="_blank" rel="noopener noreferrer" aria-label="Share on {{ .label }}" data-share="{{ .network }}">{{ $svg }}</a>
 {{- else }}<button class="blog-share-btn" type="button" aria-label="Share on {{ .label }}" data-share="{{ .network }}" data-share-url="{{ $url }}" data-share-title="{{ $.title }}">{{ $svg }}</button>{{ end }}
+{{- end }}<span class="blog-share-spacer" aria-hidden="true"></span>
+{{- range slice (dict "action" "copy" "label" "Copy link" "icon" `<path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4a5 5 0 0 0 0-10z"/>`) (dict "action" "native" "label" "More ways to share" "icon" `<path d="M16 5l-1.42 1.42-1.59-1.59V16h-1.98V4.83L9.42 6.42 8 5l4-4zm4 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h3v2H6v11h12V10h-3V8h3a2 2 0 0 1 2 2z"/>`) }}
+<button class="blog-share-btn" type="button" aria-label="{{ .label }}" title="{{ .label }}" data-share="{{ .action }}" data-share-url="{{ $url }}" data-share-title="{{ $.title }}"{{ if eq .action "native" }} hidden{{ end }}>{{ printf `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">%s</svg>` .icon | safeHTML }}</button>
 {{- end }}<span class="blog-share-status" role="status" aria-live="polite"></span></nav>

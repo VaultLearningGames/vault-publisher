@@ -359,21 +359,27 @@
     }
   });
 
-  /* A post's Instagram share button (partials/blog/share.html): Instagram has no web share address, so this opens the
-     browser's share sheet, or else copies the post's address for pasting into Instagram. */
-  $$('.blog-share [data-share="instagram"]').forEach(function (btn) {
+  /* A post's share bar (partials/blog/share.html). Instagram has no web share address, so its button opens the
+     browser's share sheet, or else copies the post's address for pasting into Instagram. "Copy link" copies the
+     address; the share-sheet button shows only where the browser has one. */
+  $$('.blog-share [data-share="instagram"], .blog-share [data-share="copy"], .blog-share [data-share="native"]').forEach(function (btn) {
     var status = $('.blog-share-status', btn.closest('.blog-share'));
-    var url = btn.dataset.shareUrl, title = btn.dataset.shareTitle;
+    var url = btn.dataset.shareUrl, title = btn.dataset.shareTitle, action = btn.dataset.share;
+    var where = action === 'instagram' ? ' into Instagram' : '';
     function say(msg) { if (status) status.textContent = msg; }
     function copy() {
+      var fail = function () { say('Copy this link to share it' + (where ? ' on Instagram' : '') + ': ' + url); };
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(function () { say('Link copied: paste it into Instagram.'); },
-          function () { say('Copy this link to share it on Instagram: ' + url); });
-      } else say('Copy this link to share it on Instagram: ' + url);
+        navigator.clipboard.writeText(url).then(function () { say('Link copied' + (where ? ': paste it' + where : '') + '.'); }, fail);
+      } else fail();
+    }
+    if (action === 'native') {
+      if (!navigator.share) return;
+      btn.hidden = false;
     }
     btn.addEventListener('click', function () {
       say('');
-      if (navigator.share) {
+      if (action !== 'copy' && navigator.share) {
         navigator.share({ title: title, url: url }).catch(function (e) { if (!e || e.name !== 'AbortError') copy(); });
       } else copy();
     });

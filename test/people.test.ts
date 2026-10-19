@@ -185,7 +185,7 @@ describe('Vault People page', () => {
       for (const perm of VAULT_PERMISSIONS) assert.match(page, new RegExp(`name="${perm}"`));
       assert.match(page, /invitee<\/b><span><span class="pill p-wait">Invited/);
       assert.match(page, /otto<\/b>[\s\S]*Other Studio/);
-      assert.match(await (await who.get('/')).text(), /href="\/vault\/people"/);
+      assert.match(await (await who.get('/vault/analytics')).text(), /href="\/vault\/people"/);
     }
     for (const who of [p.contentEditor, p.blogEditor, p.studioAdmin, p.maintainer, p.viewer]) assert.equal((await who.get('/vault/people')).status, 403);
     assert.doesNotMatch(await (await p.contentEditor.get('/')).text(), /href="\/vault\/people"/);

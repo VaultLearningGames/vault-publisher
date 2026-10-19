@@ -181,7 +181,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
           <a href="/vault/analytics" class="${active === 'analytics' ? 'on' : ''}">Analytics</a>
           <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
           <a href="/vault/site-checks" class="${active === 'site-checks' ? 'on' : ''}">Site checks</a>
-          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Game Catalog</a>
+          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Games</a>
           <a href="/vault/studios" class="${active === 'vault-studios' ? 'on' : ''}">Studios</a>
           ${vault('vault.users.maintain') ? html`<a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>` : ''}
           <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>

@@ -33,11 +33,11 @@ The vault-site README section on promotion:
 ```markdown
 ## Promoting staging to production
 
-Site templates, styles and other site code reach production by a pull request from `staging` to `production`,
-reviewed by a person. The staging portal commits blog posts and other content to `staging` as vault-portal-bot (each
-commit has a `Portal-User:` trailer); some of that is test content made on staging. **Before merging, remove or
-leave out test-only content created on staging** (e.g. `content/blog/<test-post>/`). Production content is committed
-to `production` by the production portal and needs no promotion.
+Only code reaches production: site templates, styles and other site code go by a pull request from `staging` to
+`production`, reviewed by a person. Content never does. Production content is committed to `production` by the
+production portal; anything the staging portal commits to `staging` is test content and is thrown away (vault-site's
+*Reset staging content* workflow replaces it with production's daily and on demand; run it before opening the PR).
+vault-site's *Promotion is code only* check fails a PR that changes `content/blog` or `content/tags`.
 ```
 
 ## 3. Tokens (one per system)

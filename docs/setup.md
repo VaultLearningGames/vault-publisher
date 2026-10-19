@@ -11,10 +11,12 @@ to Cloudflare's static hosting (a Worker with files and no script).
 | Portal and deployer (this repo) | `portal.vaultlearninggames.org` → `vault-publisher` | `portal.vaultlearninggames-staging.org` → `vault-publisher-staging` |
 | Studios' test builds | `builds.vaultlearninggames.org` → R2 `builds-vaultlearninggames` | `builds.vaultlearninggames-staging.org` → `builds-vaultlearninggames-staging` |
 | Releases | `cdn.vaultlearninggames.org` → R2 `cdn-vaultlearninggames` | `cdn.vaultlearninggames-staging.org` → `cdn-vaultlearninggames-staging` |
-| Database (Litestream) | GCS `PROJECT-vault-publisher-db` | GCS `PROJECT-vault-publisher-staging-db`, first seeded from production's |
+| Database (Litestream) | GCS `PROJECT-vault-publisher-db` | GCS `PROJECT-vault-publisher-staging-db`, a disposable copy seeded from production's (a scheduled re-seed is planned) |
 | Deployed from | the `production` branch | `main` |
 
-Studios only ever use production. Staging is where Vault tries the next version; only
+Studios only ever use production. Staging is throwaway: it is for testing the portal's code, the site's layouts and the
+process (never content), and everything on it can be discarded. Content is made on production and flows to staging, not
+the other way. Staging is where Vault tries the next version; only
 `VaultLearningGames/vault-publisher-test` publishes to it.
 
 The staging portal says so on every page, signed in or not: a banner at the top that can't be closed, saying that what

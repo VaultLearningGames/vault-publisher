@@ -465,9 +465,21 @@ The bucket can't be listed, so the copy takes the files from where the source bu
 
 ## The website
 
-`site/` is the public site (vaultlearninggames.org): Hugo, theme `vault-squarespace` (the replica of the Squarespace
-design). It came from `VaultLearningGames/vault-hugo-rebuild` (branch `original-squarespace-design`), which is no
-longer where the site is edited or deployed from. Details of the theme: [site/README.md](site/README.md).
+The public site (vaultlearninggames.org) is a **static Hugo site** whose source is
+[`VaultLearningGames/vault-site`](https://github.com/VaultLearningGames/vault-site) (theme `vault-squarespace`). The
+`site/` folder in this repository is retired, ignored by every deploy, and being removed: never edit it.
+
+**How the portal makes the site.** The portal writes content, never pages. Editing a blog post in the portal commits
+Markdown (`content/blog/<slug>/index.md`) to vault-site as `vault-portal-bot`; game pages come from the portal's
+`GET /v1/catalog`. vault-site's *Deploy (site)* workflow runs Hugo over the Markdown, templates and catalog, and
+publishes the resulting static files to Cloudflare. Nothing is rendered per request.
+
+**Production is where content is made; staging is throwaway.** Real posts and listings are written on the
+*production* portal, which commits to vault-site's `production` branch. The staging portal and site
+(`vaultlearninggames-staging.org`) exist only to test portal code, layouts and the process: staging content is
+disposable, is replaced from production on a schedule, and is never promoted. Only code (templates, styles, portal
+changes) goes staging → production, by a reviewed pull request that CI fails if it touches `content/blog` or
+`content/tags`.
 
 * **Game pages come from the portal**, not from files: `npm run site:catalog` saves this system's `GET /v1/catalog`
   to `site/data/catalog.json` (not in git), and `site/content/games/_content.gotmpl` turns each listing into a page.
@@ -475,7 +487,7 @@ longer where the site is edited or deployed from. Details of the theme: [site/RE
   editor commits to as `vault-portal-bot`, on the system's branch (`staging` or `production`; docs/setup.md, "The
   blog"; docs/vault-site.md, "Who does what"). vault-site's own workflow builds and publishes it. The portal has no
   `/v1/blog` any more, so `npm run site:catalog` leaves this copy's blog empty.
-* **Build:** `VAULT_PORTAL=https://portal.vaultlearninggames-staging.org npm run site:build` → `site/public`
+* **Local build (legacy, uses the retired `site/`; build in vault-site instead):** `VAULT_PORTAL=https://portal.vaultlearninggames-staging.org npm run site:build` → `site/public`
   (catalog, `hugo`, `site/scripts/squarespace-paths.mjs` for the `/game-cards/category|tag/…` addresses, then
   `scripts/site-hosting.ts` for the hosting's `_headers` and `_redirects`).
   `npm run site:dev` serves it on http://localhost:1313. Game images are on the Vault CDN; `site/` holds only the
@@ -503,8 +515,8 @@ own previews from this portal's JSON.
 ## Previews and vault-site
 
 The website's source is its own repository, [VaultLearningGames/vault-site](https://github.com/VaultLearningGames/vault-site)
-(Hugo at the repository root; this repository is its `portal/` submodule). `site/` here is deprecated and unused by
-the image. The portal renders previews from vault-site, found by `src/site-dir.ts` (`resolveSiteDir()`) in this order:
+(Hugo at the repository root; this repository is its `portal/` submodule). `site/` here is retired (removal is
+planned) and unused by the image. The portal renders previews from vault-site, found by `src/site-dir.ts` (`resolveSiteDir()`) in this order:
 `SITE_DIR` (must be a Hugo site, or the portal says so and previews answer 503), the folder above this repository when
 it is a Hugo site (the `vault-site/portal` checkout), then `/app/vault-site` (the image). Every build runs in a
 temporary copy; the site source is never written to.

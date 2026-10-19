@@ -23,8 +23,9 @@ commit in `vault-site.ref` (README, [Previews and vault-site](../README.md#previ
 - The portal touches only `content/`, `data/`, `static/` and `assets/` (`src/site-repo/paths.ts`), never templates,
   configuration or workflows.
 - `SITE_PUBLISHING_ENABLED=false` stops every portal write at once.
-- Site code (templates, styles) reaches production by a human-approved PR from `staging` to `production` in
-  vault-site; a new portal version reaches production by this repository's own human-gated deploy.
+- Only code (templates, styles) reaches production, by a human-approved PR from `staging` to `production` in
+  vault-site; content never does (production is the only source of content; staging content is disposable and reset
+  from production); a new portal version reaches production by this repository's own human-gated deploy.
 
 The one-time setup (the bot user, its tokens, the branches and their protection): [ops-checklist.md](ops-checklist.md).
 
@@ -65,8 +66,8 @@ From `portal/`, the portal finds this site as its parent folder and renders prev
 
 Blog posts are `content/blog/<slug>/index.md`; the portal's blog editor commits them here as vault-portal-bot (the
 staging portal to `staging`, the production portal to `production`). A push to either branch builds and publishes that
-site; it doesn't deploy the portal. Before merging a `staging` → `production` PR, remove or leave out test-only content
-created on staging.
+site; it doesn't deploy the portal. Staging content is test content and is thrown away: *Reset staging content* replaces it with production's, and a
+`staging` → `production` PR that touches `content/blog` or `content/tags` fails CI (*Promotion is code only*).
 
 ## Updating the submodule and the portal's pin
 

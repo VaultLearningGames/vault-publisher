@@ -315,7 +315,7 @@ describe('Vault Studios page', () => {
       assert.equal((await who.get('/vault/studios/fieldday')).status, 403);
     }
     assert.equal((await p.signedOut.get('/vault/studios')).status, 302);
-    assert.match(await (await p.vaultAdmin.get('/')).text(), /href="\/vault\/studios"/);
+    assert.match(await (await p.vaultAdmin.get('/vault')).text(), /href="\/vault\/studios"/);
   });
 
   test('Vault admins create studios with a GitHub organization or without one', async () => {

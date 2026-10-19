@@ -201,7 +201,8 @@ describe('seeing studios and games', () => {
 
   test('every page renders for Vault staff', async () => {
     const boss = as('boss', 'admin');
-    for (const p of ['/', '/s/fieldday', '/s/fieldday/g/aqualab', '/s/fieldday/register', '/s/fieldday/members', '/vault', '/vault/people', '/vault/activity']) {
+    assert.equal((await boss.get('/')).headers.get('location'), '/vault/analytics');
+    for (const p of ['/s/fieldday', '/s/fieldday/g/aqualab', '/s/fieldday/register', '/s/fieldday/members', '/vault', '/vault/people', '/vault/activity']) {
       const r = await boss.get(p);
       assert.equal(r.status, 200, p);
     }

@@ -178,10 +178,10 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
           <a href="/s/${cur.slug}/members" class="${active === 'members' ? 'on' : ''}">Members</a>` : ''}
         ${staff ? html`
           <div class="nav-sep">Vault</div>
-          <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
-          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Games</a>
-          <a href="/vault/site-checks" class="${active === 'site-checks' ? 'on' : ''}">Site checks</a>
           <a href="/vault/analytics" class="${active === 'analytics' ? 'on' : ''}">Analytics</a>
+          <a href="/vault" class="${active === 'vault' ? 'on' : ''}">Release requests</a>
+          <a href="/vault/site-checks" class="${active === 'site-checks' ? 'on' : ''}">Site checks</a>
+          <a href="/vault/listings" class="${active === 'vault-listings' ? 'on' : ''}">Game Catalog</a>
           <a href="/vault/studios" class="${active === 'vault-studios' ? 'on' : ''}">Studios</a>
           ${vault('vault.users.maintain') ? html`<a href="/vault/people" class="${active === 'people' ? 'on' : ''}">People</a>` : ''}
           <a href="/vault/activity" class="${active === 'activity' ? 'on' : ''}">Activity</a>
@@ -389,9 +389,11 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   app.get('/', (c) => {
     const u = signedIn(c);
     if (u instanceof Response) return u;
+    // Vault staff land on Analytics (also after signing in without a next page); studio members keep their studios.
+    if (isStaff(u)) return c.redirect('/vault/analytics');
     const mine = db.membershipsForLogin(u.login);
-    if (mine.length === 1 && !isStaff(u)) return c.redirect(`/s/${mine[0].studio_slug}`);
-    const studios = isStaff(u) ? db.studios() : db.studios().filter((s) => mine.some((m) => m.studio_id === s.id));
+    if (mine.length === 1) return c.redirect(`/s/${mine[0].studio_slug}`);
+    const studios = db.studios().filter((s) => mine.some((m) => m.studio_id === s.id));
     if (!studios.length) {
       return page(c, 'Welcome', html`${head(`Welcome, ${u.name || u.login}`, 'You’re signed in, but you aren’t a member of any studio yet.')}
         <div class="card"><p>Ask your studio’s admin (or Vault) to add your GitHub username: <code>${u.login}</code></p></div>`);

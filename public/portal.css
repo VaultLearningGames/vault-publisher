@@ -599,3 +599,5 @@ th.r .th-sort { text-align: right; }
   .findings-acts { margin-left: 0; }
   input[type=search].findings-filter { width: 100%; padding: 8px 12px; }   /* no search icon to clear */
 }
+.env-sync { flex-basis: 100%; font-size: 13px; }
+.env-sync-left { font-weight: 600; }

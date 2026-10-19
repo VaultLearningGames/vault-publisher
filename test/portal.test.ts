@@ -158,6 +158,8 @@ describe('the staging banner', () => {
     for (const page of await pages()) {
       assert.match(page, /<body class="staging"><div class="env-banner" role="note" aria-label="This is the staging portal">/);
       assert.match(page, /Staging portal: for previewing features, not for content\./);
+      assert.match(page, /class="env-sync" data-sync-at="\d{4}-\d\d-\d\dT\d\d:00:00\.000Z"/, 'sync countdown');
+      assert.match(page, /Next sync from production/);
       assert.match(page, /Content is written on the production portal and flows down to staging/);
       assert.match(page, /<a href="https:\/\/portal\.vaultlearninggames\.org\/">portal\.vaultlearninggames\.org<\/a>/);
       assert.doesNotMatch(page.match(/<div class="env-banner"[^]*?<\/div>/)![0], /<button|data-close|dismiss/i, 'it can’t be dismissed');
@@ -168,7 +170,7 @@ describe('the staging banner', () => {
     for (const baseUrl of ['https://portal.vaultlearninggames.org', 'https://portal.test']) {
       app = createApp({ ...base(), portal: { baseUrl, sessionSecret: SECRET, vaultAdmins: ['boss'] } });
       for (const page of await pages()) {
-        assert.doesNotMatch(page, /env-banner|Staging portal|class="staging"/, baseUrl);
+        assert.doesNotMatch(page, /env-banner|Staging portal|class="staging"|env-sync/, baseUrl);
       }
     }
   });

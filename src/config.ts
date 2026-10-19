@@ -48,6 +48,9 @@ export interface Config {
   hugoBin: string;
   // The portal's "Need support?" link: the invitation to the Slack workspace. '' hides the link.
   supportUrl: string;
+  // Staging only: the UTC hour (0-23) the staging data is replaced from production each day; the staging banner counts down
+  // to it. STAGING_SYNC_UTC_HOUR, default 9. The re-seed job must run at the same hour.
+  stagingSyncUtcHour: number;
   // Google Analytics 4 property the analytics pages read (its numeric id, not the G- measurement id), and its time
   // zone (the property's days). No id: the pages say analytics isn't connected. See docs/analytics.md.
   gaPropertyId?: string;
@@ -146,6 +149,7 @@ export function loadConfig(): Config {
     siteDir: process.env.SITE_DIR?.trim() || 'site',
     hugoBin: process.env.HUGO_BIN?.trim() || 'hugo',
     supportUrl: parseSupportUrl(process.env.SUPPORT_URL),
+    stagingSyncUtcHour: (() => { const n = Number(process.env.STAGING_SYNC_UTC_HOUR?.trim()); return Number.isInteger(n) && n >= 0 && n <= 23 ? n : 9; })(),
     gaPropertyId: parseGaPropertyId(process.env.GA_PROPERTY_ID),
     gaTimeZone: process.env.GA_TIMEZONE?.trim() || 'America/Chicago',
     deployStatusGithubToken: process.env.DEPLOY_STATUS_GITHUB_TOKEN?.trim() || undefined,

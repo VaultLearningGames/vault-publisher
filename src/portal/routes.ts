@@ -46,6 +46,7 @@ export interface PortalConfig {
   vaultAdmins: string[];
   // The "Need support?" link (the Slack invitation). Left out: the default; '': no link.
   supportUrl?: string;
+  stagingSyncUtcHour?: number;   // staging only: daily hour (UTC) staging data is replaced from production; default 9
   oauth?: OAuthClient; // injected in tests
   githubAccount?: GitHubAccountLookup; // injected in tests
   githubRepository?: GitHubRepositoryLookup; // injected in tests
@@ -117,6 +118,11 @@ const supportLink = (text: string) => html`<a href="${supportUrl}" target="_blan
 // the portal's own address (PORTAL_URL): the deploy refuses a staging environment whose PORTAL_URL doesn't contain
 // "staging", and a production one whose does. Set by registerPortal, like supportUrl; '' on production.
 let stagingBanner: Html | '' = '';
+// Next daily sync instant (UTC hour) strictly after `now`.
+export function nextStagingSync(now: Date, hour: number): Date {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour));
+  return d.getTime() > now.getTime() ? d : new Date(d.getTime() + 86_400_000);
+}
 export function stagingProductionUrl(baseUrl: string): string | null {
   let u: URL;
   try { u = new URL(baseUrl); } catch { return null; }
@@ -124,14 +130,15 @@ export function stagingProductionUrl(baseUrl: string): string | null {
   const host = u.hostname.replace(/-staging(?=\.)/i, '').replace(/^staging\./i, '');
   return host !== u.hostname && !/staging/i.test(host) ? `${u.protocol}//${host}` : '';
 }
-function stagingBannerFor(baseUrl: string): Html | '' {
+function stagingBannerFor(baseUrl: string, syncHour = 9): Html | '' {
   const prod = stagingProductionUrl(baseUrl);
   if (prod === null) return '';
   return html`<div class="env-banner" role="note" aria-label="This is the staging portal">
     <strong><span aria-hidden="true">⚠</span> Staging portal: for previewing features, not for content.</strong>
     <span>Staging is for testing layouts and the portal. Content is written on the production portal and flows down to staging
     (staging's content is replaced from production, and anything saved here is thrown away). Only code is promoted to production.
-    Make real changes${prod ? html` on <a href="${prod}/">${new URL(prod).host}</a>` : ' on the production portal'}.</span></div>`;
+    Make real changes${prod ? html` on <a href="${prod}/">${new URL(prod).host}</a>` : ' on the production portal'}.</span>
+    <span class="env-sync" data-sync-at="${nextStagingSync(nowDate(), syncHour).toISOString()}" role="status"><span aria-hidden="true">⟳</span> Next sync from production (games, listings, blog, settings): <time datetime="${nextStagingSync(nowDate(), syncHour).toISOString()}">${String(syncHour).padStart(2, '0')}:00 UTC</time>, <b class="env-sync-left">daily</b>. Everything saved here is replaced then.</span></div>`;
 }
 // The deploy bar, under the staging banner on every page while a deploy of this system runs or one is scheduled by a
 // portal action (public/portal.js fills it in and polls DEPLOY_STATUS_PATH). Set by registerPortal: deployStatus is
@@ -216,7 +223,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
   const secure = cfg.baseUrl.startsWith('https://');
   const admins = new Set(cfg.vaultAdmins.map((l) => l.toLowerCase()));
   supportUrl = cfg.supportUrl ?? DEFAULT_SUPPORT_URL;
-  stagingBanner = stagingBannerFor(cfg.baseUrl);
+  stagingBanner = stagingBannerFor(cfg.baseUrl, cfg.stagingSyncUtcHour);
   const ds = cfg.deployStatus;
   const deployFrom = deployBranch({ isStaging: stagingProductionUrl(cfg.baseUrl) !== null, environment: ds?.environment, stagingBranch: ds?.stagingBranch, productionBranch: ds?.productionBranch });
   const fetchRuns = ds?.fetchRuns ?? (ds?.token ? githubRunsFetcher(ds.token) : null);

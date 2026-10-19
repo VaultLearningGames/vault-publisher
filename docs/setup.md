@@ -22,6 +22,9 @@ process (never content), and everything on it can be discarded. Content is made 
 the other way. Staging is where Vault tries the next version; only
 `VaultLearningGames/vault-publisher-test` publishes to it.
 
+The staging banner also counts down to the next daily sync from production (`STAGING_SYNC_UTC_HOUR`, default 9, UTC; the
+re-seed job must run at that hour). The countdown is only a display: the re-seed job itself is a separate card.
+
 The staging portal says so on every page, signed in or not: a banner at the top that can't be closed, saying that what
 is saved there (settings, game data, listings) is thrown away: staging is for testing layouts and the portal, content is written on the production portal and flows
 down to staging (never up), and only code is promoted. Real changes are made on the production portal. The portal decides from its own

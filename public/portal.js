@@ -550,3 +550,20 @@
   }
   update();
 })();
+
+// Staging banner: count down to the next sync from production.
+(function () {
+  const el = document.querySelector('.env-sync[data-sync-at]');
+  if (!el) return;
+  const out = el.querySelector('.env-sync-left');
+  const at = () => new Date(el.getAttribute('data-sync-at')).getTime();
+  const DAY = 86400000;
+  const tick = () => {
+    let ms = at() - Date.now();
+    if (ms <= 0 && ms > -30 * 60000) { out.textContent = 'syncing now, reload in a few minutes'; return; }
+    while (ms <= 0) ms += DAY;   // the page was rendered before an earlier sync: count to the next daily one
+    const m = Math.floor(ms / 60000), h = Math.floor(m / 60);
+    out.textContent = 'in ' + (h ? h + ' h ' : '') + (m % 60) + ' min';
+  };
+  tick(); setInterval(tick, 30000);
+})();

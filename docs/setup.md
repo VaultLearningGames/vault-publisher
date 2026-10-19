@@ -1,13 +1,16 @@
 # One-time setup
 
 Vault runs two complete, separate systems. They share code and nothing else: each has its own site, portal and
-deployer, database, R2 buckets, keys and GitHub OAuth app. Both the portal and the website are in this repository
-and deploy together (`.github/workflows/deploy.yml`): the portal to Cloud Run, the website (`site/`, static files)
-to Cloudflare's static hosting (a Worker with files and no script).
+deployer, database, R2 buckets, keys and GitHub OAuth app. The portal (this repository) deploys to Cloud Run
+(`.github/workflows/deploy.yml`). The website is **not** in this repository: it is the static Hugo site in
+`VaultLearningGames/vault-site`, which its own *Deploy (site)* workflow builds and publishes to Cloudflare's static
+hosting (a Worker with files and no script). The portal only writes Markdown and the catalog that site is built
+from. The old `site/` folder here is retired and ignored (a board card removes it); where this page below still says
+`site/`, read `vault-site`, and treat the Cloud Run/R2-era steps as history.
 
 | | Production | Staging |
 |---|---|---|
-| Public site (`site/`) | `vaultlearninggames.org` → Worker `vault-site` (still Squarespace until launch) | `vaultlearninggames-staging.org` → Worker `vault-site-staging` (see [The website on Cloudflare static hosting](#the-website-on-cloudflare-static-hosting) for the state of the move from R2) |
+| Public site (`vault-site` repo) | `vaultlearninggames.org` → Worker `vault-site` (still Squarespace until launch) | `vaultlearninggames-staging.org` → Worker `vault-site-staging` (see [The website on Cloudflare static hosting](#the-website-on-cloudflare-static-hosting) for the state of the move from R2) |
 | Portal and deployer (this repo) | `portal.vaultlearninggames.org` → `vault-publisher` | `portal.vaultlearninggames-staging.org` → `vault-publisher-staging` |
 | Studios' test builds | `builds.vaultlearninggames.org` → R2 `builds-vaultlearninggames` | `builds.vaultlearninggames-staging.org` → `builds-vaultlearninggames-staging` |
 | Releases | `cdn.vaultlearninggames.org` → R2 `cdn-vaultlearninggames` | `cdn.vaultlearninggames-staging.org` → `cdn-vaultlearninggames-staging` |
@@ -302,6 +305,13 @@ hour, and a filled `company_website` honeypot field is accepted but not written.
 submitted values; each saved submission adds a `form.submit` audit entry (form and site only).
 
 ## The website on Cloudflare static hosting
+
+> **Retired parts.** Everything in this section that builds or deploys from `site/`, `site:build`,
+> `src/site-hosting.ts`, `cloudflare/site/` or this repository's deploy workflow now lives in vault-site (its
+> README and `.github/workflows/deploy.yml`). The Worker names, hostnames, cutover and cleanup steps are still the
+> record of how the hosting was set up. The 2026-10-02 state below is out of date: vault-site deploys staging from its
+> `staging` branch; `production` does not exist yet. Staging content is throwaway (reset from production), see
+> [vault-site](vault-site.md).
 
 The website (`site/`) is a few hundred static files. The deploy workflow builds them and publishes the build to the
 system's **Worker** (`vault-site-staging`, `vault-site`) as Workers Static Assets: Cloudflare stores the files and

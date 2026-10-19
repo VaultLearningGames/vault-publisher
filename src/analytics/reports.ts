@@ -202,6 +202,22 @@ export function topPagesRequest(sel: Selection, paths: string[]): GaRequest {
   };
 }
 
+// The blog (the site's /blog index and /blog/<slug>/ posts): opens (page views), readers (users) and time on screen
+// (GA's engagement time, seconds, summed). By page path, the current period, most opened first; blogTotalsRequest
+// has the totals in each period (readers can't be added up across paths).
+export const BLOG_METRICS = ['screenPageViews', 'totalUsers', 'userEngagementDuration'] as const;
+const blogPaths: Expr = { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'BEGINS_WITH', value: '/blog' } } };
+export function blogRequest(sel: Selection): GaRequest {
+  return {
+    dateRanges: [{ startDate: sel.current.start, endDate: sel.current.end }], dimensions: [{ name: 'pagePath' }],
+    metrics: BLOG_METRICS.map((name) => ({ name })), dimensionFilter: all(blogPaths, ...hoursTo(sel)),
+    orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }], limit: 1000,
+  };
+}
+export function blogTotalsRequest(sel: Selection): GaRequest {
+  return { dateRanges: ranges(sel), metrics: BLOG_METRICS.map((name) => ({ name })), dimensionFilter: all(blogPaths, ...hoursTo(sel)) };
+}
+
 // Realtime (the last 30 minutes), by country and city. Realtime reports can't see event parameters and refuse eventName
 // with activeUsers ("cannot be queried together"), so a player is someone whose user property vault_game is set (the
 // play script sets it on play_start), and a game's players are those whose vault_game is that game.
@@ -392,6 +408,49 @@ export function readTopPages(res: GaResponse, catalog: Record<string, string[]>)
     games.set(slug, g);
   }
   return [...games.values()].filter((g) => g.views > 0 || g.clicks > 0).sort((a, b) => b.views - a.views || a.slug.localeCompare(b.slug));
+}
+
+// The blog's figures: totals in each period, and per post (slug; '' is the blog's home: /blog and its pages).
+export interface BlogFigures { opens: number; readers: number; seconds: number }
+export interface BlogPostStats extends BlogFigures { slug: string; path: string }
+export interface BlogStats { totals: Record<'opens' | 'readers' | 'seconds', Pair>; posts: BlogPostStats[] }
+// A blog path's post: '' for /blog, /blog/ and /blog/page/N/; the first segment for /blog/<slug>/…; null for paths that
+// only begin with "/blog" (/blogger) or that aren't a post (/blog/tags/…, /blog/index.xml).
+export function blogSlugOf(path: string): string | null {
+  const p = path.split(/[?#]/)[0];
+  if (p !== '/blog' && !p.startsWith('/blog/')) return null;
+  const segs = p.slice('/blog'.length).split('/').filter(Boolean);
+  if (!segs.length || (segs[0] === 'page' && /^\d+$/.test(segs[1] ?? ''))) return '';
+  if (segs[0] === 'tags' || segs[0] === 'page' || segs[0].includes('.')) return null;
+  return decodeURIComponent(segs[0]);
+}
+// Rows by page path, added up per post (other /blog paths are left out). Most opened first, then by slug.
+export function readBlog(byPath: GaResponse, totals: GaResponse): BlogStats {
+  const t = readPairs(totals, [...BLOG_METRICS]);
+  const posts = new Map<string, BlogPostStats>();
+  for (const r of rowsOf(byPath)) {
+    const path = r.dims.pagePath ?? '';
+    let slug: string | null;
+    try { slug = blogSlugOf(path); } catch { slug = null; }
+    if (slug === null) continue;
+    const p = posts.get(slug) ?? { slug, path: slug ? `/blog/${slug}/` : '/blog/', opens: 0, readers: 0, seconds: 0 };
+    p.opens += r.mets.screenPageViews ?? 0;
+    p.readers += r.mets.totalUsers ?? 0;
+    p.seconds += r.mets.userEngagementDuration ?? 0;
+    posts.set(slug, p);
+  }
+  return {
+    totals: { opens: t.screenPageViews, readers: t.totalUsers, seconds: t.userEngagementDuration },
+    posts: [...posts.values()].filter((p) => p.opens > 0).sort((a, b) => b.opens - a.opens || a.slug.localeCompare(b.slug)),
+  };
+}
+// Average time on screen per reader, or null with no readers (shown as a dash, never NaN).
+export const perReader = (seconds: number, readers: number): number | null => (readers > 0 && Number.isFinite(seconds) ? seconds / readers : null);
+// Seconds as m:ss (h:mm:ss from an hour); null, a dash.
+export function minSec(s: number | null): string {
+  if (s === null || !Number.isFinite(s)) return '—';
+  const t = Math.max(0, Math.round(s)), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = String(t % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
 }
 
 // Average seconds per timed play (player plays), or null when there were none: then the length is unknown, not zero.

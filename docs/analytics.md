@@ -48,6 +48,17 @@ and studio views have their pages' views, visitors and Play-button clicks (see
 
 Average play time shows "—" until there are timed plays in the range.
 
+## Blog
+
+Vault → Analytics (Vault staff only; studios' and games' views don't have it) has a **Blog** section after the
+website's figures, for the same date range: opens (page views of `/blog` and `/blog/<slug>/`), readers (users) and
+average time on screen per reader (GA's engagement time, `userEngagementDuration` / `totalUsers`, as m:ss; a dash with
+no readers), compared with the period before when comparing. Its table lists the 20 most opened posts with their
+opens, readers and average time on screen: each post by its title (the posts in vault-site, as the blog editor lists
+them; else its path), and `/blog` (and its `/blog/page/N/`) as **Blog home**. Tag pages and feeds are left out. The
+site sends these already (`page_view` with engagement time); no custom definitions are needed. Not connected: the
+page's usual notice.
+
 ## History (before the play events)
 
 The play events are new, but the property has years of page views from the Squarespace site, which had the same
@@ -94,6 +105,7 @@ realtime reports (the site; a studio: five and one; a game: four and one), well 
 | The game's page, the studio's game pages | `screenPageViews`, `totalUsers`, `eventCount` by `eventName` (`page_view`, `click`), their `pagePath`s, both periods |
 | Top games by page views (site and studio views, when no game has plays) | `screenPageViews`, `eventCount` by `pagePath` and `eventName`, the games' paths, this period so far |
 | The website (site view) | `screenPageViews`, `sessions`, `totalUsers`, both periods |
+| Blog (site view) | `screenPageViews` (opens), `totalUsers` (readers), `userEngagementDuration` (time on screen) with `pagePath` beginning `/blog`: by `pagePath` this period (most opened first), and the totals in both periods |
 | On the site now (site view) | realtime `activeUsers` by `countryId`, `country`, `city` (everyone, playing or browsing), the total, and how many have `customUser:vault_game` set (playing a game) |
 | Playing now (a game) | realtime `activeUsers` by place with `customUser:vault_game` = the game's slug |
 | Playing now (a studio) | the same, with `customUser:vault_game` in the list of its games' slugs (no request when it has none on the site) |

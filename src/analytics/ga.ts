@@ -4,11 +4,12 @@
 // AnalyticsError whose kind the pages explain: not connected, no access, a definition not registered yet, or other.
 import { googleTokenSource, NoCredentialsError, type TokenSource } from './google-auth.ts';
 import {
-  basicPlaysRequest, localNow, pagesRequest, playersRequest, playSeriesRequest, playsRequest, readBasicPlays, readPages, readPairs, readPlaces,
+  basicPlaysRequest, blogRequest, blogTotalsRequest, localNow, pagesRequest, playersRequest, playSeriesRequest, playsRequest, readBasicPlays, readBlog, readPages, readPairs, readPlaces,
   readPlays, readSeries, readTopPages, realtimePlayersRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest,
-  selectionOf, topPagesRequest, trafficRequest, trafficSeriesRequest, type GamePages, type GaRequest, type GaResponse, type PageStats, type Pair,
+  selectionOf, topPagesRequest, trafficRequest, trafficSeriesRequest, type BlogStats, type GamePages, type GaRequest, type GaResponse, type PageStats, type Pair,
   type Place, type PlayStats, type Scope, type Selection, type Series,
 } from './reports.ts';
+export { blogRequest, blogTotalsRequest, readBlog, type BlogStats } from './reports.ts';
 
 export type GaMethod = 'runReport' | 'runRealtimeReport';
 // Sends one request to the property and answers its JSON. Injected in tests and for local screenshots.
@@ -156,6 +157,11 @@ export class Analytics {
       top,
     ]);
     return { sel, series: chart, traffic, plays: playStats, players, pages, topPages };
+  }
+
+  // The blog: its opens, readers and time on screen in each period, and per post (Vault → Analytics only).
+  async blog(sel: Selection): Promise<Result<BlogStats>> {
+    return settle(Promise.all([this.call('runReport', blogRequest(sel)), this.call('runReport', blogTotalsRequest(sel))]).then(([p, t]) => readBlog(p, t)));
   }
 
   // The site: everyone on it (playing or browsing) by place, and how many of them are playing. A game: its players. A

@@ -1,4 +1,0 @@
-{{- /* A grid of post cards, newest first as given (three to a row at most: .blog-grid--posts); "No posts yet." when
-       there are none. */ -}}
-{{- if . }}<div class="blog-grid blog-grid--posts">{{ range . }}{{ partial "blog/card.html" . }}{{ end }}</div>
-{{- else }}<div class="blog-grid blog-grid--posts"><p class="blog-empty">No posts yet.</p></div>{{ end -}}

@@ -1,3 +1,4 @@
+import { IMAGE_SITE_DIR } from './site-dir.ts';
 export interface Config {
   port: number;
   dbPath: string;
@@ -41,7 +42,7 @@ export interface Config {
   // Where an unsaved listing preview opens, ADDRESS/_preview/TOKEN/ (listing-preview.ts): this portal, which renders
   // it itself, and any site that still renders its own. The first is the editor's main Preview button.
   previewSites: PreviewSite[];
-  // SITE_DIR as set ('site' when it isn't). The previews' site source is found by site-dir.ts (resolveSiteDir: SITE_DIR,
+  // SITE_DIR as set (the image's /app/vault-site when it isn't). The previews' site source is found by site-dir.ts (resolveSiteDir: SITE_DIR,
   // the enclosing vault-site checkout, or the image's /app/vault-site), not from this. hugoBin is the Hugo binary the
   // portal renders previews with (portal/site-preview.ts). The pages load their assets from siteUrl.
   siteDir: string;
@@ -146,7 +147,7 @@ export function loadConfig(): Config {
     formsSubmitGameSheet: process.env.FORMS_SUBMIT_GAME_SHEET?.trim() || undefined,
     siteUrl: (process.env.SITE_URL?.trim() || 'https://vaultlearninggames.org').replace(/\/+$/, ''),
     previewSites: parsePreviewSites(process.env.PREVIEW_SITES),
-    siteDir: process.env.SITE_DIR?.trim() || 'site',
+    siteDir: process.env.SITE_DIR?.trim() || IMAGE_SITE_DIR,
     hugoBin: process.env.HUGO_BIN?.trim() || 'hugo',
     supportUrl: parseSupportUrl(process.env.SUPPORT_URL),
     stagingSyncUtcHour: (() => { const n = Number(process.env.STAGING_SYNC_UTC_HOUR?.trim()); return Number.isInteger(n) && n >= 0 && n <= 23 ? n : 9; })(),

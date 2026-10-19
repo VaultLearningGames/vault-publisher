@@ -7,7 +7,7 @@ import {
   readPlaces, readPlays, readSeries, readTopPages, realtimePlayersRequest, realtimeStudioRequest, selectionOf, topPagesRequest, trafficRequest,
   trafficSeriesRequest, type GaRequest, type GaResponse,
 } from '../src/analytics/reports.ts';
-import { loadLegacy, pagePaths } from '../src/analytics/pages.ts';
+import { loadLegacy, pagePaths, type Legacy } from '../src/analytics/pages.ts';
 import { parseGaPropertyId } from '../src/config.ts';
 import { EMPTY_LISTING } from '../src/listings.ts';
 import { chart, datePicker, delta, duration, placesMap, playsNote, realtimeBody, view } from '../src/portal/analytics.ts';
@@ -96,7 +96,8 @@ describe('date ranges and requests', () => {
   });
 
   test('a game’s page: its addresses old and new, page views, visitors and outbound clicks, in standard fields only', () => {
-    const legacy = loadLegacy();
+    const legacy: Legacy = { 'wake-tales-from-the-aqualab': { path: 'wake', card_id: 'blog-post-title-one-kma9a' } };
+    assert.deepEqual(loadLegacy('/nonexistent/games.json'), {});
     assert.deepEqual(pagePaths('wake-tales-from-the-aqualab', legacy), ['/wake', '/wake/', '/game-cards/blog-post-title-one-kma9a', '/game-cards/blog-post-title-one-kma9a/']);
     assert.deepEqual(pagePaths('a-new-game', legacy), ['/a-new-game', '/a-new-game/']);
     assert.deepEqual(pagePaths('x', { x: { path: 'jowilder' } }), ['/jowilder', '/jowilder/']);

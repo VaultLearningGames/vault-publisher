@@ -54,8 +54,8 @@ The play events are new, but the property has years of page views from the Squar
 domain and the same game page addresses. So, with standard fields only (no custom definitions):
 
 * **A game's pages** (`src/analytics/pages.ts`): the site puts a listing's page at `/<path>/`, where `path` is its
-  old Squarespace address from `site/data/squarespace/games.json` (keyed by catalog slug; e.g. `wake`, `jowilder`)
-  or else the listing's slug (`site/content/games/_content.gotmpl`). The portal matches `pagePath` against `/<path>`,
+  old Squarespace address from vault-site's `data/squarespace/games.json` (found like previews' site source: `src/site-dir.ts`) (keyed by catalog slug; e.g. `wake`, `jowilder`)
+  or else the listing's slug (vault-site's `content/games/_content.gotmpl`). The portal matches `pagePath` against `/<path>`,
   `/<path>/` and the game's old Game Card, `/game-cards/<card id>` (now a 301 to the page).
 * **The chart's sessions and users** go back through those years. A game's chart, plays and unique players filter on
   its `pagePath` (the play events are sent from its page), so they work without `game_slug` too; only play time and

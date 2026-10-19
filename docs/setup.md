@@ -5,8 +5,9 @@ deployer, database, R2 buckets, keys and GitHub OAuth app. The portal (this repo
 (`.github/workflows/deploy.yml`). The website is **not** in this repository: it is the static Hugo site in
 `VaultLearningGames/vault-site`, which its own *Deploy (site)* workflow builds and publishes to Cloudflare's static
 hosting (a Worker with files and no script). The portal only writes Markdown and the catalog that site is built
-from. The old `site/` folder here is retired and ignored (a board card removes it); where this page below still says
-`site/`, read `vault-site`, and treat the Cloud Run/R2-era steps as history.
+from. This repository has no copy of the site (the old `site/` folder was removed); where this page below mentions
+`site/`, `site:build` or `cloudflare/site/`, read the same paths in vault-site, and treat the Cloud Run/R2-era steps as
+history.
 
 | | Production | Staging |
 |---|---|---|
@@ -202,7 +203,7 @@ and images from. `SITE_WORKER` is the Cloudflare Worker the deploy publishes the
 `vault-site`; with the environment's `CLOUDFLARE_API_TOKEN` secret and the repository's `CLOUDFLARE_ACCOUNT_ID`:
 [The deploy's Cloudflare token](#the-deploys-cloudflare-token)); an environment without it builds the site as a
 check and publishes nothing. `PREVIEW_SITES` lists where the editor's Preview buttons open
-(`ADDRESS/_preview/TOKEN/`): the portal itself, which renders previews with `site/`, and on staging also the new
+(`ADDRESS/_preview/TOKEN/`): the portal itself, which renders previews with its vault-site checkout (`SITE_DIR`; [README](../README.md#previews-and-vault-site)), and on staging also the new
 design's own site.
 
 Point the test game at staging: `gh variable set VAULT_PUBLISHER_URL --body https://portal.vaultlearninggames-staging.org -R VaultLearningGames/vault-publisher-test`.
@@ -310,8 +311,9 @@ submitted values; each saved submission adds a `form.submit` audit entry (form a
 
 ## The website on Cloudflare static hosting
 
-> **Retired parts.** Everything in this section that builds or deploys from `site/`, `site:build`,
-> `src/site-hosting.ts`, `cloudflare/site/` or this repository's deploy workflow now lives in vault-site (its
+> **Moved to vault-site.** Everything in this section that builds or deploys from `site/`, `site:build`,
+> `src/site-hosting.ts`, `cloudflare/site/` or this repository's deploy workflow now lives in vault-site (removed from
+> this repository) (its
 > README and `.github/workflows/deploy.yml`). The Worker names, hostnames, cutover and cleanup steps are still the
 > record of how the hosting was set up. The 2026-10-02 state below is out of date: vault-site deploys staging from its
 > `staging` branch; `production` does not exist yet. Staging content is throwaway (reset from production), see
@@ -321,7 +323,7 @@ The website (`site/`) is a few hundred static files. The deploy workflow builds 
 system's **Worker** (`vault-site-staging`, `vault-site`) as Workers Static Assets: Cloudflare stores the files and
 serves them itself. No script runs, nothing is billed or counted per request, and nothing else is involved: no
 bucket, no zone rule (one exception: `www` → apex), no Cloud Run service, no nginx. Listing previews are rendered by
-the portal (`/_preview/TOKEN/`), which carries `site/` and Hugo in its image.
+the portal (`/_preview/TOKEN/`), which carries vault-site (pinned, `vault-site.ref`) and Hugo in its image.
 
 It replaced "R2 bucket + custom domain + five zone rules" on 2026-10-02, because an R2 custom domain can't answer a
 missing address with the site's own 404 page.

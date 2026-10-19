@@ -2,10 +2,10 @@
 // redirects, the 404 page, the headers; and that the build's pages say what a search engine needs (one canonical
 // address, the one the page is served at; nothing marked noindex; title, Open Graph and structured data).
 // Only reads (GET and HEAD).
-//   node scripts/site-check.ts BASE [--build site/public] [--robots noindex|all] [--compare OTHER] [--verbose]
-//   BASE     where the build is served: http://127.0.0.1:8941 (cloudflare/site/check.sh starts the real hosting
+//   node scripts/site-check.ts BASE --build BUILD_DIR [--robots noindex|all] [--compare OTHER] [--verbose]
+//   BASE     where the build is served: http://127.0.0.1:8941 (vault-site's cloudflare/site/check.sh starts the real hosting
 //            runtime there), https://static.vaultlearninggames-staging.org, https://vaultlearninggames-staging.org
-//   --build  the build that was published there (npm run site:build): bodies are compared with its files
+//   --build  the build that was published there (vault-site's npm run build): bodies are compared with its files
 //   --robots what X-Robots-Tag must say at BASE (default noindex; all at production's real address)
 //   --compare OTHER  also fetch every address from OTHER and list what differs (status, body, type, lifetime,
 //            robots, redirect target). Differences are printed, and only a different status or body fails the run.
@@ -16,8 +16,9 @@ import { cacheFor, canonicalPath, linkedPath, listFiles, PAGE_CACHE } from '../s
 const args = process.argv.slice(2);
 const opt = (name: string): string | undefined => { const i = args.indexOf(name); return i === -1 ? undefined : args[i + 1]; };
 const base = args[0]?.replace(/\/+$/, '');
-if (!base || base.startsWith('--')) { console.error('usage: node scripts/site-check.ts BASE [--build site/public] [--robots noindex|all] [--compare OTHER] [--verbose]'); process.exit(2); }
-const build = opt('--build') ?? 'site/public';
+if (!base || base.startsWith('--')) { console.error('usage: node scripts/site-check.ts BASE --build BUILD_DIR [--robots noindex|all] [--compare OTHER] [--verbose]'); process.exit(2); }
+const build = opt('--build');
+if (!build) { console.error('site-check: --build BUILD_DIR is required (the build that was published at BASE)'); process.exit(2); }
 const robots = opt('--robots') ?? 'noindex';
 const other = opt('--compare')?.replace(/\/+$/, '');
 const verbose = args.includes('--verbose');
@@ -93,7 +94,7 @@ for (const key of served.filter((k) => k.endsWith('.html'))) {
   const isHome2 = path === '/home';
   expect(!!canonical && pathOf(canonical) === (isHome2 ? '/' : path) && !canonical.endsWith('/'), 'page: canonical is its address, no trailing slash', `${path}: ${canonical}`);
   // A blog page may be noindex (a private post; every blog page while the blog is off on a build): then it is in no
-  // sitemap either (site/themes/vault-squarespace/layouts/partials/blog/noindex.html).
+  // sitemap either (vault-site's themes/vault-squarespace/layouts/partials/blog/noindex.html).
   const noindexBlog = /^\/blog(\/|$)/.test(path) && /<meta name="robots" content="noindex">/.test(head);
   if (canonical && !isHome2 && !noindexBlog) canonicals.add(canonical);
   if (!noindexBlog) expect(!/<meta name="robots"/.test(head), 'page: no robots meta tag', `${path}: ${head.match(/<meta name="robots"[^>]*>/)?.[0]}`);

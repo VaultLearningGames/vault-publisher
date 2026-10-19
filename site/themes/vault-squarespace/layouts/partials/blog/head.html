@@ -1,7 +1,0 @@
-{{- /* The blog pages' additions to <head>: RSS autodiscovery (.feeds: title and site path of each feed) and, where
-       partials/blog/noindex.html says so, noindex. */ -}}
-{{- $base := site.BaseURL | strings.TrimSuffix "/" -}}
-{{- if partial "blog/noindex.html" .page }}
-<meta name="robots" content="noindex">{{ end }}
-{{- range .feeds }}
-<link rel="alternate" type="application/rss+xml" title="{{ .title }}" href="{{ printf "%s%s" $base .path }}">{{ end }}

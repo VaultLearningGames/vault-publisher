@@ -1,3 +1,0 @@
-{{- /* A tag in the blog's topics (.tag), as a pill linking to its page; filled, aria-current, when it is .active. */ -}}
-{{- $on := eq .tag.slug .active -}}
-<a class="blog-pill{{ if $on }} is-active{{ end }}" href="{{ printf "/blog/tag/%s" .tag.slug }}"{{ if $on }} aria-current="page"{{ end }}>{{ .tag.name }}</a>

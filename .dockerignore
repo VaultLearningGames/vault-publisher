@@ -8,5 +8,3 @@ cloudflare
 .git
 *.db*
 .env
-# The old in-repo website (deprecated): the image carries vault-site instead (Dockerfile, stage "site").
-site

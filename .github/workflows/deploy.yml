@@ -90,8 +90,10 @@ jobs:
         hugo-version: ${{ steps.hugo.outputs.version }}
         extended: true
 
-    # With Hugo installed the tests also render a real preview from site/.
+    # With Hugo installed the tests also render a real preview from the vault-site checkout above (SITE_DIR).
     - run: npm ci && npm run typecheck && npm test
+      env:
+        SITE_DIR: vault-site-src
 
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v3

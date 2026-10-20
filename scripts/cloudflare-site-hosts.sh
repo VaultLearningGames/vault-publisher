@@ -115,7 +115,7 @@ attach)
   fi
   change "attach $host to the Worker $worker" -X PUT "$api/accounts/$account/workers/domains" \
     --data "$(jq -nc --arg h "$host" --arg s "$worker" --arg z "$zone" '{hostname: $h, service: $s, zone_id: $z, environment: "production"}')"
-  $apply && echo "The certificate takes up to a few minutes. Then: node scripts/site-check.ts https://$host --build site/public"
+  $apply && echo "The certificate takes up to a few minutes. Then: node scripts/site-check.ts https://$host --build /path/to/vault-site/public"
   ;;
 
 detach)

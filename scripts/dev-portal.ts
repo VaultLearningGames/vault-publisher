@@ -21,13 +21,15 @@ import { Analytics } from '../src/analytics/ga.ts';
 import { parseGaPropertyId } from '../src/config.ts';
 import { fakeGa } from './fake-ga.ts';
 
-// The site source previews render with: vault-site when it can be found, else the deprecated in-repo site/.
-function devSiteDir(): string {
+// The site source previews render with: a vault-site checkout (SITE_DIR, or the one this repository is the portal/
+// submodule of). Without one the dev portal still runs; Preview answers 503.
+function devSiteDir(): string | null {
   try { return resolveSiteDir(); } catch (err) {
-    console.warn(`dev portal: ${(err as Error).message}; previews use the old in-repo site/`);
-    return new URL('../site/', import.meta.url).pathname;
+    console.warn(`dev portal: ${(err as Error).message}; previews are off`);
+    return null;
   }
 }
+const devSite = devSiteDir();
 
 class MemoryStorage implements Storage {
   objects = new Map<string, Uint8Array>();
@@ -162,13 +164,13 @@ const app = createApp({
   previewRetentionDays: 90, taskInvokerEmail: 'dev@example.org',
   siteUrl: SITE_URL,
   // Preview opens on this dev portal, which renders it with vault-site (Hugo must be installed): SITE_DIR, or the
-  // vault-site checkout this repository is the portal/ submodule of, else the old in-repo site/ (src/site-dir.ts). The
+  // vault-site checkout this repository is the portal/ submodule of (src/site-dir.ts). The
   // page loads its CSS and images from SITE_URL.
   previewSites: parsePreviewSites(process.env.PREVIEW_SITES ?? `Site=http://localhost:${PORT}`),
-  sitePreview: new SitePreviewer({
-    siteDir: devSiteDir(), siteUrl: SITE_URL, portalUrl: `http://localhost:${PORT}`,
+  sitePreview: devSite ? new SitePreviewer({
+    siteDir: devSite, siteUrl: SITE_URL, portalUrl: `http://localhost:${PORT}`,
     catalog: () => buildCatalog(db, 'https://cdn.vaultlearninggames.org'),
-  }),
+  }) : null,
   // Analytics: a made-up property, or the real one with GA_PROPERTY_ID (read with your gcloud application default
   // credentials: `gcloud auth application-default login --scopes=openid,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/analytics.readonly`).
   // GA_FAKE=off: neither, to see the pages' "not connected" state; GA_FAKE=history: page views only, no play events.

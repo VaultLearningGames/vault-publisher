@@ -1,5 +1,0 @@
-{{- /* Whether a blog page is kept out of search engines and the sitemap: every blog page while the blog is off on this
-       build (params.blog.url empty: production, until it is promoted), and a private post always. */ -}}
-{{- $no := not site.Params.blog.url -}}
-{{- with .Params.post }}{{ if not .listed }}{{ $no = true }}{{ end }}{{ end -}}
-{{- return $no -}}

@@ -11,4 +11,3 @@ node_modules
 .wrangler/
 .DS_Store
 .dispatch/
-site/

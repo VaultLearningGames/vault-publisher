@@ -10,6 +10,7 @@ import { loadConfig, parsePreviewSites } from '../src/config.ts';
 import { PREVIEW_TTL_MS, PreviewStore, wantsJson } from '../src/portal/listing-preview.ts';
 import { absolutize, BADGE, CACHE_MS, HUGO_TIMEOUT_MS, hugoRunner, MAX_BUILDS, mergeCatalog, PREVIEW_CSP, SitePreviewer, withBadge, type HugoRunner } from '../src/portal/site-preview.ts';
 import { portalHarness } from './portal-harness.ts';
+import { findSiteDir } from '../src/site-dir.ts';
 
 const L = '/portal/api/s/fieldday/listings';
 const SITE = 'https://site.test';
@@ -275,7 +276,7 @@ describe('the portal renders listing previews', () => {
 });
 
 describe('config', () => {
-  test('SITE_DIR and HUGO_BIN default to the image’s site/ and hugo', () => {
+  test('SITE_DIR and HUGO_BIN default to the image’s vault-site and hugo', () => {
     const keep = { ...process.env };
     try {
       Object.assign(process.env, { R2_ACCOUNT_ID: 'a', R2_BUILDS_ACCESS_KEY_ID: 'k', R2_BUILDS_SECRET_ACCESS_KEY: 's', BUILDS_BUCKET: 'b',
@@ -283,7 +284,7 @@ describe('config', () => {
         SITE_URL: 'https://site.test/', PREVIEW_SITES: 'Site=https://p.test New=https://new.test' });
       delete process.env.SITE_DIR; delete process.env.HUGO_BIN;
       let c = loadConfig();
-      assert.equal(c.siteDir, 'site');
+      assert.equal(c.siteDir, '/app/vault-site');
       assert.equal(c.hugoBin, 'hugo');
       assert.equal(c.siteUrl, 'https://site.test');
       assert.deepEqual(c.previewSites, [{ label: 'Site', url: 'https://p.test' }, { label: 'New', url: 'https://new.test' }]);
@@ -298,13 +299,15 @@ describe('config', () => {
   });
 });
 
-// The real thing, when Hugo is installed (the deploy workflow installs it before the tests): site/ rendered with a
-// previewed game, through the portal's route.
+// The real thing, when Hugo is installed and a vault-site checkout is found (SITE_DIR, the enclosing checkout, or the
+// image's copy: src/site-dir.ts; the deploy workflow installs Hugo and sets SITE_DIR to its vault-site checkout): the
+// website's source rendered with a previewed game, through the portal's route.
 const hugoVersion = (() => { try { return execFileSync('hugo', ['version'], { encoding: 'utf8' }); } catch { return ''; } })();
-describe('with Hugo and site/', { skip: hugoVersion ? false : 'hugo is not installed' }, () => {
+const vaultSiteDir = (() => { try { return findSiteDir(); } catch { return ''; } })();
+describe('with Hugo and vault-site', { skip: !hugoVersion ? 'hugo is not installed' : !vaultSiteDir ? 'no vault-site checkout (set SITE_DIR)' : false }, () => {
   test('a new game’s page, with the site’s own templates', async () => {
     const real = new SitePreviewer({
-      siteDir: new URL('../site/', import.meta.url).pathname, siteUrl: 'https://vaultlearninggames-staging.org', portalUrl: 'https://portal.test',
+      siteDir: vaultSiteDir, siteUrl: 'https://vaultlearninggames-staging.org', portalUrl: 'https://portal.test',
       catalog: () => buildCatalog(t.db, 'https://prod.test'), log: (l) => logs.push(l),
     });
     t.rebuild({ previewSites: parsePreviewSites('Site=https://portal.test'), sitePreview: real });

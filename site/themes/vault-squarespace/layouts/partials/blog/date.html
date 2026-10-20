@@ -1,2 +1,0 @@
-{{- /* <time datetime="ISO">Month D, YYYY</time> in UTC, for an ISO date string; nothing without one. */ -}}
-{{- with . }}{{ $t := (time .).UTC }}<time class="blog-date" datetime="{{ . }}">{{ $t.Format "January 2, 2006" }}</time>{{ end -}}

@@ -74,6 +74,6 @@ printf 'token: '; read -rs v; echo; printf '%s' "$v" | gcloud secrets versions a
 
 ## 6. Later: retire the portal's copy of the site
 
-- [ ] Once vault-site's *Deploy (site)* publishes both systems, remove the site build and publish jobs (`site`,
-      `publish`) from this repository's `deploy.yml` and delete `site/` (already marked deprecated); the portal keeps
+- [x] Once vault-site's *Deploy (site)* publishes both systems, remove the site build and publish jobs (`site`,
+      `publish`) from this repository's `deploy.yml` and delete `site/` (done 2026-10-19); the portal keeps
       vault-site only at `vault-site.ref` for previews.

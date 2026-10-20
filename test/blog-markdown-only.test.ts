@@ -46,3 +46,11 @@ test('lists: Markdown lists are list blocks and round-trip; editor list HTML bec
   assert.equal(blocksToMarkdown([{ type: 'paragraph', html: '<ul><li>x</li><li>y <em>z</em></li></ul>' }]), '- x\n- y *z*\n');
   assert.equal(validateBlocks([{ type: 'list', ordered: false, items: [[{ text: 'a' }]] }]).ok, true);
 });
+
+import { htmlToBlocks as _h2b, blocksToMarkdown as _b2md } from '../src/site-content/markdown-blocks.ts';
+import { test as _t } from 'node:test';
+import _assert from 'node:assert/strict';
+_t('a space before a link in unwrapped editor text is kept', () => {
+  const r = _h2b('You can read more about it <a href="https://x.org">here</a> if you want.');
+  _assert.equal(_b2md(r as never), 'You can read more about it [here](https://x.org) if you want.\n');
+});

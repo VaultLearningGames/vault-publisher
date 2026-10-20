@@ -1,11 +1,12 @@
 // Write the static hosting's files (_headers, _redirects, robots.txt: src/site-hosting.ts) into a build of the
-// website. The last step of `npm run site:build`.
-//   node scripts/site-hosting.ts [site/public]
+// website (vault-site runs its own copy as the last step of its build).
+//   node scripts/site-hosting.ts BUILD_DIR
 // Environment: SITE_INDEX_HOST, the one hostname search engines may index (production's deploy sets
 // vaultlearninggames.org). Not set: every hostname says noindex.
 import { writeHostingFiles } from '../src/site-hosting.ts';
 
-const dir = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? 'site/public';
+const dir = process.argv.slice(2).find((a) => !a.startsWith('--'));
+if (!dir) { console.error('usage: node scripts/site-hosting.ts BUILD_DIR'); process.exit(2); }
 const indexHost = process.env.SITE_INDEX_HOST?.trim() || undefined;
 try {
   const r = await writeHostingFiles(dir, { indexHost });

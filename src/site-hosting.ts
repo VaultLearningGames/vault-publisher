@@ -1,6 +1,6 @@
-// What the website's static hosting (Cloudflare Workers Static Assets: cloudflare/site/wrangler.jsonc) needs next to
-// the built pages: `_headers` and `_redirects`, written into the build (site/public) by scripts/site-hosting.ts as
-// the last step of `npm run site:build`. Cloudflare reads the two files when the build is published; they are not
+// What the website's static hosting (Cloudflare Workers Static Assets: vault-site's cloudflare/site/wrangler.jsonc)
+// needs next to the built pages: `_headers` and `_redirects`, written into the build by scripts/site-hosting.ts (vault-site
+// runs its own copy as the last step of its build). Cloudflare reads the two files when the build is published; they are not
 // served. Nothing else is configured anywhere: no zone rule, no script.
 //
 //   _headers    cache lifetimes, X-Robots-Tag, and the CORS header listing previews need
@@ -18,7 +18,7 @@ import { join } from 'node:path';
 
 // Pages and feeds change when listings do: a minute. Snapshot images (named NAME-<6 hex of their source address>), the
 // smaller copies Hugo makes of them (NAME_hu_<hex>.webp, partials/sq/srcset.html) or that are made beside them
-// (NAME-<6 hex>-<width>w.avif, site/scripts/image-copies.mjs) and fonts are never changed in place: a month. Everything else an hour: the stylesheet and script are requested as
+// (NAME-<6 hex>-<width>w.avif, vault-site's scripts/image-copies.mjs) and fonts are never changed in place: a month. Everything else an hour: the stylesheet and script are requested as
 // "?v=<hash>", so a new one is fetched at once whatever this says.
 export const PAGE_CACHE = 'public, max-age=60';
 export const FIXED_CACHE = 'public, max-age=2592000';
@@ -46,7 +46,7 @@ export function canonicalPath(key: string): string {
 
 // The same path as Squarespace's addresses, the sitemap, the canonical link and the site's own links spell it
 // (Hugo's urlquery of a filter's value: partials/sq/canonical.html): "+" stays "+", ":" is "%3A"; and a "/" inside a
-// filter's value ("Subject: Family/Consumer Science", which site/scripts/squarespace-paths.mjs makes two folders) is
+// filter's value ("Subject: Family/Consumer Science", which vault-site's scripts/squarespace-paths.mjs makes two folders) is
 // "%2F".
 export function linkedPath(key: string): string {
   const filter = key.match(/^(game-cards\/(?:category|tag))\/(.+)$/);
@@ -130,7 +130,7 @@ export interface CardRedirect { from: string; to: string }
 export interface CdnRedirect { from: string; to: string }
 export const CDN_PREFIX = '/cdn';
 
-// A renamed blog post: its old address and its page ("/blog/old-slug" → "/blog/new-slug"; site/data/blog.json).
+// A renamed blog post: its old address and its page ("/blog/old-slug" → "/blog/new-slug"; vault-site's data/blog.json).
 export interface BlogRedirect { from: string; to: string }
 
 export interface Redirects { text: string; cards: number; cdn: number; blog: number; rewrites: number; slashes: number; skippedSlashes: boolean }

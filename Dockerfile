@@ -3,7 +3,6 @@
 # Litestream keeps the SQLite database replicated to a GCS bucket. The image also carries the website's source
 # (VaultLearningGames/vault-site at the commit pinned in vault-site.ref, without its .git or portal/ submodule) and
 # Hugo: the portal renders listing and blog previews with them (src/portal/site-preview.ts, src/site-dir.ts).
-# The old in-repo site/ is not used (deprecated; see site/README.md).
 FROM litestream/litestream:0.3.13 AS litestream
 
 # vault-site at the pinned ref (vault-site.ref): the deploy workflow checks it out into ./vault-site-src before the

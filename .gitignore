@@ -6,14 +6,6 @@ node_modules
 *.db-shm
 *.db-wal
 .env
-# The website's build: the catalog is pulled from the portal (npm run site:catalog), the rest is Hugo's output.
-site/data/catalog.json
-site/data/blog.json
-site/public/
-site/resources/
-site/.hugo_build.lock
-# wrangler's local state (cloudflare/site/check.sh, wrangler dev).
-.wrangler/
 .DS_Store
 
 # The card pipeline's per-worktree folder; never commit it.

@@ -2,7 +2,7 @@
   "name": "vault-publisher",
   "version": "0.1.0",
   "private": true,
-  "description": "The Vault Studio Portal: publishes game builds to the Vault Learning Games CDN (Cloudflare R2), and builds, previews and publishes the Vault website (site/).",
+  "description": "The Vault Studio Portal: publishes game builds to the Vault Learning Games CDN (Cloudflare R2), and previews listings and blog posts with the Vault website's source (VaultLearningGames/vault-site).",
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -12,10 +12,6 @@
     "dev": "node --watch src/server.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc",
-    "site:catalog": "node site/scripts/pull-catalog.mjs",
-    "site:build": "npm run site:catalog && hugo --source site --buildDrafts --cleanDestinationDir && node site/scripts/squarespace-paths.mjs && node scripts/site-hosting.ts site/public",
-    "site:dev": "npm run site:catalog; hugo server --source site --buildDrafts --port 1313",
-    "site:check": "cloudflare/site/check.sh",
     "site:audit": "node scripts/check-site.ts",
     "import:medium": "node scripts/import-medium-fielddaylab.ts"
   },

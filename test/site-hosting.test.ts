@@ -202,16 +202,4 @@ describe('the static hosting files of the site', () => {
     assert.equal((await writeHostingFiles(build(SITE))).cards, 0);
   });
 
-  test('the hosting configuration: two Workers, files only, no hostname for a deploy to change', () => {
-    const text = readFileSync(join(import.meta.dirname, '..', 'cloudflare', 'site', 'wrangler.jsonc'), 'utf8');
-    const config = JSON.parse(text.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n'));
-    assert.deepEqual(config.env, { staging: { name: 'vault-site-staging' }, production: { name: 'vault-site' } });
-    assert.deepEqual(config.assets, { directory: '../../site/public', not_found_handling: '404-page', html_handling: 'drop-trailing-slash' });
-    assert.equal(config.workers_dev, false);
-    assert.equal(config.preview_urls, false);
-    assert.ok(!('main' in config), 'no script');
-    assert.ok(!/"routes?"|custom_domain/.test(text), 'no hostname');
-    const pin = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'cloudflare', 'site', 'package.json'), 'utf8'));
-    assert.match(pin.devDependencies.wrangler, /^\d+\.\d+\.\d+$/, 'wrangler is pinned to one version');
-  });
 });

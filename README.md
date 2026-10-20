@@ -1,10 +1,9 @@
 # vault-publisher
 
-The Vault Studio Portal and the Vault website, in one repository with one deploy:
-
-- the **portal** (`src/`): studios' builds, releases and site listings, on Cloud Run;
-- the **website** (`site/`, Hugo): built from the portal's published listings and served as static files by
-  Cloudflare (static hosting). See [The website](#the-website).
+The Vault Studio Portal (`src/`): studios' builds, releases, site listings and the blog editor, on Cloud Run. The
+public website is not here: it is the Hugo project
+[`VaultLearningGames/vault-site`](https://github.com/VaultLearningGames/vault-site), built from the Markdown and catalog
+the portal writes and served as static files by Cloudflare. See [The website](#the-website).
 
 The portal publishes web game builds to Vault Learning Games:
 
@@ -47,7 +46,7 @@ this version reaches the `production` branch) shows its badges as not found.
 | --- | --- |
 | Runtime | Node 24 (native TypeScript, ESM) |
 | Framework | [Hono](https://hono.dev) (`@hono/node-server`) — one app serves the machine API, portal UI, site forms and listing previews |
-| Website | [Hugo](https://gohugo.io) 0.166 extended (`site/`); the version is the Dockerfile's `HUGO_VERSION`, used by the deploy's site build and by the image, which renders listing previews |
+| Previews | [Hugo](https://gohugo.io) 0.166 extended over a vault-site checkout; the version is the Dockerfile's `HUGO_VERSION`, used by the image, which renders listing and blog previews |
 | Database | `node:sqlite`, plain SQL + numbered migrations (`src/db.ts`); no ORM (Postgres-portable) |
 | Storage | Cloudflare R2 via AWS SDK v3 (`src/storage.ts`); build uploads are presigned PUTs (from CI and from the browser) — the API never proxies them. URL monitors stream each file from the studio's site into R2 |
 | Auth | `jose`: GitHub Actions OIDC tokens (CI), Google ID tokens (scheduled tasks); portal login is interactive GitHub OAuth → HMAC-signed `vault_session` cookie (`src/portal/session.ts`) |
@@ -69,15 +68,12 @@ this version reaches the `production` branch) shows its badges as not found.
 | `src/{releases,storage,paths,config,forms,catalog,game-checks}.ts` | Domain logic |
 | `src/studios-file.ts` | `studios.json` at startup: studios and the repositories assigned to them |
 | `src/portal/site-preview.ts`, `src/site-dir.ts` | Listing and blog previews: runs Hugo on a temporary copy of vault-site (found by `resolveSiteDir()`) with the previewed game or post in place, and returns its page |
-| `src/site-hosting.ts`, `scripts/site-hosting.ts` | The static hosting's `_headers`, `_redirects` and `robots.txt`, written into the built site (`site/public`) |
-| `cloudflare/site/` | The site's hosting: `wrangler.jsonc` (one Worker per system, files only), the pinned wrangler, `check.sh` |
+| `src/site-hosting.ts`, `scripts/site-hosting.ts` | The static hosting's `_headers`, `_redirects` and `robots.txt` for a site build (vault-site has its own copy, which its deploy uses) |
 | `scripts/site-check.ts` | Checks a served copy of the site against its build: every address, redirects, 404 page, headers, and each page's canonical address, title and structured data |
-| `site/` | The website: `hugo.toml`, `content/`, `data/`, `themes/vault-squarespace/`, `static/` ([site/README.md](site/README.md)) |
 | `scripts/cloudflare-site-hosts.sh` | Admin, once per hostname: attach it to the site's Worker, detach it, remove its R2-era setup |
 | `scripts/cloudflare-site-rules.sh` | R2-era: the five zone rules a bucket's hostname needed. Kept to remove them (and for a rollback) |
 | `src/site-checks.ts`, `src/site-checks/` | [Site checks](#site-checks): what the measurements mean and the reports (`site-checks.ts`), and the engine that drives Chromium and probes links (`run.ts`; `words.txt`: spellings to accept), which only the command line and the workflow load |
-| `src/analytics/`, `src/portal/analytics.ts` | [Analytics](docs/analytics.md): Google Analytics Data API client (cached), the reports, and Vault → Analytics / each game's Analytics tab; `public/analytics.{css,js}`, `public/world-map.svg` (Natural Earth, `scripts/world-map.ts`) |
-| `site/themes/vault-squarespace/static/sq/js/vault-play-analytics.js` | The website's play events (`play_start`, `play_heartbeat`, `play_end`) on game pages |
+| `src/analytics/`, `src/portal/analytics.ts` | [Analytics](docs/analytics.md): Google Analytics Data API client (cached), the reports, and Vault → Analytics (with the blog's opens and time on screen) / each game's Analytics tab; `public/analytics.{css,js}`, `public/world-map.svg` (Natural Earth, `scripts/world-map.ts`) |
 | `scripts/check-site.ts`, `.github/workflows/check-site.yml` | Site checks from the command line, and daily on a GitHub runner, which posts each run to the portal |
 
 ### API
@@ -467,8 +463,9 @@ The bucket can't be listed, so the copy takes the files from where the source bu
 ## The website
 
 The public site (vaultlearninggames.org) is a **static Hugo site** whose source is
-[`VaultLearningGames/vault-site`](https://github.com/VaultLearningGames/vault-site) (theme `vault-squarespace`). The
-`site/` folder in this repository is retired, ignored by every deploy, and being removed: never edit it.
+[`VaultLearningGames/vault-site`](https://github.com/VaultLearningGames/vault-site) (theme `vault-squarespace`). Its
+templates, CSS, scripts (the Play gate, the play events), hosting configuration and their tests live there; this
+repository has no copy of the site.
 
 **How the portal makes the site.** The portal writes content, never pages. Editing a blog post in the portal commits
 Markdown (`content/blog/<slug>/index.md`) to vault-site as `vault-portal-bot`; game pages come from the portal's
@@ -482,27 +479,22 @@ disposable, is replaced from production on a schedule, and is never promoted. On
 changes) goes staging → production, by a reviewed pull request that CI fails if it touches `content/blog` or
 `content/tags`.
 
-* **Game pages come from the portal**, not from files: `npm run site:catalog` saves this system's `GET /v1/catalog`
-  to `site/data/catalog.json` (not in git), and `site/content/games/_content.gotmpl` turns each listing into a page.
+* **Game pages come from the portal**, not from files: vault-site's `scripts/pull-catalog.mjs` saves this system's
+  `GET /v1/catalog` at build time, and its `content/games/_content.gotmpl` turns each listing into a page.
 * **The blog is Markdown in `VaultLearningGames/vault-site`** (`content/blog/<slug>/index.md`), which the portal's blog
   editor commits to as `vault-portal-bot`, on the system's branch (`staging` or `production`; docs/setup.md, "The
-  blog"; docs/vault-site.md, "Who does what"). vault-site's own workflow builds and publishes it. The portal has no
-  `/v1/blog` any more, so `npm run site:catalog` leaves this copy's blog empty.
-* **Local build (legacy, uses the retired `site/`; build in vault-site instead):** `VAULT_PORTAL=https://portal.vaultlearninggames-staging.org npm run site:build` → `site/public`
-  (catalog, `hugo`, `site/scripts/squarespace-paths.mjs` for the `/game-cards/category|tag/…` addresses, then
-  `scripts/site-hosting.ts` for the hosting's `_headers` and `_redirects`).
-  `npm run site:dev` serves it on http://localhost:1313. Game images are on the Vault CDN; `site/` holds only the
-  theme's own files (17 MB, mostly the Squarespace snapshot images) and `static/files/keys-to-the-vault.pdf`.
+  blog"; docs/vault-site.md, "Who does what"). vault-site's own workflow builds and publishes it.
+* **Local build:** in a vault-site checkout (`npm run build`, `npm run dev`; its README).
 * **Deploy:** the website is built and published ONLY by VaultLearningGames/vault-site (its *Deploy (site)* workflow:
   push to its `staging` / `production` branch, or Run workflow), to `vault-site-staging` / `vault-site`. This
   repository's [deploy workflow](.github/workflows/deploy.yml) deploys the portal image only (which carries the pinned
   vault-site and Hugo for previews: [Previews and vault-site](#previews-and-vault-site)) and never publishes to a site
   Worker. The flow is portal → commit to vault-site → vault-site build → Cloudflare. The build (forms post to that system's
-  portal through the `HUGOxPARAMSxFORMSx…` overrides) is checked under the hosting's own runtime (`cloudflare/site/check.sh`) Cloudflare serves the files itself, with the build's `404.html` for a missing
+  portal through the `HUGOxPARAMSxFORMSx…` overrides) is checked under the hosting's own runtime (vault-site's `cloudflare/site/check.sh`). Cloudflare serves the files itself, with the build's `404.html` for a missing
   address; the build's `_headers` and `_redirects` (`src/site-hosting.ts`) carry the cache lifetimes, `noindex`,
   CORS and redirects. Hostnames are attached to a Worker once, by an admin
   ([docs/setup.md](docs/setup.md#the-website-on-cloudflare-static-hosting)).
-* **Check a build locally:** `npm run site:build`, `npm ci --prefix cloudflare/site` (once), `npm run site:check`.
+* **Check a build locally:** in vault-site, `npm run build` then `npm run check`.
 * **When listings change** (published, edited, taken off the site, featured) the site must be rebuilt, though no
   code changed: **vault-site → Actions → Deploy (site) → Run workflow**, choose the system, or
   `gh workflow run deploy.yml -R VaultLearningGames/vault-site -f environment=staging`.
@@ -516,8 +508,7 @@ own previews from this portal's JSON.
 ## Previews and vault-site
 
 The website's source is its own repository, [VaultLearningGames/vault-site](https://github.com/VaultLearningGames/vault-site)
-(Hugo at the repository root; this repository is its `portal/` submodule). `site/` here is retired (removal is
-planned) and unused by the image. The portal renders previews from vault-site, found by `src/site-dir.ts` (`resolveSiteDir()`) in this order:
+(Hugo at the repository root; this repository is its `portal/` submodule). The portal renders previews from vault-site, found by `src/site-dir.ts` (`resolveSiteDir()`) in this order:
 `SITE_DIR` (must be a Hugo site, or the portal says so and previews answer 503), the folder above this repository when
 it is a Hugo site (the `vault-site/portal` checkout), then `/app/vault-site` (the image). Every build runs in a
 temporary copy; the site source is never written to.
@@ -532,7 +523,7 @@ temporary copy; the site source is never written to.
   abbreviated SHA works but makes the build fetch the whole history. Previews then render with that commit's templates.
 * **Developing:** clone vault-site with `--recurse-submodules` (or `git submodule update --init` in it), work in
   `vault-site/portal`, and `node scripts/dev-portal.ts` previews with the enclosing vault-site. In a standalone clone
-  of this repository set `SITE_DIR=/path/to/vault-site`; without either, the dev portal falls back to `site/`.
+  of this repository set `SITE_DIR=/path/to/vault-site`; without either, the dev portal runs with previews off (Preview answers 503).
 * **The blog export** (done once, when the blog moved): `node scripts/export-blog.ts --db data/publisher.db --out
   ../vault-site` (dry run; add `--yes` to write, or use `--github --yes` to commit through the Contents API) writes
   each post of the old blog tables to `content/blog/<slug>/index.md`, with its tags and old slugs (as `aliases`). It
@@ -565,8 +556,8 @@ spelling, the limits of the measurements and what it costs (nothing on the porta
 
 ## Develop
 
-Node 24, no build step: `npm install && npm test` (with Hugo installed, the tests also render a real preview from
-`site/`). Preview the portal with example data: `node scripts/dev-portal.ts` (its Preview button renders vault-site
+Node 24, no build step: `npm install && npm test` (with Hugo installed and a vault-site checkout found, e.g.
+`SITE_DIR=/path/to/vault-site`, the tests also render a real preview from it; the deploy workflow does this). Preview the portal with example data: `node scripts/dev-portal.ts` (its Preview button renders vault-site
 locally, as found by `src/site-dir.ts`, with CSS and images from the staging site; see
 [Previews and vault-site](#previews-and-vault-site)).
 The portal's "Need support?" link (sidebar foot and sign-in page) is `SUPPORT_URL`: by default the invitation to the

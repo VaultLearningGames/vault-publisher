@@ -1,4 +1,0 @@
-{{- /* blog-redirects.json: each renamed blog post's old address and its page ({from: "/blog/<old slug>", to:
-       "/blog/<slug>"}, data/blog.json). Read by src/site-hosting.ts, which writes a 301 for each into the hosting's
-       _redirects. The file itself is not published. */ -}}
-{{- ((hugo.Data.blog | default dict).redirects | default slice) | jsonify -}}

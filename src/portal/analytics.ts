@@ -5,6 +5,7 @@
 // before), a chart of sessions, plays and users, plays / players / average play time, a realtime map of where people
 // are playing, top games (site and studio), and for the site its page views, sessions and visitors. A game's (a
 // studio's) sessions and users are visits that showed its page or started one of its plays.
+// The site view also has the blog (Vault staff only): opens, readers and average time on screen, and the top posts.
 // The play events began on PLAYS_SINCE: before it there are no plays (the page says so), but sessions, users, page
 // views and outbound clicks of the game pages go back through the Squarespace years (the same addresses): the top
 // games fall back to page views when there are no plays.
@@ -12,12 +13,13 @@ import type { Hono } from 'hono';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { Analytics, AnalyticsError, type Overview, type Realtime, type Result } from '../analytics/ga.ts';
+import { Analytics, AnalyticsError, type BlogStats, type Overview, type Realtime, type Result } from '../analytics/ga.ts';
 import { cityPoint } from '../analytics/cities.ts';
 import { COUNTRY_POINTS } from '../analytics/countries.ts';
 import { MAP_HEIGHT, MAP_WIDTH } from '../analytics/projection.ts';
 import { loadLegacy, pagePaths } from '../analytics/pages.ts';
-import { averageSeconds, longDate, PLAYS_SINCE, PRESETS, presetPeriods, spanLabel, type GamePages, type GamePlays, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
+import { averageSeconds, longDate, minSec, perReader, PLAYS_SINCE, PRESETS, presetPeriods, spanLabel, type GamePages, type GamePlays, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
+import { SiteBlogRepo } from '../blog/siteRepo.ts';
 import type { Studio, User } from '../db.ts';
 import { html, raw, type Html } from './html.ts';
 import type { ListingHelpers, ListingRow } from './listings.ts';
@@ -157,7 +159,9 @@ const firstError = (...rs: (Result<unknown> | null)[]) => rs.find((r): r is { ok
 // studio's Analytics page.
 export interface GameTitle { title: string; href: string | null; studio?: { name: string; href: string } }
 // topUrl: where Load more asks for the next top games (the view's scope and range); none, no button.
-interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; topUrl?: string; assets: Assets; titleOf(slug: string): GameTitle }
+// blog: the site view's Blog section (Vault staff only), with each post's title by slug.
+interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; topUrl?: string; assets: Assets; titleOf(slug: string): GameTitle
+  blog?: { stats: Result<BlogStats>; titles: Map<string, string> } | null }
 interface Assets { css: string; js: string; land: string }
 
 // The date range picker, laid out like Google Analytics': a button showing the range, which opens the presets (in GA's
@@ -251,6 +255,26 @@ export function pageParams(offset: string | undefined, limit: string | undefined
   return { offset: o ?? 0, limit: l === null ? TOP_PAGE : Math.max(1, Math.min(100, l)) };
 }
 
+// ---------- the blog ----------
+// The posts shown in the Blog section's table.
+export const BLOG_TOP = 20;
+// A post's name in the table: the blog's home, its title (from the posts in vault-site), else its path.
+export const blogTitle = (slug: string, path: string, titles: Map<string, string>) => (slug === '' ? 'Blog home' : titles.get(slug) || path);
+// The Blog section of the site view: opens, readers and average time on screen (m:ss), and the top posts by opens.
+export function blogSection(stats: Result<BlogStats>, sel: Selection, staff: boolean, titles: Map<string, string>): Html {
+  const head = html`<h3 class="sec">Blog <small class="muted small">${spanLabel(sel.current)}</small></h3>`;
+  if (!stats.ok) return html`${head}${problem(stats.error, staff, 'the blog')}`;
+  const { totals: t, posts } = stats.value;
+  const avg = (p: 'current' | 'previous') => perReader(t.seconds[p], t.readers[p]);
+  const k = (label: string, v: Pair, title: string) => kpi(label, num(v.current), delta(v.current, v.previous, sel), title);
+  const rows = posts.slice(0, BLOG_TOP).map((p) => html`<tr data-slug="${p.slug}"><td class="proj"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num">${num(p.opens)}</td><td class="r num">${num(p.readers)}</td><td class="r num">${minSec(perReader(p.seconds, p.readers))}</td></tr>`);
+  return html`${head}
+    <div class="kpis ga-k3">${k('Opens', t.opens, 'Blog pages shown: the blog’s home and its posts')}${k('Readers', t.readers, 'People (browsers) who opened the blog')}${kpi('Average time on screen', minSec(avg('current')), delta(avg('current'), avg('previous'), sel), 'Time the blog was on screen (Google Analytics engagement time), per reader')}</div>
+    <div class="card ga-blog">${rows.length
+      ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th></tr></thead><tbody>${rows}</tbody></table></div>${posts.length > BLOG_TOP ? html`<p class="small muted">The ${BLOG_TOP} most opened of ${num(posts.length)}.</p>` : ''}`
+      : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`;
+}
+
 export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   const sel = ov.sel;
   const kind = o.scope.game ? 'game' : o.scope.studio ? 'studio' : 'site';
@@ -318,7 +342,7 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
     const k = (label: string, v: Pair | null, title: string) => kpi(label, v ? num(v.current) : '—', v ? delta(v.current, v.previous, sel) : html`<div class="d"></div>`, title);
     site = html`<h3 class="sec">The website <small class="muted small">${spanLabel(sel.current)}</small></h3>
       <div class="kpis ga-k3">${k('Page views', pair('screenPageViews'), 'Every page shown on the site')}${k('Sessions', pair('sessions'), 'Visits to the site')}${k('Visitors', pair('totalUsers'), 'People (browsers) who visited')}</div>
-      ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the website’s visits') : ''}`;
+      ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the website’s visits') : ''}${o.blog && o.staff ? blogSection(o.blog.stats, sel, o.staff, o.blog.titles) : ''}`;
   }
 
   const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">${kind === 'site' ? 'On the site now' : 'Playing now'}</span><small>last 30 minutes · updates every minute</small></h2>
@@ -388,14 +412,31 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
   const queryOf = (c: { req: { query(k: string): string | undefined; queries(k: string): string[] | undefined } }): Query =>
     ({ range: c.req.query('range'), start: c.req.query('start'), end: c.req.query('end'), compare: c.req.queries('compare')?.at(-1) });
 
+  // The blog posts' titles by slug (vault-site's posts, as the blog editor lists them), for the Blog section. The post
+  // list is cached; unconfigured, failing or slow (2 s): no titles, and the table shows paths.
+  let blogRepo: SiteBlogRepo | null = null;
+  async function blogTitles(): Promise<Map<string, string>> {
+    try {
+      blogRepo ??= new SiteBlogRepo({ client: h.deps.siteContent ?? undefined });
+      const posts = blogRepo.listPosts();
+      posts.catch(() => {});
+      const list = await Promise.race([posts, new Promise<null>((r) => setTimeout(() => r(null), 2000).unref())]);
+      return new Map((list ?? []).filter((p) => p.title).map((p) => [p.slug, p.title]));
+    } catch { return new Map(); }
+  }
+
   async function render(u: User, scope: Scope, q: Query, base: string, cat = catalog()) {
     const rtq = scope.game ? `?game=${encodeURIComponent(scope.game)}` : scope.studio ? `?studio=${encodeURIComponent(scope.studio)}` : '';
     const full = scope.game ? { ...scope, pages: cat[scope.game] ?? pagePaths(scope.game, legacy) } : scope;
-    const [ov, rt] = await Promise.all([analytics.overview(analytics.selection(q), full, cat), analytics.realtime(scope)]);
+    const sel = analytics.selection(q);
+    // The site view (Vault staff): the blog too.
+    const site = !scope.game && !scope.studio && h.isStaff(u);
+    const [ov, rt, blog] = await Promise.all([analytics.overview(sel, full, cat), analytics.realtime(scope),
+      site ? Promise.all([analytics.blog(sel), blogTitles()]).then(([stats, titles]) => ({ stats, titles })) : null]);
     // Load more: the same scope and range as the page.
     const tq = new URLSearchParams(Object.entries({ studio: scope.studio, ...q }).filter((e): e is [string, string] => e[1] !== undefined));
     return view(ov, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`,
-      topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio) });
+      topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio), blog });
   }
 
   app.get('/vault/analytics', async (c) => {

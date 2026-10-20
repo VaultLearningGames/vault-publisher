@@ -42,7 +42,7 @@
 .ga-chart .gridl { stroke: var(--grid); stroke-width: 1; }
 .ga-cur { fill: none; stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
 .ga-prev { fill: none; stroke-width: 1.5; stroke-dasharray: 5 4; stroke-linejoin: round; stroke-linecap: round; opacity: .55; }
-.ga-cur.s1, .ga-prev.s1 { stroke: var(--s1); } .ga-cur.s2, .ga-prev.s2 { stroke: var(--s2); } .ga-cur.s3, .ga-prev.s3 { stroke: var(--s3); }
+.ga-cur.s1, .ga-prev.s1 { stroke: var(--s1); } .ga-cur.s2, .ga-prev.s2 { stroke: var(--s2); } .ga-cur.s3, .ga-prev.s3 { stroke: var(--s3); } .ga-cur.s4, .ga-prev.s4 { stroke: var(--s4); }
 .ga-hit { fill: transparent; }
 .ga-hit:hover { fill: var(--ink); opacity: .06; }
 .ga-x { position: relative; height: 22px; margin-top: 4px; }
@@ -54,7 +54,7 @@
 .ga-lk .d:empty { display: none; }
 .ga-lk .d.up { color: var(--ok); } .ga-lk .d.down { color: var(--bad); }
 .ga-legend .k { display: inline-block; width: 18px; height: 0; border-top: 2.5px solid var(--s1); align-self: center; }
-.ga-legend .k.s2 { border-top-color: var(--s2); } .ga-legend .k.s3 { border-top-color: var(--s3); }
+.ga-legend .k.s2 { border-top-color: var(--s2); } .ga-legend .k.s3 { border-top-color: var(--s3); } .ga-legend .k.s4 { border-top-color: var(--s4); }
 .ga-legend .k.prev { border-top: 2px dashed var(--ink-3); }
 .ga-lprev { display: flex; gap: 6px; align-self: center; color: var(--ink-3); }
 

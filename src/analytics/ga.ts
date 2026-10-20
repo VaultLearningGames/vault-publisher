@@ -4,9 +4,9 @@
 // AnalyticsError whose kind the pages explain: not connected, no access, a definition not registered yet, or other.
 import { googleTokenSource, NoCredentialsError, type TokenSource } from './google-auth.ts';
 import {
-  basicPlaysRequest, blogRequest, blogTotalsRequest, localNow, pagesRequest, playersRequest, playSeriesRequest, playsRequest, readBasicPlays, readBlog, readPages, readPairs, readPlaces,
-  readPlays, readSeries, readShares, readTopPages, realtimePlayersRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest,
-  selectionOf, sharesRequest, topPagesRequest, trafficRequest, trafficSeriesRequest, type BlogStats, type GamePages, type GaRequest, type GaResponse, type PageStats, type Pair,
+  basicPlaysRequest, blogReadsSeriesRequest, blogRequest, blogTotalsRequest, localNow, pagesRequest, playersRequest, playSeriesRequest, playsRequest, readBasicPlays, readBlog, readPages, readPairs, readPlaces,
+  readPlays, readReads, readSeries, readShares, readTopPages, realtimePlayersRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest,
+  selectionOf, sharesRequest, topPagesRequest, trafficRequest, trafficSeriesRequest, type BlogStats, type GamePages, type GaRequest, type GaResponse, type Line, type PageStats, type Pair,
   type Place, type PlayStats, type Scope, type Selection, type Series, type ShareStats,
 } from './reports.ts';
 export { blogRequest, blogTotalsRequest, readBlog, readShares, sharesRequest, type BlogStats, type ShareStats } from './reports.ts';
@@ -82,7 +82,7 @@ const settle = <T>(p: Promise<T>): Promise<Result<T>> => p.then((value) => ({ ok
 export type Traffic = Record<'screenPageViews' | 'sessions' | 'totalUsers', Pair>;
 export interface Overview {
   sel: Selection;
-  series: Result<Series>;        // the chart: sessions, plays and users
+  series: Result<Series>;        // the chart: plays and users (sessions kept for its data, not drawn)
   traffic: Result<Traffic>;      // the view's page views, sessions and users in each period (the site: the website's figures)
   plays: Result<PlayStats>;
   players: Result<Pair>;
@@ -162,6 +162,11 @@ export class Analytics {
   // The blog: its opens, readers and time on screen in each period, and per post (Vault → Analytics only).
   async blog(sel: Selection): Promise<Result<BlogStats>> {
     return settle(Promise.all([this.call('runReport', blogRequest(sel)), this.call('runReport', blogTotalsRequest(sel))]).then(([p, t]) => readBlog(p, t)));
+  }
+  // The chart's blog reads (opens of a post) per point, in each period: site-wide, so the site view's only.
+  async blogReads(sel: Selection): Promise<Result<Line>> {
+    const { today, hour } = localNow(this.timeZone, this.now());
+    return settle(this.call('runReport', blogReadsSeriesRequest(sel)).then((r) => readReads(r, sel, today, hour)));
   }
   // The blog's share-button clicks (share_click), by post and network. Its own result: before the custom dimensions
   // network and post_slug are registered it fails ('setup') while the blog's other figures still show.

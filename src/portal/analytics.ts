@@ -2,7 +2,7 @@
 // site (Vault → Analytics, /vault/analytics); each studio has an Analytics page for all its games (/s/STUDIO/analytics)
 // and each game's page an Analytics tab, with the same view, which the studio's members (viewers too) see. Each view:
 // a date range picked the way Google Analytics' picker does it (presets, a custom range, compare with the period
-// before), a chart of sessions, plays and users, plays / players / average play time, a realtime map of where people
+// before), a chart of plays and users (and for the site, blog reads), plays / players / average play time, a realtime map of where people
 // are playing, top games (site and studio), and for the site its page views, sessions and visitors. A game's (a
 // studio's) sessions and users are visits that showed its page or started one of its plays.
 // The site view also has the blog (Vault staff only): opens, readers and average time on screen, share-button clicks
@@ -59,12 +59,15 @@ function niceMax(v: number): number {
   for (const m of [1, 1.2, 1.4, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p;
   return 10 * p;
 }
-// The three lines, in the portal's series colours; the period before is the same colour, dashed.
+// The lines, in the portal's series colours; the period before is the same colour, dashed. Blog reads are site-wide:
+// only the site view for Vault staff has them (Series.reads), so a studio's or a game's chart never draws them.
 export const LINES = [
-  { key: 'sessions', label: 'Sessions', one: 'session', cls: 's1' },
   { key: 'plays', label: 'Plays', one: 'play', cls: 's2' },
   { key: 'users', label: 'Users', one: 'user', cls: 's3' },
+  { key: 'reads', label: 'Blog reads', one: 'blog read', cls: 's4' },
 ] as const;
+// The chart's title, by its lines.
+export const chartTitle = (s: { reads?: unknown }) => (s.reads ? 'Plays, users and blog reads' : 'Plays and users');
 export function chart(s: Series, sel: Selection): Html {
   const n = s.labels.length;
   const lines = LINES.map((l) => ({ ...l, line: s[l.key] })).filter((l) => l.line);
@@ -93,7 +96,7 @@ export function chart(s: Series, sel: Selection): Html {
     return `${s.tips[i]}: ${figures(i, 'current')}${sel.compare && s.prevTips[i] ? `\n${s.prevTips[i]}: ${figures(i, 'previous')}` : ''}`;
   };
   const totalsLabel = lines.map((l) => `${l.label}: ${l.line!.current.reduce<number>((t, v) => t + (v ?? 0), 0)}`).join(', ');
-  return html`<div class="ga-chart" role="img" aria-label="Sessions, plays and users per ${s.unit}, ${spanLabel(sel.current)}. ${totalsLabel}.">
+  return html`<div class="ga-chart" role="img" aria-label="${chartTitle(s)} per ${s.unit}, ${spanLabel(sel.current)}. ${totalsLabel}.">
     <div class="ga-plot">
       ${ticks.filter((t) => Number.isInteger(t)).map((t) => html`<span class="ga-yl" style="bottom:${(t / top) * 100}%">${num(t)}</span>`)}
       <svg viewBox="0 0 ${n} 100" preserveAspectRatio="none" aria-hidden="true">
@@ -163,6 +166,7 @@ export interface GameTitle { title: string; href: string | null; studio?: { name
 // topUrl: where Load more asks for the next top games (the view's scope and range); none, no button.
 // blog: the site view's Blog section (Vault staff only), with each post's title by slug and its share clicks.
 interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; topUrl?: string; assets: Assets; titleOf(slug: string): GameTitle
+  readsError?: AnalyticsError | null;   // the site view's blog reads couldn't be read (the chart draws without them)
   blog?: { stats: Result<BlogStats>; titles: Map<string, string>; shares?: Result<ShareStats> | null } | null }
 interface Assets { css: string; js: string; land: string }
 
@@ -302,29 +306,32 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
 
   // The legend: each line's total for the range and its change.
   const tr = ov.traffic.ok ? ov.traffic.value : null, pl = ov.plays.ok ? ov.plays.value : null;
+  const sum = (vals: (number | null)[] | null | undefined) => (vals ?? []).reduce<number>((t, v) => t + (v ?? 0), 0);
+  const reads = ov.series.ok ? ov.series.value.reads : undefined;
   const totals: Record<string, { cur: number; prev: number } | null> = {
-    sessions: tr && { cur: tr.sessions.current, prev: tr.sessions.previous },
+    reads: reads ? { cur: sum(reads.current), prev: sum(reads.previous) } : null,
     plays: pl && { cur: pl.current.plays, prev: pl.previous.plays },
     users: tr && { cur: tr.totalUsers.current, prev: tr.totalUsers.previous },
   };
   const whose = kind === 'game' ? ' that showed the game’s page or played it' : kind === 'studio' ? ' that showed one of the studio’s game pages or played one of its games' : '';
   const about: Record<string, string> = {
-    sessions: `Visits to the site${whose}`,
+    reads: 'Blog posts opened on the site (each opening of a post counts once)',
     plays: 'Games opened from their page on the site (in the player, or in a new tab)',
-    users: `People (browsers)${whose ? ` in those visits` : ' who visited'}. Each point counts its own; the total counts each person once.`,
+    users: `People (browsers)${whose ? ` in visits to the site${whose}` : ' who visited'}. Each point counts its own; the total counts each person once.`,
   };
-  const legend = html`<div class="ga-legend">${LINES.map((l) => {
+  const legend = html`<div class="ga-legend">${LINES.filter((l) => l.key !== 'reads' || reads).map((l) => {
     const t = totals[l.key];
     return html`<div class="ga-lk" title="${about[l.key]}"><span class="k ${l.cls}"></span><span class="ga-ln">${l.label}</span> <b class="ga-tot">${t ? num(t.cur) : '—'}</b>${t ? delta(t.cur, t.prev, sel, l.key === 'plays') : ''}</div>`;
   })}${sel.compare ? html`<div class="ga-lk ga-lprev small"><span class="k prev"></span>${sel.vs[0].toUpperCase()}${sel.vs.slice(1)}</div>` : ''}</div>`;
   const s = ov.series;
   const chartCard = html`<div class="card ga-top">
-    <div class="card-h ga-head"><h2>Sessions, plays and users</h2>${picker}</div>
+    <div class="card-h ga-head"><h2>${chartTitle({ reads })}</h2>${picker}</div>
     ${playsNote(sel)}
     ${legend}
     ${s.ok ? html`${chart(s.value, sel)}${s.value.plays ? '' : problem(new AnalyticsError('failed', 'the plays line'), o.staff, 'the chart’s plays')}` : problem(s.error, o.staff, 'the chart')}
+    ${o.readsError ? problem(o.readsError, o.staff, 'the chart’s blog reads') : ''}
     <p class="small muted ga-span">${spanNote(sel)}</p>
-    ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'sessions and users') : ''}
+    ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the users') : ''}
   </div>`;
 
   const p = ov.plays.ok ? ov.plays.value : null;
@@ -447,12 +454,16 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     const sel = analytics.selection(q);
     // The site view (Vault staff): the blog too.
     const site = !scope.game && !scope.studio && h.isStaff(u);
-    const [ov, rt, blog] = await Promise.all([analytics.overview(sel, full, cat), analytics.realtime(scope),
-      site ? Promise.all([analytics.blog(sel), blogTitles(), analytics.blogShares(sel)]).then(([stats, titles, shares]) => ({ stats, titles, shares })) : null]);
+    const [overview, rt, blog, reads] = await Promise.all([analytics.overview(sel, full, cat), analytics.realtime(scope),
+      site ? Promise.all([analytics.blog(sel), blogTitles(), analytics.blogShares(sel)]).then(([stats, titles, shares]) => ({ stats, titles, shares })) : null,
+      site ? analytics.blogReads(sel) : null]);
+    // The chart's blog reads: site-wide, so never for a studio's or a game's view (nor anyone but Vault staff).
+    const ov = reads?.ok && overview.series.ok ? { ...overview, series: { ok: true as const, value: { ...overview.series.value, reads: reads.value } } } : overview;
     // Load more: the same scope and range as the page.
     const tq = new URLSearchParams(Object.entries({ studio: scope.studio, ...q }).filter((e): e is [string, string] => e[1] !== undefined));
     return view(ov, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`,
-      topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio), blog });
+      topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio), blog,
+      readsError: reads && !reads.ok ? reads.error : null });
   }
 
   app.get('/vault/analytics', async (c) => {

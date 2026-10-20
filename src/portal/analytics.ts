@@ -459,7 +459,7 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     const u = h.signedIn(c); if (u instanceof Response) return u;
     if (!h.isStaff(u)) return h.denied(c, 'Only Vault staff can see this page.');
     const body = await render(u, {}, queryOf(c), '/vault/analytics');
-    return h.page(c, 'Analytics', html`${head('Analytics', 'Plays of the games on vaultlearninggames.org, and visits to the site. Each studio and each game in the portal has the same view for its games.')}${body}`, { active: 'analytics' });
+    return h.page(c, 'Analytics', html`${head('Analytics')}${body}`, { active: 'analytics' });
   });
 
   // A studio's Analytics page: all its games on the site.

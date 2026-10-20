@@ -59,6 +59,9 @@
 .ga-lprev { display: flex; gap: 6px; align-self: center; color: var(--ink-3); }
 
 .ga .kpis.ga-k3, .kpis.ga-k3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 16px; }
+/* The headline row's two-tile views (a studio's or a game's: plays and average play time): fill the row. The
+   site's five tiles use .kpis's own five columns. */
+.ga .kpis.ga-k2, .kpis.ga-k2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .kpis.ga-k3 .kpi:nth-child(n) { border-top: 0; grid-column: auto; }
 .kpis.ga-k3 .kpi + .kpi { border-left: 1px solid var(--line) !important; }
 .kpis.ga-k3 .kpi .d { line-height: 1.35; }

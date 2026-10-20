@@ -2,9 +2,11 @@
 // site (Vault → Analytics, /vault/analytics); each studio has an Analytics page for all its games (/s/STUDIO/analytics)
 // and each game's page an Analytics tab, with the same view, which the studio's members (viewers too) see. Each view:
 // a date range picked the way Google Analytics' picker does it (presets, a custom range, compare with the period
-// before), a chart of plays and users (and for the site, blog reads), plays / players / average play time, a realtime map of where people
-// are playing, top games (site and studio), and for the site its page views, sessions and visitors. A game's (a
-// studio's) sessions and users are visits that showed its page or started one of its plays.
+// before), a top row of figures — the site's: unique users, plays, pages per user, blog reads and average play time;
+// a studio's or a game's: plays and average play time — above a chart of plays and users (and for the site, blog
+// reads), a realtime map of where people are playing, top games (site and studio), and for the site the blog's
+// figures and top posts. A game's (a studio's) sessions and users are visits that showed its page or started one of
+// its plays.
 // The site view also has the blog (Vault staff only): opens, readers and average time on screen, share-button clicks
 // (by network), and the top posts.
 // The play events began on PLAYS_SINCE: before it there are no plays (the page says so), but sessions, users, page
@@ -29,6 +31,9 @@ import { head } from './routes.ts';
 // ---------- formatting ----------
 const nf = new Intl.NumberFormat('en-US');
 const num = (n: number) => nf.format(Math.round(n));
+const ppu1 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+// Pages per user: one decimal place; null (no visitors, or no data), a dash like the other figures.
+const ppuStr = (n: number | null) => (n === null || !Number.isFinite(n) ? '—' : ppu1.format(n));
 export function duration(s: number | null): string {
   if (s === null) return '—';
   const t = Math.round(s);
@@ -337,18 +342,25 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
     ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the users') : ''}
   </div>`;
 
+  // The headline row: the website's and the plays' figures combined, at the very top of the view (above the plot).
+  // The site's view has the five; a studio's or a game's — which never had the website's or the blog's figures — has
+  // its plays' two.
   const p = ov.plays.ok ? ov.plays.value : null;
-  const avgCur = p && p.timed ? averageSeconds(p.current) : null, avgPrev = p && p.timed ? averageSeconds(p.previous) : null;
-  const players = ov.players.ok ? ov.players.value : null;
+  const h = ov.headline;
+  const avgCur = h.avgPlaytimeSeconds, avgPrev = p && p.timed ? averageSeconds(p.previous) : null;
   const avgNote = !p ? '' : !p.timed ? 'Needs the custom definitions in Google Analytics.'
     : avgCur === null ? 'No timed plays in this range yet. Only plays since the game pages began sending play events are timed.' : '';
-  const kpis = html`<div class="kpis ga-k3" aria-label="Plays, ${spanLabel(sel.current)}">
-      ${kpi('Plays', p ? num(p.current.plays) : '—', p ? delta(p.current.plays, p.previous.plays, sel, true) : html`<div class="d"></div>`, 'A play: the game opened from its page on the site (in the player, or in a new tab)')}
-      ${kpi('Unique players', players ? num(players.current) : '—', players ? delta(players.current, players.previous, sel, true) : html`<div class="d"></div>`, 'People (browsers) who started at least one play')}
-      ${kpi('Average play time', duration(avgCur), avgNote ? html`<div class="d">${avgNote}</div>` : delta(avgCur, avgPrev, sel, true), 'Time the game was open in the player with the page on screen, per play in the player. Games opened in a new tab can’t be timed.')}
+  const d = (cur: number | null, prev: number | null, plays = false) => (cur === null ? html`<div class="d"></div>` : delta(cur, prev, sel, plays));
+  const ppuPrev = tr && tr.totalUsers.previous > 0 ? tr.screenPageViews.previous / tr.totalUsers.previous : null;
+  const readsPrev = reads ? sum(reads.previous) : null;   // the chart's blog reads (the site view only), if read
+  const headline = html`<div class="kpis ga-headline${kind === 'site' ? '' : ' ga-k2'}" aria-label="${kind === 'site' ? 'The website and the plays' : 'The plays'}, ${spanLabel(sel.current)}">
+      ${kind === 'site' ? kpi('Unique Users', h.uniqueUsers === null ? '—' : num(h.uniqueUsers), d(h.uniqueUsers, tr ? tr.totalUsers.previous : null), 'People (browsers) who visited the site. Each point counts its own; the total counts each person once.') : ''}
+      ${kpi('Plays', h.plays === null ? '—' : num(h.plays), d(h.plays, p ? p.previous.plays : null, true), 'A play: the game opened from its page on the site (in the player, or in a new tab)')}
+      ${kind === 'site' ? kpi('Pages per User', ppuStr(h.pagesPerUser), d(h.pagesPerUser, ppuPrev), 'Page views on the site, per person who visited (page views ÷ unique users)') : ''}
+      ${kind === 'site' ? kpi('Blog Reads', h.blogReads === null ? '—' : num(h.blogReads), d(h.blogReads, readsPrev), 'Blog posts opened on the site (each opening of a post counts once)') : ''}
+      ${kpi('Average Playtime', duration(avgCur), avgNote ? html`<div class="d">${avgNote}</div>` : d(avgCur, avgPrev, true), 'Time the game was open in the player with the page on screen, per play in the player. Games opened in a new tab can’t be timed.')}
     </div>
-    ${!ov.plays.ok ? problem(ov.plays.error, o.staff, kind === 'game' ? 'this game’s plays can’t be counted' : kind === 'studio' ? 'this studio’s plays can’t be counted' : 'plays') : ''}
-    ${!ov.players.ok && ov.plays.ok ? problem(ov.players.error, o.staff, 'players') : ''}`;
+    ${!ov.plays.ok ? problem(ov.plays.error, o.staff, kind === 'game' ? 'this game’s plays can’t be counted' : kind === 'studio' ? 'this studio’s plays can’t be counted' : 'plays') : ''}`;
 
   // A game's page (a studio's games' pages): views, visitors and outbound clicks, back through the Squarespace years.
   let page: Html | string = '';
@@ -362,17 +374,8 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
       ${!ov.pages.ok ? problem(ov.pages.error, o.staff, its) : ''}`;
   }
 
-  // The site's own figures, and the blog's: its figures stay with them, its top posts go in the top lists below.
-  let site: Html | string = '';
-  let blog: { stats: Html; card: Html | string } | null = null;
-  if (kind === 'site') {
-    const pair = (k: 'screenPageViews' | 'sessions' | 'totalUsers') => (tr ? tr[k] : null);
-    const k = (label: string, v: Pair | null, title: string) => kpi(label, v ? num(v.current) : '—', v ? delta(v.current, v.previous, sel) : html`<div class="d"></div>`, title);
-    site = html`<h3 class="sec">The website <small class="muted small">${spanLabel(sel.current)}</small></h3>
-      <div class="kpis ga-k3">${k('Page views', pair('screenPageViews'), 'Every page shown on the site')}${k('Sessions', pair('sessions'), 'Visits to the site')}${k('Visitors', pair('totalUsers'), 'People (browsers) who visited')}</div>
-      ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the website’s visits') : ''}`;
-    if (o.blog && o.staff) blog = blogSection(o.blog.stats, sel, o.staff, o.blog.titles, o.blog.shares ?? null);
-  }
+  // The blog's: its figures stay with the site's, its top posts go in the top lists below.
+  const blog = kind === 'site' && o.blog && o.staff ? blogSection(o.blog.stats, sel, o.staff, o.blog.titles, o.blog.shares ?? null) : null;
 
   const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">${kind === 'site' ? 'On the site now' : 'Playing now'}</span><small>last 30 minutes · updates every minute</small></h2>
     <div data-realtime="${o.realtimeUrl}">${realtimeBody(rt, { staff: o.staff, land: o.assets.land, game: !!o.scope.game })}</div></div>`;
@@ -402,8 +405,8 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   // side by side (one of them only, the other spans the row).
   const lists = top || blog?.card ? html`<div class="grid analytics-top-lists">${top}${blog?.card ?? ''}</div>` : '';
 
-  return html`${assets}<div class="ga">${chartCard}${kpis}${page}
-    ${realtime}${lists}${site}${blog ? blog.stats : ''}
+  return html`${assets}<div class="ga">${headline}${chartCard}${page}
+    ${realtime}${lists}${blog ? blog.stats : ''}
     <p class="small muted ga-foot">From Google Analytics (the site’s visits and ${p && !p.timed ? 'play counts' : 'play events'}, which began on ${longDate(PLAYS_SINCE)}; days are ${o.timeZone.replace(/_/g, ' ')} days, weeks start on Sunday). Figures are cached for up to 10 minutes; the realtime map for a minute.</p></div>`;
 }
 
@@ -464,16 +467,16 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     const sel = analytics.selection(q);
     // The site view (Vault staff): the blog too.
     const site = !scope.game && !scope.studio && h.isStaff(u);
-    const [overview, rt, blog, reads] = await Promise.all([analytics.overview(sel, full, cat), analytics.realtime(scope),
-      site ? Promise.all([analytics.blog(sel), blogTitles(), analytics.blogShares(sel)]).then(([stats, titles, shares]) => ({ stats, titles, shares })) : null,
-      site ? analytics.blogReads(sel) : null]);
-    // The chart's blog reads: site-wide, so never for a studio's or a game's view (nor anyone but Vault staff).
-    const ov = reads?.ok && overview.series.ok ? { ...overview, series: { ok: true as const, value: { ...overview.series.value, reads: reads.value } } } : overview;
+    const [ov, rt, blog] = await Promise.all([analytics.overview(sel, full, cat), analytics.realtime(scope),
+      site ? Promise.all([analytics.blog(sel), blogTitles(), analytics.blogShares(sel)]).then(([stats, titles, shares]) => ({ stats, titles, shares })) : null]);
+    // The chart's blog reads: the site view's summary carries them (site-wide, so a studio's or a game's never does,
+    // nor anyone but Vault staff).
+    const charted = ov.reads?.ok && ov.series.ok ? { ...ov, series: { ok: true as const, value: { ...ov.series.value, reads: ov.reads.value } } } : ov;
     // Load more: the same scope and range as the page.
     const tq = new URLSearchParams(Object.entries({ studio: scope.studio, ...q }).filter((e): e is [string, string] => e[1] !== undefined));
-    return view(ov, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`,
+    return view(charted, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`,
       topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio), blog,
-      readsError: reads && !reads.ok ? reads.error : null });
+      readsError: ov.reads && !ov.reads.ok ? ov.reads.error : null });
   }
 
   app.get('/vault/analytics', async (c) => {

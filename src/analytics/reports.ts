@@ -217,6 +217,21 @@ export function blogRequest(sel: Selection): GaRequest {
 export function blogTotalsRequest(sel: Selection): GaRequest {
   return { dateRanges: ranges(sel), metrics: BLOG_METRICS.map((name) => ({ name })), dimensionFilter: all(blogPaths, ...hoursTo(sel)) };
 }
+// The blog's share buttons: the site sends share_click with the parameters network and post_slug, registered in GA as
+// event-scoped custom dimensions (Admin → Custom definitions); a property without them refuses this (400, 'setup').
+export const SHARE_EVENT = 'share_click';
+export const DIM_NETWORK = 'customEvent:network';
+export const DIM_POST = 'customEvent:post_slug';
+// The networks the share buttons offer, in the order shown, with their names.
+export const SHARE_NETWORKS = [['linkedin', 'LinkedIn'], ['facebook', 'Facebook'], ['instagram', 'Instagram'], ['pinterest', 'Pinterest'], ['whatsapp', 'WhatsApp']] as const;
+export type ShareNetwork = (typeof SHARE_NETWORKS)[number][0];
+// Share clicks by post and network, in each period.
+export function sharesRequest(sel: Selection): GaRequest {
+  return {
+    dateRanges: ranges(sel), dimensions: [{ name: DIM_POST }, { name: DIM_NETWORK }], metrics: [{ name: 'eventCount' }],
+    dimensionFilter: all(eventIn([SHARE_EVENT]), ...hoursTo(sel)), limit: 10000,
+  };
+}
 
 // Realtime (the last 30 minutes), by country and city. Realtime reports can't see event parameters and refuse eventName
 // with activeUsers ("cannot be queried together"), so a player is someone whose user property vault_game is set (the
@@ -444,6 +459,33 @@ export function readBlog(byPath: GaResponse, totals: GaResponse): BlogStats {
     posts: [...posts.values()].filter((p) => p.opens > 0).sort((a, b) => b.opens - a.opens || a.slug.localeCompare(b.slug)),
   };
 }
+// Share clicks: the total and each network's in each period, and this period's per post (by slug) and network. A
+// network the buttons don't offer (or "(not set)") counts in the totals only.
+export type NetworkCounts = Record<ShareNetwork, number>;
+export interface PostShares { total: number; networks: NetworkCounts }
+export interface ShareStats { total: Pair; networks: Record<ShareNetwork, Pair>; posts: Map<string, PostShares> }
+const noNetworks = (): NetworkCounts => Object.fromEntries(SHARE_NETWORKS.map(([k]) => [k, 0])) as NetworkCounts;
+const networkOf = (v: string): ShareNetwork | null => SHARE_NETWORKS.find(([k]) => k === v.trim().toLowerCase())?.[0] ?? null;
+export function readShares(res: GaResponse): ShareStats {
+  const total: Pair = { current: 0, previous: 0 };
+  const networks = Object.fromEntries(SHARE_NETWORKS.map(([k]) => [k, { current: 0, previous: 0 }])) as Record<ShareNetwork, Pair>;
+  const posts = new Map<string, PostShares>();
+  for (const r of rowsOf(res)) {
+    const p = periodOf(r);
+    if (!p) continue;
+    const n = r.mets.eventCount ?? 0, net = networkOf(r.dims[DIM_NETWORK] ?? '');
+    total[p] += n;
+    if (net) networks[net][p] += n;
+    const slug = (r.dims[DIM_POST] ?? '').trim();
+    if (p !== 'current' || !slug || slug === '(not set)') continue;
+    const s = posts.get(slug) ?? { total: 0, networks: noNetworks() };
+    s.total += n;
+    if (net) s.networks[net] += n;
+    posts.set(slug, s);
+  }
+  return { total, networks, posts };
+}
+
 // Average time on screen per reader, or null with no readers (shown as a dash, never NaN).
 export const perReader = (seconds: number, readers: number): number | null => (readers > 0 && Number.isFinite(seconds) ? seconds / readers : null);
 // Seconds as m:ss (h:mm:ss from an hour); null, a dash.

@@ -59,6 +59,13 @@ them; else its path), and `/blog` (and its `/blog/page/N/`) as **Blog home**. Ta
 site sends these already (`page_view` with engagement time); no custom definitions are needed. Not connected: the
 page's usual notice.
 
+The section also counts the posts' **share buttons**: the site sends `share_click` with the parameters `network`
+(`linkedin`, `facebook`, `instagram`, `pinterest`, `whatsapp`) and `post_slug`. Shares (every network) and each
+network's clicks show under the opens, compared like them, and the posts' table has a **Shares** column with each
+post's clicks by network. Register both parameters in GA (Admin → Custom definitions → Create custom dimension, scope
+Event): `network` and `post_slug` (the portal doesn't create them). Until they exist GA refuses the request and the
+section says so in place of the share figures (the table's Shares show a dash); the other blog figures still show.
+
 ## History (before the play events)
 
 The play events are new, but the property has years of page views from the Squarespace site, which had the same
@@ -106,6 +113,7 @@ realtime reports (the site; a studio: five and one; a game: four and one), well 
 | Top games by page views (site and studio views, when no game has plays) | `screenPageViews`, `eventCount` by `pagePath` and `eventName`, the games' paths, this period so far |
 | The website (site view) | `screenPageViews`, `sessions`, `totalUsers`, both periods |
 | Blog (site view) | `screenPageViews` (opens), `totalUsers` (readers), `userEngagementDuration` (time on screen) with `pagePath` beginning `/blog`: by `pagePath` this period (most opened first), and the totals in both periods |
+| Blog shares (site view) | `eventCount` of `share_click` by `customEvent:post_slug` and `customEvent:network`, both periods |
 | On the site now (site view) | realtime `activeUsers` by `countryId`, `country`, `city` (everyone, playing or browsing), the total, and how many have `customUser:vault_game` set (playing a game) |
 | Playing now (a game) | realtime `activeUsers` by place with `customUser:vault_game` = the game's slug |
 | Playing now (a studio) | the same, with `customUser:vault_game` in the list of its games' slugs (no request when it has none on the site) |

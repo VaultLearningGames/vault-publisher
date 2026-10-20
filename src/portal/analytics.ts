@@ -5,7 +5,8 @@
 // before), a chart of sessions, plays and users, plays / players / average play time, a realtime map of where people
 // are playing, top games (site and studio), and for the site its page views, sessions and visitors. A game's (a
 // studio's) sessions and users are visits that showed its page or started one of its plays.
-// The site view also has the blog (Vault staff only): opens, readers and average time on screen, and the top posts.
+// The site view also has the blog (Vault staff only): opens, readers and average time on screen, share-button clicks
+// (by network), and the top posts.
 // The play events began on PLAYS_SINCE: before it there are no plays (the page says so), but sessions, users, page
 // views and outbound clicks of the game pages go back through the Squarespace years (the same addresses): the top
 // games fall back to page views when there are no plays.
@@ -13,12 +14,12 @@ import type { Hono } from 'hono';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { Analytics, AnalyticsError, type BlogStats, type Overview, type Realtime, type Result } from '../analytics/ga.ts';
+import { Analytics, AnalyticsError, type BlogStats, type Overview, type Realtime, type Result, type ShareStats } from '../analytics/ga.ts';
 import { cityPoint } from '../analytics/cities.ts';
 import { COUNTRY_POINTS } from '../analytics/countries.ts';
 import { MAP_HEIGHT, MAP_WIDTH } from '../analytics/projection.ts';
 import { loadLegacy, pagePaths } from '../analytics/pages.ts';
-import { averageSeconds, longDate, minSec, perReader, PLAYS_SINCE, PRESETS, presetPeriods, spanLabel, type GamePages, type GamePlays, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
+import { averageSeconds, longDate, minSec, perReader, PLAYS_SINCE, PRESETS, presetPeriods, SHARE_NETWORKS, spanLabel, type GamePages, type GamePlays, type NetworkCounts, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
 import { SiteBlogRepo } from '../blog/siteRepo.ts';
 import type { Studio, User } from '../db.ts';
 import { html, raw, type Html } from './html.ts';
@@ -141,12 +142,13 @@ export function placesMap(places: Place[], landUrl: string, what: 'Plays' | 'Peo
 
 // ---------- errors ----------
 const CONNECTION = new Set(['not_connected', 'denied', 'api_disabled']);
-function problem(e: AnalyticsError, staff: boolean, what = ''): Html {
+// defs: the custom definitions a 'setup' error is about.
+function problem(e: AnalyticsError, staff: boolean, what = '', defs = 'the play events’ custom definitions'): Html {
   const text: Record<AnalyticsError['kind'], string> = {
     not_connected: 'Analytics isn’t connected: this portal has no Google Analytics property to read (GA_PROPERTY_ID), or no Google credentials.',
     denied: 'Analytics isn’t connected: this portal’s service account doesn’t have access to the Google Analytics property yet.',
     api_disabled: 'Analytics isn’t connected: the Google Analytics Data API isn’t enabled in the service account’s Google Cloud project.',
-    setup: `Google Analytics doesn’t know the play events’ custom definitions yet${what ? `, so ${what}` : ''}.`,
+    setup: `Google Analytics doesn’t know ${defs} yet${what ? `, so ${what}` : ''}.`,
     failed: `Google Analytics couldn’t answer${what ? ` for ${what}` : ''}.`,
   };
   if (!staff && CONNECTION.has(e.kind)) return html`<p class="fix">Analytics isn’t connected yet: Vault hasn’t given the portal access to Google Analytics.</p>`;
@@ -159,9 +161,9 @@ const firstError = (...rs: (Result<unknown> | null)[]) => rs.find((r): r is { ok
 // studio's Analytics page.
 export interface GameTitle { title: string; href: string | null; studio?: { name: string; href: string } }
 // topUrl: where Load more asks for the next top games (the view's scope and range); none, no button.
-// blog: the site view's Blog section (Vault staff only), with each post's title by slug.
+// blog: the site view's Blog section (Vault staff only), with each post's title by slug and its share clicks.
 interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; topUrl?: string; assets: Assets; titleOf(slug: string): GameTitle
-  blog?: { stats: Result<BlogStats>; titles: Map<string, string> } | null }
+  blog?: { stats: Result<BlogStats>; titles: Map<string, string>; shares?: Result<ShareStats> | null } | null }
 interface Assets { css: string; js: string; land: string }
 
 // The date range picker, laid out like Google Analytics': a button showing the range, which opens the presets (in GA's
@@ -260,18 +262,32 @@ export function pageParams(offset: string | undefined, limit: string | undefined
 export const BLOG_TOP = 20;
 // A post's name in the table: the blog's home, its title (from the posts in vault-site), else its path.
 export const blogTitle = (slug: string, path: string, titles: Map<string, string>) => (slug === '' ? 'Blog home' : titles.get(slug) || path);
-// The Blog section of the site view: opens, readers and average time on screen (m:ss), and the top posts by opens.
-export function blogSection(stats: Result<BlogStats>, sel: Selection, staff: boolean, titles: Map<string, string>): Html {
+// A post's (or the blog's) share clicks by network, e.g. "LinkedIn 3 · WhatsApp 1": the networks with clicks only.
+export const networkBreakdown = (n: NetworkCounts): string => SHARE_NETWORKS.filter(([k]) => n[k] > 0).map(([k, name]) => `${name} ${num(n[k])}`).join(' · ');
+// The Blog section of the site view: opens, readers and average time on screen (m:ss), share clicks (the total, and by
+// network), and the top posts by opens with their shares. shares: null, not asked for (no Shares figures); failed, the
+// usual notice under the figures, and dashes in the table.
+export function blogSection(stats: Result<BlogStats>, sel: Selection, staff: boolean, titles: Map<string, string>, shares: Result<ShareStats> | null = null): Html {
   const head = html`<h3 class="sec">Blog <small class="muted small">${spanLabel(sel.current)}</small></h3>`;
   if (!stats.ok) return html`${head}${problem(stats.error, staff, 'the blog')}`;
   const { totals: t, posts } = stats.value;
+  const sh = shares?.ok ? shares.value : null;
   const avg = (p: 'current' | 'previous') => perReader(t.seconds[p], t.readers[p]);
   const k = (label: string, v: Pair, title: string) => kpi(label, num(v.current), delta(v.current, v.previous, sel), title);
-  const rows = posts.slice(0, BLOG_TOP).map((p) => html`<tr data-slug="${p.slug}"><td class="proj"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num">${num(p.opens)}</td><td class="r num">${num(p.readers)}</td><td class="r num">${minSec(perReader(p.seconds, p.readers))}</td></tr>`);
+  const shareCell = (slug: string) => {
+    if (!sh) return html`<td class="r num">—</td>`;
+    const s = slug ? sh.posts.get(slug) : undefined;
+    const by = s ? networkBreakdown(s.networks) : '';
+    return html`<td class="r num ga-shares">${num(s?.total ?? 0)}${by ? html`<span class="small muted">${by}</span>` : ''}</td>`;
+  };
+  const rows = posts.slice(0, BLOG_TOP).map((p) => html`<tr data-slug="${p.slug}"><td class="proj"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num">${num(p.opens)}</td><td class="r num">${num(p.readers)}</td><td class="r num">${minSec(perReader(p.seconds, p.readers))}</td>${shares ? shareCell(p.slug) : ''}</tr>`);
+  // Share clicks: the total and each network's, compared with the period before like the other figures.
+  const shareKpis = sh ? html`<div class="kpis ga-k3 ga-share-k">${k('Shares', sh.total, 'Clicks on the posts’ share buttons, every network')}${SHARE_NETWORKS.map(([key, name]) => k(name, sh.networks[key], `Clicks on the ${name} share button`))}</div>` : '';
   return html`${head}
     <div class="kpis ga-k3">${k('Opens', t.opens, 'Blog pages shown: the blog’s home and its posts')}${k('Readers', t.readers, 'People (browsers) who opened the blog')}${kpi('Average time on screen', minSec(avg('current')), delta(avg('current'), avg('previous'), sel), 'Time the blog was on screen (Google Analytics engagement time), per reader')}</div>
+    ${shareKpis}${shares && !shares.ok ? problem(shares.error, staff, 'share clicks can’t be counted', 'the share buttons’ custom definitions (network, post_slug)') : ''}
     <div class="card ga-blog">${rows.length
-      ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th></tr></thead><tbody>${rows}</tbody></table></div>${posts.length > BLOG_TOP ? html`<p class="small muted">The ${BLOG_TOP} most opened of ${num(posts.length)}.</p>` : ''}`
+      ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${rows}</tbody></table></div>${posts.length > BLOG_TOP ? html`<p class="small muted">The ${BLOG_TOP} most opened of ${num(posts.length)}.</p>` : ''}`
       : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`;
 }
 
@@ -342,7 +358,7 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
     const k = (label: string, v: Pair | null, title: string) => kpi(label, v ? num(v.current) : '—', v ? delta(v.current, v.previous, sel) : html`<div class="d"></div>`, title);
     site = html`<h3 class="sec">The website <small class="muted small">${spanLabel(sel.current)}</small></h3>
       <div class="kpis ga-k3">${k('Page views', pair('screenPageViews'), 'Every page shown on the site')}${k('Sessions', pair('sessions'), 'Visits to the site')}${k('Visitors', pair('totalUsers'), 'People (browsers) who visited')}</div>
-      ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the website’s visits') : ''}${o.blog && o.staff ? blogSection(o.blog.stats, sel, o.staff, o.blog.titles) : ''}`;
+      ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the website’s visits') : ''}${o.blog && o.staff ? blogSection(o.blog.stats, sel, o.staff, o.blog.titles, o.blog.shares ?? null) : ''}`;
   }
 
   const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">${kind === 'site' ? 'On the site now' : 'Playing now'}</span><small>last 30 minutes · updates every minute</small></h2>
@@ -432,7 +448,7 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     // The site view (Vault staff): the blog too.
     const site = !scope.game && !scope.studio && h.isStaff(u);
     const [ov, rt, blog] = await Promise.all([analytics.overview(sel, full, cat), analytics.realtime(scope),
-      site ? Promise.all([analytics.blog(sel), blogTitles()]).then(([stats, titles]) => ({ stats, titles })) : null]);
+      site ? Promise.all([analytics.blog(sel), blogTitles(), analytics.blogShares(sel)]).then(([stats, titles, shares]) => ({ stats, titles, shares })) : null]);
     // Load more: the same scope and range as the page.
     const tq = new URLSearchParams(Object.entries({ studio: scope.studio, ...q }).filter((e): e is [string, string] => e[1] !== undefined));
     return view(ov, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`,

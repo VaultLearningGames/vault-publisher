@@ -62,6 +62,11 @@
 .kpis.ga-k3 .kpi:nth-child(n) { border-top: 0; grid-column: auto; }
 .kpis.ga-k3 .kpi + .kpi { border-left: 1px solid var(--line) !important; }
 .kpis.ga-k3 .kpi .d { line-height: 1.35; }
+/* The blog's shares: the total and five networks, two rows of three. */
+.kpis.ga-share-k { margin-top: 0; }
+.kpis.ga-share-k .kpi:nth-child(3n+1) { border-left: 0 !important; }
+.kpis.ga-share-k .kpi:nth-child(n+4) { border-top: 1px solid var(--line); }
+.ga-blog td.ga-shares span { display: block; font-size: 11px; white-space: nowrap; }
 
 .ga-split { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; }
 .ga-map { position: relative; width: 100%; margin: 4px 0 10px; overflow: hidden; border-radius: 6px; }

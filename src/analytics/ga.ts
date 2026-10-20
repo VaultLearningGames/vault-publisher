@@ -5,11 +5,11 @@
 import { googleTokenSource, NoCredentialsError, type TokenSource } from './google-auth.ts';
 import {
   basicPlaysRequest, blogRequest, blogTotalsRequest, localNow, pagesRequest, playersRequest, playSeriesRequest, playsRequest, readBasicPlays, readBlog, readPages, readPairs, readPlaces,
-  readPlays, readSeries, readTopPages, realtimePlayersRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest,
-  selectionOf, topPagesRequest, trafficRequest, trafficSeriesRequest, type BlogStats, type GamePages, type GaRequest, type GaResponse, type PageStats, type Pair,
-  type Place, type PlayStats, type Scope, type Selection, type Series,
+  readPlays, readSeries, readShares, readTopPages, realtimePlayersRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest,
+  selectionOf, sharesRequest, topPagesRequest, trafficRequest, trafficSeriesRequest, type BlogStats, type GamePages, type GaRequest, type GaResponse, type PageStats, type Pair,
+  type Place, type PlayStats, type Scope, type Selection, type Series, type ShareStats,
 } from './reports.ts';
-export { blogRequest, blogTotalsRequest, readBlog, type BlogStats } from './reports.ts';
+export { blogRequest, blogTotalsRequest, readBlog, readShares, sharesRequest, type BlogStats, type ShareStats } from './reports.ts';
 
 export type GaMethod = 'runReport' | 'runRealtimeReport';
 // Sends one request to the property and answers its JSON. Injected in tests and for local screenshots.
@@ -162,6 +162,11 @@ export class Analytics {
   // The blog: its opens, readers and time on screen in each period, and per post (Vault → Analytics only).
   async blog(sel: Selection): Promise<Result<BlogStats>> {
     return settle(Promise.all([this.call('runReport', blogRequest(sel)), this.call('runReport', blogTotalsRequest(sel))]).then(([p, t]) => readBlog(p, t)));
+  }
+  // The blog's share-button clicks (share_click), by post and network. Its own result: before the custom dimensions
+  // network and post_slug are registered it fails ('setup') while the blog's other figures still show.
+  async blogShares(sel: Selection): Promise<Result<ShareStats>> {
+    return settle(this.call('runReport', sharesRequest(sel)).then(readShares));
   }
 
   // The site: everyone on it (playing or browsing) by place, and how many of them are playing. A game: its players. A

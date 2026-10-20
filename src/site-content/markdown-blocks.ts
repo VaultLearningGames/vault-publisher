@@ -434,12 +434,13 @@ export function htmlToBlocks(html: string): Block[] | string {
     inP = false;
     while (spans.length && /^\s*$/.test(spans.at(-1)!.text) && !spans.at(-1)!.marks) spans.pop();
     while (spans.length && /^\s*$/.test(spans[0].text) && !spans[0].marks) spans.shift();
+    { const l = spans.at(-1); if (l && !l.marks && l.href === undefined) l.text = l.text.replace(/\s+$/, ''); }
     if (spans.length) { if (list) list.items.push(spans); else out.push({ type: 'paragraph', children: spans }); }
     spans = [];
   };
   const re = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:[^>"']|"[^"]*"|'[^']*')*)>|([^<]+)/g;
   for (let m; (m = re.exec(html));) {
-    if (m[4] !== undefined) { const t = decodeEntities(m[4]); if (inP || head || t.trim()) addText(head ? t : inP ? t : t.trim()); continue; }
+    if (m[4] !== undefined) { const t = decodeEntities(m[4]); if (inP || head || t.trim()) addText(head ? t : inP ? t : t.replace(/^\s+/, '')); continue; }
     const close = m[1] === '/', name = m[2].toLowerCase(), attrs = m[3];
     if (!close && /data-indent/i.test(attrs)) return 'indented text is not supported on the site; remove the indent';
     switch (name) {

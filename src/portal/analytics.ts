@@ -269,11 +269,12 @@ export const blogTitle = (slug: string, path: string, titles: Map<string, string
 // A post's (or the blog's) share clicks by network, e.g. "LinkedIn 3 · WhatsApp 1": the networks with clicks only.
 export const networkBreakdown = (n: NetworkCounts): string => SHARE_NETWORKS.filter(([k]) => n[k] > 0).map(([k, name]) => `${name} ${num(n[k])}`).join(' · ');
 // The Blog section of the site view: opens, readers and average time on screen (m:ss), share clicks (the total, and by
-// network), and the top posts by opens with their shares. shares: null, not asked for (no Shares figures); failed, the
-// usual notice under the figures, and dashes in the table.
-export function blogSection(stats: Result<BlogStats>, sel: Selection, staff: boolean, titles: Map<string, string>, shares: Result<ShareStats> | null = null): Html {
+// network), and the top posts by opens with their shares. Two parts: stats (the heading and the figures, which stay
+// with the site’s own) and card (the top posts, which the view sets next to the top games, under the full-width map).
+// shares: null, not asked for (no Shares figures); failed, the usual notice under the figures, and dashes in the table.
+export function blogSection(stats: Result<BlogStats>, sel: Selection, staff: boolean, titles: Map<string, string>, shares: Result<ShareStats> | null = null): { stats: Html; card: Html | string } {
   const head = html`<h3 class="sec">Blog <small class="muted small">${spanLabel(sel.current)}</small></h3>`;
-  if (!stats.ok) return html`${head}${problem(stats.error, staff, 'the blog')}`;
+  if (!stats.ok) return { stats: html`${head}${problem(stats.error, staff, 'the blog')}`, card: '' };
   const { totals: t, posts } = stats.value;
   const sh = shares?.ok ? shares.value : null;
   const avg = (p: 'current' | 'previous') => perReader(t.seconds[p], t.readers[p]);
@@ -287,12 +288,14 @@ export function blogSection(stats: Result<BlogStats>, sel: Selection, staff: boo
   const rows = posts.slice(0, BLOG_TOP).map((p) => html`<tr data-slug="${p.slug}"><td class="proj"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num">${num(p.opens)}</td><td class="r num">${num(p.readers)}</td><td class="r num">${minSec(perReader(p.seconds, p.readers))}</td>${shares ? shareCell(p.slug) : ''}</tr>`);
   // Share clicks: the total and each network's, compared with the period before like the other figures.
   const shareKpis = sh ? html`<div class="kpis ga-k3 ga-share-k">${k('Shares', sh.total, 'Clicks on the posts’ share buttons, every network')}${SHARE_NETWORKS.map(([key, name]) => k(name, sh.networks[key], `Clicks on the ${name} share button`))}</div>` : '';
-  return html`${head}
-    <div class="kpis ga-k3">${k('Opens', t.opens, 'Blog pages shown: the blog’s home and its posts')}${k('Readers', t.readers, 'People (browsers) who opened the blog')}${kpi('Average time on screen', minSec(avg('current')), delta(avg('current'), avg('previous'), sel), 'Time the blog was on screen (Google Analytics engagement time), per reader')}</div>
-    ${shareKpis}${shares && !shares.ok ? problem(shares.error, staff, 'share clicks can’t be counted', 'the share buttons’ custom definitions (network, post_slug)') : ''}
-    <div class="card ga-blog">${rows.length
+  return {
+    stats: html`${head}
+      <div class="kpis ga-k3">${k('Opens', t.opens, 'Blog pages shown: the blog’s home and its posts')}${k('Readers', t.readers, 'People (browsers) who opened the blog')}${kpi('Average time on screen', minSec(avg('current')), delta(avg('current'), avg('previous'), sel), 'Time the blog was on screen (Google Analytics engagement time), per reader')}</div>
+      ${shareKpis}${shares && !shares.ok ? problem(shares.error, staff, 'share clicks can’t be counted', 'the share buttons’ custom definitions (network, post_slug)') : ''}`,
+    card: html`<div class="card ga-blog">${rows.length
       ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${rows}</tbody></table></div>${posts.length > BLOG_TOP ? html`<p class="small muted">The ${BLOG_TOP} most opened of ${num(posts.length)}.</p>` : ''}`
-      : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`;
+      : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`,
+  };
 }
 
 export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
@@ -359,13 +362,16 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
       ${!ov.pages.ok ? problem(ov.pages.error, o.staff, its) : ''}`;
   }
 
+  // The site's own figures, and the blog's: its figures stay with them, its top posts go in the top lists below.
   let site: Html | string = '';
+  let blog: { stats: Html; card: Html | string } | null = null;
   if (kind === 'site') {
     const pair = (k: 'screenPageViews' | 'sessions' | 'totalUsers') => (tr ? tr[k] : null);
     const k = (label: string, v: Pair | null, title: string) => kpi(label, v ? num(v.current) : '—', v ? delta(v.current, v.previous, sel) : html`<div class="d"></div>`, title);
     site = html`<h3 class="sec">The website <small class="muted small">${spanLabel(sel.current)}</small></h3>
       <div class="kpis ga-k3">${k('Page views', pair('screenPageViews'), 'Every page shown on the site')}${k('Sessions', pair('sessions'), 'Visits to the site')}${k('Visitors', pair('totalUsers'), 'People (browsers) who visited')}</div>
-      ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the website’s visits') : ''}${o.blog && o.staff ? blogSection(o.blog.stats, sel, o.staff, o.blog.titles, o.blog.shares ?? null) : ''}`;
+      ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the website’s visits') : ''}`;
+    if (o.blog && o.staff) blog = blogSection(o.blog.stats, sel, o.staff, o.blog.titles, o.blog.shares ?? null);
   }
 
   const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">${kind === 'site' ? 'On the site now' : 'Playing now'}</span><small>last 30 minutes · updates every minute</small></h2>
@@ -392,8 +398,12 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
         : html`<p class="small muted">No plays in this range yet.</p>`}</div>`;
   }
 
+  // The map's card takes the full width on its own row; then the top lists: the top games and the blog's top posts,
+  // side by side (one of them only, the other spans the row).
+  const lists = top || blog?.card ? html`<div class="grid analytics-top-lists">${top}${blog?.card ?? ''}</div>` : '';
+
   return html`${assets}<div class="ga">${chartCard}${kpis}${page}
-    <div class="grid ${top ? 'ga-split' : ''}">${realtime}${top}</div>${site}
+    ${realtime}${lists}${site}${blog ? blog.stats : ''}
     <p class="small muted ga-foot">From Google Analytics (the site’s visits and ${p && !p.timed ? 'play counts' : 'play events'}, which began on ${longDate(PLAYS_SINCE)}; days are ${o.timeZone.replace(/_/g, ' ')} days, weeks start on Sunday). Figures are cached for up to 10 minutes; the realtime map for a minute.</p></div>`;
 }
 

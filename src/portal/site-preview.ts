@@ -28,13 +28,15 @@ const TMP_PREFIX = 'vault-preview-';
 
 // No allow-same-origin: the page runs in an opaque origin, apart from the portal's (see the note above).
 export const PREVIEW_CSP = 'sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-presentation allow-pointer-lock allow-orientation-lock';
-export const PREVIEW_HEADERS: Record<string, string> = {
+// Frozen and copied per response by its users (listing-preview.ts): the node server writes each response's
+// Content-Length into the headers object it is given, so this must never be passed to a Response directly.
+export const PREVIEW_HEADERS: Record<string, string> = Object.freeze({
   'Content-Type': 'text/html; charset=utf-8',
   'Cache-Control': 'no-store',
   'X-Robots-Tag': 'noindex, nofollow',
   'Content-Security-Policy': PREVIEW_CSP,
   'Referrer-Policy': 'strict-origin-when-cross-origin',
-};
+});
 
 export const BADGE = '<div id="vault-preview-badge" role="status" style="position:fixed;right:16px;bottom:16px;z-index:2147483647;' +
   'padding:8px 14px;border-radius:999px;background:#c62828;color:#fff;font:600 14px/1.2 system-ui,-apple-system,' +

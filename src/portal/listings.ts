@@ -17,7 +17,7 @@ import { availabilityCells, availabilityLine, AVAILABILITY_HEADS } from './avail
 import { compareByTestingStatus, deriveTestingStatus } from './testingStatus.ts';
 import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '../featured.ts';
 import type { PortalDeps } from './routes.ts';
-import { imageField } from './listing-assets.ts';
+import { imageField, imageToolScript } from './listing-assets.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
 import { cdnRedirectNote, unpublishedWarning } from './unpublished-warning.ts';
 import { addMaker, createProposedStudios, makersField, proposedLine, pruneMakerProposals } from './listing-makers.ts';
@@ -158,6 +158,7 @@ export function listingPieces(h: ListingHelpers) {
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'hero_image', label: 'Hero image', value: f.hero_image, hint: 'A path on the site (games/x/img/hero.png) or an https link.' })}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'thumb_image', label: 'Thumbnail', value: f.thumb_image, hint: 'A path on the site or an https link.' })}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'screenshots', label: 'Screenshots', value: f.screenshots, hint: 'One path or link per line, in the order the site shows them; delete a line to remove it.' })}
+        ${edit && h.deps.production ? imageToolScript() : ''}
       </div>
       <h2 style="margin-top:18px">Playing</h2>
       <div class="fields">

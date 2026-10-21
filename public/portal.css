@@ -494,6 +494,15 @@ tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
 .img-prev:empty { display: none; }
 .img-up { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .field .img-up input[type=file] { font-size: 12px; max-width: 240px; width: auto; border: 0; padding: 1px; background: none; }
+/* The image tool's dialog (portal-image-tool.js): the crop as it will look, on a checkerboard (transparency shows). */
+dialog.iet { width: min(700px, calc(100vw - 32px)); }
+.iet-stage { display: flex; justify-content: center; background: repeating-conic-gradient(#e6e6e6 0 25%, #fff 0 50%) 0 0 / 16px 16px; border-radius: 8px; overflow: hidden; }
+.iet-canvas { display: block; max-width: 100%; cursor: grab; touch-action: none; }
+.iet-canvas:active { cursor: grabbing; }
+.iet-canvas:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.iet-zoom { display: flex; gap: 10px; align-items: center; }
+.iet-zoom input { flex: 1; }
+.iet-sizes { font-size: 13px; }
 
 /* Listing editor: the "Made by" chooser. The makers are ticked chips in the site's order; the other studios are
    unticked chips until portal.js (which adds .js) moves them into the "Add a studio…" dropdown. */

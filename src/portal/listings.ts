@@ -19,6 +19,7 @@ import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '..
 import type { PortalDeps } from './routes.ts';
 import { imageField } from './listing-assets.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
+import { unpublishedWarning } from './unpublished-warning.ts';
 import { addMaker, createProposedStudios, makersField, proposedLine, pruneMakerProposals } from './listing-makers.ts';
 
 // "Smallest screen" (min_width × min_height): editable by Vault, shown read-only to the studio. Empty: the site default.
@@ -113,7 +114,8 @@ export function listingPieces(h: ListingHelpers) {
     }
     const waiting = l && l.review === 'submitted' ? html`<p class="small">${pill('wait', 'Waiting for Vault')} ${changedFields(l.published, l.draft).map((k) => FIELD_LABEL[k]).join(', ')}</p>` : '';
     const checked = pub ? availabilityLine(db, l!.slug, h.isStaff(u)) : '';
-    return html`<div class="card"><h2>Where it plays</h2>${status}${checked}${waiting}${next}</div>`;
+    const unpub = !pub && g && cur ? html`<p>${unpublishedWarning(l, 'cdn')} The Vault CDN address ${cdnUrl(s, g)} is affected.</p>` : '';
+    return html`<div class="card"><h2>Where it plays</h2>${status}${checked}${waiting}${unpub}${next}</div>`;
   }
 
   // The listing editor (draft) and its status card.
@@ -141,6 +143,7 @@ export function listingPieces(h: ListingHelpers) {
       <textarea name="${name}" rows="${rows}" ${dis}>${Array.isArray(f[name]) ? (f[name] as string[]).join('\n') : String(f[name] ?? '')}</textarea>${hint ? html`<span class="hint">${hint}</span>` : ''}</label>`;
     const form = html`<form data-api="${api}" data-then="reload" class="card form-card">
       <h2>Site listing <small>vaultlearninggames.org/games/${l.slug}/</small></h2>
+      ${l.published ? '' : html`<p>${unpublishedWarning(l, 'site')}</p>`}
       <div class="fields">
         ${txt('title', 'Title', '', 'required')}
         ${makersField(db, { api, edit, staff: h.isStaff(u), studio: s, listing: l })}

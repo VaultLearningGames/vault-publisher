@@ -318,18 +318,18 @@ describe('the Google Analytics client', () => {
     const week = a.selection({ range: 'this-week' });
     assert.deepEqual(week.current, { start: '2026-10-18', end: '2026-10-20' });   // the property's today
     const ov = await a.overview(week, {});
-    assert.equal(log.length, 5);   // plays, the chart's plays and its sessions and users, players, the site's totals
+    assert.equal(log.length, 6);   // plays, the chart's plays and its sessions and users, players, the site's totals, its blog reads
     assert.ok(ov.series.ok && ov.plays.ok && ov.players.ok && ov.traffic.ok);
     assert.ok(ov.series.value.sessions.current[0]! > 0 && ov.series.value.plays!.current[0]! > 0);
     await a.overview(week, {});
-    assert.equal(log.length, 5);
+    assert.equal(log.length, 6);
     await a.realtime({}); await a.realtime({});
-    assert.equal(log.length, 8);   // people by place, the total, and how many are playing
+    assert.equal(log.length, 9);   // people by place, the total, and how many are playing
     now += 61_000;
     await a.realtime({});
-    assert.equal(log.length, 11);
+    assert.equal(log.length, 12);
     await a.overview(week, { game: 'wake', pages: ['/wake', '/wake/'] });
-    assert.equal(log.length, 17);  // and its page's report
+    assert.equal(log.length, 18);  // and its page's report
   });
 
   test('a studio: its games’ plays, players and pages, and its players now', async () => {
@@ -362,7 +362,7 @@ describe('the Google Analytics client', () => {
     assert.ok(ov.series.ok && ov.series.value.sessions.current.every((v) => v! > 0));
     assert.ok(ov.series.value.plays!.current.every((v) => v === null));
     assert.ok(ov.topPages?.ok && ov.topPages.value.map((g) => g.slug).sort().join() === 'bloom,wake');
-    assert.equal(log.length, 6);   // the five, then top pages because no game had plays
+    assert.equal(log.length, 7);   // the six, then top pages because no game had plays
     const opts = { timeZone: 'America/Chicago', staff: true, realtimeUrl: '/rt', assets: { css: '', js: '', land: '' }, titleOf: (slug: string) => ({ title: slug.toUpperCase(), href: null }) };
     const page = String(view(ov, { places: { ok: true, value: [] }, visitors: null, who: 'players' }, { ...opts, scope: {}, base: '/vault/analytics' }));
     assert.match(page, /<h2>Plays and users<\/h2>/, 'no blog reads: the view wasn’t given them');
@@ -551,8 +551,8 @@ describe('portal pages', () => {
     assert.match(page, /<h2>Plays, users and blog reads<\/h2>/);
     assert.match(page, /Blog reads/);
     assert.match(page, /<form class="ga-dp" method="get" action="\/vault\/analytics">/);
-    assert.match(page, /Unique players/);
-    assert.match(page, /Average play time/);
+    assert.match(page, /Unique Users/);
+    assert.match(page, /Average Playtime/);
     assert.match(page, /Page views/);
     assert.match(page, /Sessions/);
     assert.match(page, /Top games/);
@@ -597,7 +597,7 @@ describe('portal pages', () => {
     const page = await (await viewer.get('/s/fieldday/analytics?range=month')).text();
     assert.match(page, /href="\/s\/fieldday\/analytics" class="on">Analytics<\/a>/);
     assert.match(page, /<span class="ga-dl">This month<\/span>/);
-    assert.match(page, /Unique players/);
+    assert.match(page, /Average Playtime/);
     assert.match(page, /Top games/);
     assert.match(page, /href="\/s\/fieldday\/g\/wake\?tab=analytics"><b>Wake<\/b>/);
     assert.doesNotMatch(page, /Transformations Quest|The website/);   // its games only; no site figures

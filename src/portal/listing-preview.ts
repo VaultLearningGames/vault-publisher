@@ -87,7 +87,7 @@ export function registerListingPreview(app: Hono, h: ListingHelpers, store = new
 
   // The preview as a page. Always no-store, noindex and sandboxed (PREVIEW_HEADERS), whatever the answer.
   async function page(c: Context, token: string): Promise<Response> {
-    const send = (status: number, body: string) => new Response(c.req.method === 'HEAD' ? null : body, { status, headers: PREVIEW_HEADERS });
+    const send = (status: number, body: string) => new Response(c.req.method === 'HEAD' ? null : body, { status, headers: { ...PREVIEW_HEADERS } });
     if (!TOKEN_RE.test(token)) return send(404, NOT_FOUND);
     const body = store.get(token);
     if (!body) return send(404, EXPIRED);
@@ -100,10 +100,10 @@ export function registerListingPreview(app: Hono, h: ListingHelpers, store = new
   app.get('/_preview/:token/', (c: Context) => page(c, c.req.param('token') ?? ''));
   app.get('/_preview/:token', (c: Context) => {
     const token = c.req.param('token') ?? '';
-    if (!TOKEN_RE.test(token)) return new Response(NOT_FOUND, { status: 404, headers: PREVIEW_HEADERS });
+    if (!TOKEN_RE.test(token)) return new Response(NOT_FOUND, { status: 404, headers: { ...PREVIEW_HEADERS } });
     return new Response(null, { status: 301, headers: { Location: `/_preview/${token}/`, 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' } });
   });
-  app.get('/_preview/*', () => new Response(NOT_FOUND, { status: 404, headers: PREVIEW_HEADERS }));
+  app.get('/_preview/*', () => new Response(NOT_FOUND, { status: 404, headers: { ...PREVIEW_HEADERS } }));
 
   app.get('/v1/listing-previews/:token', async (c: Context): Promise<Response> => {
     const token = c.req.param('token') ?? '';

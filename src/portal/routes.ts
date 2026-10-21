@@ -2,6 +2,7 @@
 // Sign-in is GitHub OAuth (profile only). Studios control staging; only Vault staff who edit game/studio content
 // release, promote and roll back. Studio members who can request publish request a release (permissions.ts).
 import type { Context, Hono } from 'hono';
+import { unpublishedWarning } from './unpublished-warning.ts';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -521,6 +522,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const requests = db.releaseRequests({ gameId: g.id });
     const release = canRelease(u), request = canRequest(u, s);
     const stable = `${deps.prodPublicUrl}/${s.slug}/${g.slug}/`;
+    const stableWarn = unpublishedWarning(db.listingsForGame(g.id) as { published?: unknown }[], 'cdn');
     const api = `/portal/api/s/${s.slug}/g/${g.slug}`;
     // A build that didn't come from a push (a .zip uploaded here, or a copy of a monitored web address) has no commit.
     const buildRows = builds.map((b: Build) => { const origin = buildOrigin(b.commit_sha); const type = origin === 'upload' ? 'upload' : b.ref_type; return html`<tr>
@@ -567,7 +569,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
         </div>`;
     const side = html`<div class="grid" style="align-content:start">
           <div class="card"><h2>Live for classrooms</h2>${cur ? html`<div class="big-rel">${cur.version}</div><p class="small muted">approved ${cur.approved_at.slice(0, 10)} by ${who(cur.approved_by)}</p>` : html`<p class="muted">No Public Releases</p>`}
-            ${cur ? html`<p class="small">Stable link (always the current release):<br><a class="mono wrap" href="${stable}" target="_blank" rel="noopener">${stable}</a></p>` : ''}
+            ${cur ? html`<p class="small">Stable link (always the current release):<br><a class="mono wrap" href="${stable}" target="_blank" rel="noopener">${stable}</a><br>${stableWarn}</p>` : ''}
             ${g.frozen_at ? html`<p class="small">${pill('wait', 'Frozen')} by ${who(g.frozen_by ?? '')} ${ago(g.frozen_at)}${g.frozen_note ? html`: “${g.frozen_note}”` : ''}. Only Vault can change the current release.</p>` : ''}
             ${release ? (g.frozen_at
               ? html`<form data-api="${api}/freeze" data-then="reload" data-confirm="Let ${s.name} switch versions again?"><input type="hidden" name="frozen" value=""><button class="btn sm">Unfreeze</button><span class="err" role="status" aria-live="polite"></span></form>`

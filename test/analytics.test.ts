@@ -318,18 +318,18 @@ describe('the Google Analytics client', () => {
     const week = a.selection({ range: 'this-week' });
     assert.deepEqual(week.current, { start: '2026-10-18', end: '2026-10-20' });   // the property's today
     const ov = await a.overview(week, {});
-    assert.equal(log.length, 5);   // plays, the chart's plays and its sessions and users, players, the site's totals
+    assert.equal(log.length, 6);   // plays, the chart's plays and its sessions and users, players, the site's totals, its blog reads
     assert.ok(ov.series.ok && ov.plays.ok && ov.players.ok && ov.traffic.ok);
     assert.ok(ov.series.value.sessions.current[0]! > 0 && ov.series.value.plays!.current[0]! > 0);
     await a.overview(week, {});
-    assert.equal(log.length, 5);
+    assert.equal(log.length, 6);
     await a.realtime({}); await a.realtime({});
-    assert.equal(log.length, 8);   // people by place, the total, and how many are playing
+    assert.equal(log.length, 9);   // people by place, the total, and how many are playing
     now += 61_000;
     await a.realtime({});
-    assert.equal(log.length, 11);
+    assert.equal(log.length, 12);
     await a.overview(week, { game: 'wake', pages: ['/wake', '/wake/'] });
-    assert.equal(log.length, 17);  // and its page's report
+    assert.equal(log.length, 18);  // and its page's report
   });
 
   test('a studio: its games’ plays, players and pages, and its players now', async () => {
@@ -362,10 +362,10 @@ describe('the Google Analytics client', () => {
     assert.ok(ov.series.ok && ov.series.value.sessions.current.every((v) => v! > 0));
     assert.ok(ov.series.value.plays!.current.every((v) => v === null));
     assert.ok(ov.topPages?.ok && ov.topPages.value.map((g) => g.slug).sort().join() === 'bloom,wake');
-    assert.equal(log.length, 6);   // the five, then top pages because no game had plays
+    assert.equal(log.length, 7);   // the six, then top pages because no game had plays
     const opts = { timeZone: 'America/Chicago', staff: true, realtimeUrl: '/rt', assets: { css: '', js: '', land: '' }, titleOf: (slug: string) => ({ title: slug.toUpperCase(), href: null }) };
     const page = String(view(ov, { places: { ok: true, value: [] }, visitors: null, who: 'players' }, { ...opts, scope: {}, base: '/vault/analytics' }));
-    assert.match(page, /Sessions, plays and users/);
+    assert.match(page, /<h2>Plays and users<\/h2>/, 'no blog reads: the view wasn’t given them');
     assert.match(page, /<p class="ga-warn" role="note"><b>Plays weren’t counted before Oct 4, 2026<\/b>/);
     assert.match(page, /not counted for the 30 days before/);
     assert.match(page, /Top games <small>by page views, Sep 1 – Sep 30, 2026/);
@@ -376,7 +376,7 @@ describe('the Google Analytics client', () => {
     const gp = String(view(game, { places: { ok: true, value: [] }, visitors: null, who: 'players' }, { ...opts, staff: false, scope: { game: 'wake', pages: catalog.wake }, base: '/s/x/g/wake?tab=analytics' }));
     assert.match(gp, /Plays weren’t counted before Oct 4, 2026/);
     assert.match(gp, /The game’s page/);
-    assert.match(gp, /Visits to the site that showed the game’s page or played it/);
+    assert.match(gp, /People \(browsers\) in visits to the site that showed the game’s page or played it/);
     assert.match(gp, /outbound clicks from the game’s page/);
     // After the play events began, comparing with a period before them: said too.
     const week = a.selection({ range: 'last-7' });   // Oct 13 – 19, against Oct 6 – 12: no note
@@ -487,22 +487,30 @@ describe('formatting', () => {
     assert.match(String(delta(12, 0, after)), /new: none the 2 days before/, 'sessions were counted then');
     assert.match(String(delta(12, 3, sel('custom', { start: '2026-10-06', end: '2026-10-08' }, '2026-10-09'), true)), /the 3 days before only partly counted/);
 
-    // The chart: a line each for sessions, plays and users, the period before dashed; tooltips with both.
+    // The chart: a line each for plays and users (not sessions), the period before dashed; tooltips with both.
     const t = (rows: [string, string, number, number][]) => res(['date', 'dateRange'], ['sessions', 'totalUsers'], rows.map(([k, r, a, b]) => [[k, r], [a, b]]));
     const s = readSeries(t([['20261004', 'current', 40, 30], ['20261005', 'current', 20, 10], ['20261002', 'previous', 30, 25]]),
       res(['date', 'dateRange'], ['eventCount'], [[['20261005', 'current'], [8]]]), after, '2026-10-06', 9);
     const svg = String(chart(s, after));
-    assert.equal(svg.match(/<path class="ga-cur s\d"/g)?.length, 3);
-    assert.equal(svg.match(/<path class="ga-prev s\d"/g)?.length, 3);
-    assert.match(svg, /<path class="ga-cur s1" d="M0\.5 0L1\.5 50"/);   // sessions 40, 20 on a 0–40 axis
-    assert.match(svg, /<path class="ga-cur s2" d="M0\.5 100L1\.5 80"/);   // plays 0, 8 (counted from Oct 4)
+    assert.equal(svg.match(/<path class="ga-cur s\d"/g)?.length, 2);
+    assert.equal(svg.match(/<path class="ga-prev s\d"/g)?.length, 2);
+    assert.doesNotMatch(svg, /class="ga-(cur|prev) s1"|sessions/, 'no sessions line');
+    assert.match(svg, /<path class="ga-cur s3" d="M0\.5 0L1\.5 66\.67"/);   // users 30, 10 on a 0–30 axis
+    assert.match(svg, /<path class="ga-cur s2" d="M0\.5 100L1\.5 73\.33"/);   // plays 0, 8 (counted from Oct 4)
     assert.match(svg, /<path class="ga-prev s2" d=""/);                  // none counted the days before
-    assert.match(svg, /<title>Sun Oct 4: 40 sessions · 0 plays · 30 users\nFri Oct 2: 30 sessions · plays not counted yet · 25 users<\/title>/);
+    assert.match(svg, /<title>Sun Oct 4: 0 plays · 30 users\nFri Oct 2: plays not counted yet · 25 users<\/title>/);
+    assert.match(svg, /aria-label="Plays and users per day/);
+    // Blog reads (the site view's): a fourth colour, in the title.
+    const withReads = { ...s, reads: { current: [5, 2], previous: [1, null] } };
+    const rsvg = String(chart(withReads, after));
+    assert.match(rsvg, /<path class="ga-cur s4" d="M0\.5 83\.33L1\.5 93\.33"/);
+    assert.match(rsvg, /aria-label="Plays, users and blog reads per day[^"]*Blog reads: 7\."/);
+    assert.match(rsvg, /<title>Sun Oct 4: 0 plays · 30 users · 5 blog reads\n/);
     const alone = { ...after, compare: false };
     assert.doesNotMatch(String(chart(readSeries(t([['20261004', 'current', 40, 30]]), null, alone, '2026-10-06', 9), alone)), /ga-prev|Oct 2/);
     const hours = readSeries(t([]), null, sel('today', {}, TODAY, 2), TODAY, 2);
     const hsvg = String(chart(hours, sel('today', {}, TODAY, 2)));
-    assert.equal(hsvg.match(/<path class="ga-cur/g)?.length, 2, 'no plays line when its report failed');
+    assert.equal(hsvg.match(/<path class="ga-cur/g)?.length, 1, 'no plays line when its report failed: users only');
     assert.match(hsvg, /<title>Oct 3, 05:00: later today<\/title>/);
   });
 
@@ -540,10 +548,11 @@ describe('portal pages', () => {
     assert.match(page, /value="quarter" data-start="[\d-]+" data-end="[\d-]+" checked>/);
     assert.match(page, /<span class="ga-dl">Quarter to date<\/span>/);
     assert.match(page, /compared with the same days last quarter/);
-    assert.match(page, /Sessions, plays and users/);
+    assert.match(page, /<h2>Plays, users and blog reads<\/h2>/);
+    assert.match(page, /Blog reads/);
     assert.match(page, /<form class="ga-dp" method="get" action="\/vault\/analytics">/);
-    assert.match(page, /Unique players/);
-    assert.match(page, /Average play time/);
+    assert.match(page, /Unique Users/);
+    assert.match(page, /Average Playtime/);
     assert.match(page, /Page views/);
     assert.match(page, /Sessions/);
     assert.match(page, /Top games/);
@@ -588,7 +597,7 @@ describe('portal pages', () => {
     const page = await (await viewer.get('/s/fieldday/analytics?range=month')).text();
     assert.match(page, /href="\/s\/fieldday\/analytics" class="on">Analytics<\/a>/);
     assert.match(page, /<span class="ga-dl">This month<\/span>/);
-    assert.match(page, /Unique players/);
+    assert.match(page, /Average Playtime/);
     assert.match(page, /Top games/);
     assert.match(page, /href="\/s\/fieldday\/g\/wake\?tab=analytics"><b>Wake<\/b>/);
     assert.doesNotMatch(page, /Transformations Quest|The website/);   // its games only; no site figures

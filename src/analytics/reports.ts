@@ -217,6 +217,15 @@ export function blogRequest(sel: Selection): GaRequest {
 export function blogTotalsRequest(sel: Selection): GaRequest {
   return { dateRanges: ranges(sel), metrics: BLOG_METRICS.map((name) => ({ name })), dimensionFilter: all(blogPaths, ...hoursTo(sel)) };
 }
+// The chart's blog reads (the site view, Vault staff only): opens of a post (/blog/<slug>/, not the blog's home, its
+// pages or tags) per point, in each period. Recorded since the blog began, so no new events are needed.
+const postPaths: Expr = all(
+  { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'FULL_REGEXP', value: '/blog/[a-z0-9][a-z0-9-]{0,199}/?' } } },
+  { notExpression: { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'FULL_REGEXP', value: '/blog/(page|tags)/?' } } } },
+);
+export function blogReadsSeriesRequest(sel: Selection): GaRequest {
+  return { dateRanges: ranges(sel), dimensions: [timeDim(sel)], metrics: [{ name: 'screenPageViews' }], dimensionFilter: postPaths, limit: 10000 };
+}
 // The blog's share buttons: the site sends share_click with the parameters network and post_slug, registered in GA as
 // event-scoped custom dimensions (Admin → Custom definitions); a property without them refuses this (400, 'setup').
 export const SHARE_EVENT = 'share_click';
@@ -290,6 +299,7 @@ export interface Series {
   sessions: Line;
   users: Line;
   plays: Line | null;            // null: GA couldn't answer; a point before PLAYS_SINCE is null (not counted then)
+  reads?: Line;                  // blog reads: the site view for Vault staff only (readReads), else absent
 }
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -324,26 +334,37 @@ function points(p: Period, unit: Selection['unit']): Point[] {
 
 // Reads the chart's two reports (trafficSeriesRequest, playSeriesRequest). today and hour: now, so the hours still to
 // come today are left empty.
-export function readSeries(traffic: GaResponse, plays: GaResponse | null, sel: Selection, today: string, hour: number): Series {
-  const values = (res: GaResponse) => {
-    const out = { current: new Map<string, Record<string, number>>(), previous: new Map<string, Record<string, number>>() };
-    for (const r of rowsOf(res)) {
-      const p = periodOf(r);
-      if (!p) continue;
-      const k = r.dims.dateHour ?? r.dims.yearMonth ?? r.dims.date ?? '';
-      const m = out[p].get(k) ?? {};
-      for (const [n, v] of Object.entries(r.mets)) m[n] = (m[n] ?? 0) + v;
-      out[p].set(k, m);
-    }
-    return out;
-  };
-  const t = values(traffic), pl = plays ? values(plays) : null;
+// A series report's metrics by period and point key (dateHour, date or yearMonth).
+function seriesValues(res: GaResponse) {
+  const out = { current: new Map<string, Record<string, number>>(), previous: new Map<string, Record<string, number>>() };
+  for (const r of rowsOf(res)) {
+    const p = periodOf(r);
+    if (!p) continue;
+    const k = r.dims.dateHour ?? r.dims.yearMonth ?? r.dims.date ?? '';
+    const m = out[p].get(k) ?? {};
+    for (const [n, v] of Object.entries(r.mets)) m[n] = (m[n] ?? 0) + v;
+    out[p].set(k, m);
+  }
+  return out;
+}
+// A line of the chart: each point's value (null for the hours still to come today), and the period before's.
+function seriesLine(sel: Selection, today: string, hour: number) {
   const cur = points(sel.current, sel.unit), prev = sel.compare ? points(sel.previous, sel.unit) : [];
   const later = (pt: Point) => pt.from > today || (pt.hour !== undefined && pt.from === today && pt.hour > hour);
   const line = (pick: (period: 'current' | 'previous', pt: Point) => number | null): Line => ({
     current: cur.map((pt) => (later(pt) ? null : pick('current', pt))),
     previous: sel.compare ? cur.map((_, i) => (prev[i] ? pick('previous', prev[i]) : null)) : null,
   });
+  return { cur, prev, line };
+}
+// Reads the chart's blog reads (blogReadsSeriesRequest): a point with none is 0.
+export function readReads(res: GaResponse, sel: Selection, today: string, hour: number): Line {
+  const v = seriesValues(res);
+  return seriesLine(sel, today, hour).line((period, pt) => v[period].get(pt.key)?.screenPageViews ?? 0);
+}
+export function readSeries(traffic: GaResponse, plays: GaResponse | null, sel: Selection, today: string, hour: number): Series {
+  const t = seriesValues(traffic), pl = plays ? seriesValues(plays) : null;
+  const { cur, prev, line } = seriesLine(sel, today, hour);
   return {
     unit: sel.unit, labels: cur.map((p) => p.label), tips: cur.map((p) => p.tip), prevTips: cur.map((_, i) => prev[i]?.tip ?? ''),
     sessions: line((period, pt) => t[period].get(pt.key)?.sessions ?? 0),

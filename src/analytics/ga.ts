@@ -4,9 +4,9 @@
 // AnalyticsError whose kind the pages explain: not connected, no access, a definition not registered yet, or other.
 import { googleTokenSource, NoCredentialsError, type TokenSource } from './google-auth.ts';
 import {
-  basicPlaysRequest, blogRequest, blogTotalsRequest, localNow, pagesRequest, playersRequest, playSeriesRequest, playsRequest, readBasicPlays, readBlog, readPages, readPairs, readPlaces,
-  readPlays, readSeries, readShares, readTopPages, realtimePlayersRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest,
-  selectionOf, sharesRequest, topPagesRequest, trafficRequest, trafficSeriesRequest, type BlogStats, type GamePages, type GaRequest, type GaResponse, type PageStats, type Pair,
+  averageSeconds, basicPlaysRequest, blogReadsSeriesRequest, blogRequest, blogTotalsRequest, localNow, pagesRequest, playersRequest, playSeriesRequest, playsRequest, readBasicPlays, readBlog, readPages, readPairs, readPlaces,
+  readPlays, readReads, readSeries, readShares, readTopPages, realtimePlayersRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest,
+  selectionOf, sharesRequest, topPagesRequest, trafficRequest, trafficSeriesRequest, type BlogStats, type GamePages, type GaRequest, type GaResponse, type Line, type PageStats, type Pair,
   type Place, type PlayStats, type Scope, type Selection, type Series, type ShareStats,
 } from './reports.ts';
 export { blogRequest, blogTotalsRequest, readBlog, readShares, sharesRequest, type BlogStats, type ShareStats } from './reports.ts';
@@ -80,14 +80,26 @@ const settle = <T>(p: Promise<T>): Promise<Result<T>> => p.then((value) => ({ ok
 }));
 
 export type Traffic = Record<'screenPageViews' | 'sessions' | 'totalUsers', Pair>;
+// The view's top row of figures (src/portal/analytics.ts draws it above the plot): the website's and the plays'
+// combined. Each is null when the view can't have it (a studio's or a game's: the website's and the blog's), when
+// there was none, or when Google Analytics didn't answer.
+export interface Headline {
+  uniqueUsers: number | null;          // the site's visitors (browsers) in the period
+  plays: number | null;
+  pagesPerUser: number | null;         // the site's page views, per visitor (null with no visitors)
+  blogReads: number | null;            // the site's blog posts opened
+  avgPlaytimeSeconds: number | null;   // per timed play; null with none
+}
 export interface Overview {
   sel: Selection;
-  series: Result<Series>;        // the chart: sessions, plays and users
+  series: Result<Series>;        // the chart: plays and users (sessions kept for its data, not drawn)
   traffic: Result<Traffic>;      // the view's page views, sessions and users in each period (the site: the website's figures)
   plays: Result<PlayStats>;
   players: Result<Pair>;
   pages: Result<PageStats> | null;          // a game's (or a studio's games') pages, when known
   topPages: Result<GamePages[]> | null;     // the site or a studio, when no game has plays (before the custom definitions)
+  reads: Result<Line> | null;               // the site's blog reads per point (the row's Blog Reads, the chart's line); null: a studio's or a game's
+  headline: Headline;                       // the top row's figures, for the range
 }
 // who: whose places these are: 'visitors' (everyone on the site, the site view) or 'players' (a game's or a studio's).
 export interface Realtime { places: Result<Place[]>; visitors: Result<number> | null; who: 'players' | 'visitors'; playing?: Result<number> }
@@ -148,20 +160,41 @@ export class Analytics {
     // The chart: without the plays line if only that report fails.
     const playLine = this.call('runReport', playSeriesRequest(sel, scope)).catch(() => null);
     const series = this.call('runReport', trafficSeriesRequest(sel, scope)).then(async (r) => readSeries(r, await playLine, sel, today, hour));
-    const [chart, traffic, playStats, players, pages, topPages] = await Promise.all([
+    // The site's blog reads per point: the row's Blog Reads and the chart's line. Site-wide, so a studio's or a
+    // game's view never asks for them.
+    const site = !scope.game && !scope.studio;
+    const reads = site ? settle(this.call('runReport', blogReadsSeriesRequest(sel)).then((r) => readReads(r, sel, today, hour))) : null;
+    const [chart, traffic, playStats, players, pages, topPages, readsRes] = await Promise.all([
       settle(series),
       settle(this.call('runReport', trafficRequest(sel, scope)).then((r) => readPairs(r, ['screenPageViews', 'sessions', 'totalUsers']) as Traffic)),
       settle(plays),
       settle(this.call('runReport', playersRequest(sel, scope)).then((r) => readPairs(r, ['totalUsers']).totalUsers)),
       (scope.game || scope.studio) && scope.pages?.length ? settle(this.call('runReport', pagesRequest(sel, scope.pages)).then(readPages)) : null,
       top,
+      reads,
     ]);
-    return { sel, series: chart, traffic, plays: playStats, players, pages, topPages };
+    const sum = (vals: (number | null)[] | null | undefined) => (vals ?? []).reduce<number>((t, v) => t + (v ?? 0), 0);
+    const t = traffic.ok ? traffic.value : null, ps = playStats.ok ? playStats.value : null;
+    return {
+      sel, series: chart, traffic, plays: playStats, players, pages, topPages, reads: readsRes,
+      headline: {
+        uniqueUsers: site && t ? t.totalUsers.current : null,
+        plays: ps ? ps.current.plays : null,
+        pagesPerUser: site && t && t.totalUsers.current > 0 ? t.screenPageViews.current / t.totalUsers.current : null,
+        blogReads: readsRes?.ok ? sum(readsRes.value.current) : null,
+        avgPlaytimeSeconds: ps ? averageSeconds(ps.current) : null,
+      },
+    };
   }
 
   // The blog: its opens, readers and time on screen in each period, and per post (Vault → Analytics only).
   async blog(sel: Selection): Promise<Result<BlogStats>> {
     return settle(Promise.all([this.call('runReport', blogRequest(sel)), this.call('runReport', blogTotalsRequest(sel))]).then(([p, t]) => readBlog(p, t)));
+  }
+  // The chart's blog reads (opens of a post) per point, in each period: site-wide, so the site view's only.
+  async blogReads(sel: Selection): Promise<Result<Line>> {
+    const { today, hour } = localNow(this.timeZone, this.now());
+    return settle(this.call('runReport', blogReadsSeriesRequest(sel)).then((r) => readReads(r, sel, today, hour)));
   }
   // The blog's share-button clicks (share_click), by post and network. Its own result: before the custom dimensions
   // network and post_slug are registered it fails ('setup') while the blog's other figures still show.

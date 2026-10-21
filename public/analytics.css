@@ -68,6 +68,8 @@
 .kpis.ga-k3 .kpi + .kpi { border-left: 1px solid var(--line) !important; }
 .kpis.ga-k3 .kpi .d { line-height: 1.35; }
 .ga-blog td.ga-shares span { display: block; font-size: 11px; white-space: nowrap; }
+/* The top lists' Total row: pinned above the rows (Load more appends below it), bold and set off by a stronger rule. */
+.analytics-total-row > td { font-weight: 700; border-bottom: 2px solid var(--line); }
 
 /* The top lists: the top games and the blog's top posts, side by side under the realtime card, which takes the row
    above at the full width. .grid (portal.css) gives display: grid and the card gap. */

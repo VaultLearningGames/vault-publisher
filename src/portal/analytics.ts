@@ -20,7 +20,7 @@ import { cityPoint } from '../analytics/cities.ts';
 import { COUNTRY_POINTS } from '../analytics/countries.ts';
 import { MAP_HEIGHT, MAP_WIDTH } from '../analytics/projection.ts';
 import { loadLegacy, pagePaths } from '../analytics/pages.ts';
-import { averageSeconds, longDate, minSec, perReader, PLAYS_SINCE, PRESETS, presetPeriods, SHARE_NETWORKS, spanLabel, type GamePages, type GamePlays, type NetworkCounts, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
+import { averageSeconds, longDate, minSec, perReader, PLAYS_SINCE, PRESETS, presetPeriods, SHARE_NETWORKS, spanLabel, topPagesTotals, type GamePages, type GamePlays, type NetworkCounts, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
 import { SiteBlogRepo } from '../blog/siteRepo.ts';
 import type { Studio, User } from '../db.ts';
 import { html, raw, type Html } from './html.ts';
@@ -260,6 +260,26 @@ export function topRow(g: TopGame, titleOf: (slug: string) => GameTitle): Html {
     ? html`<tr data-slug="${g.slug}">${name}<td class="r num">${num(g.views)}</td><td class="r num">${num(g.clicks)}</td></tr>`
     : html`<tr data-slug="${g.slug}">${name}<td class="r num">${num(g.plays)}</td><td class="r num">${duration(averageSeconds(g))}</td></tr>`;
 }
+// The top games' Total row's figures: summed over the whole ranked list (a Load more page, never). The plays' average
+// time is weighted by each game's timed plays (null when none are timed, shown as a dash); the views' columns are
+// plain sums. The scope's rows are the whole list's, so the total covers exactly what the table may show.
+export function topGamesTotals(tg: { by: 'plays' | 'views'; items: TopGame[] }):
+  { by: 'plays'; plays: number; avg: number | null } | { by: 'views'; views: number; clicks: number } {
+  if (tg.by === 'plays') {
+    const t = tg.items.reduce((s, g) => g.by === 'plays'
+      ? { plays: s.plays + g.plays, timedPlays: s.timedPlays + g.timedPlays, seconds: s.seconds + g.seconds }
+      : s, { plays: 0, timedPlays: 0, seconds: 0 });
+    return { by: 'plays', plays: t.plays, avg: averageSeconds(t) };
+  }
+  return { by: 'views', ...topPagesTotals(tg.items.filter((g): g is Extract<TopGame, { by: 'views' }> => g.by === 'views')) };
+}
+// The top games' Total row: pinned above the rows (Load more appends below it), the whole list's figures in the
+// columns' formats; no link, no rank, no thumbnail.
+export function topTotalRow(tot: { by: 'plays' | 'views'; plays?: number; avg?: number | null; views?: number; clicks?: number }): Html {
+  return tot.by === 'views'
+    ? html`<tr class="analytics-total-row"><td class="proj"><b>Total</b></td><td class="r num">${num(tot.views ?? 0)}</td><td class="r num">${num(tot.clicks ?? 0)}</td></tr>`
+    : html`<tr class="analytics-total-row"><td class="proj"><b>Total</b></td><td class="r num">${num(tot.plays ?? 0)}</td><td class="r num">${duration(tot.avg ?? null)}</td></tr>`;
+}
 // ?offset=&limit= of a Load more: whole numbers (limit kept to 1 to 100); anything else, the defaults (0 and a page).
 export function pageParams(offset: string | undefined, limit: string | undefined): { offset: number; limit: number } {
   const int = (v: string | undefined) => (v !== undefined && /^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
@@ -287,9 +307,13 @@ export function blogCard(stats: Result<BlogStats>, titles: Map<string, string>, 
     const by = s ? networkBreakdown(s.networks) : '';
     return html`<td class="r num ga-shares">${num(s?.total ?? 0)}${by ? html`<span class="small muted">${by}</span>` : ''}</td>`;
   };
+  // The pinned Total row: the whole range's figures (every post, not just the page shown) — opens and time on screen
+  // summed over the posts; readers a deduplicated total (the totals' query: readers can't be added up across posts);
+  // the average on screen, the whole's seconds per reader; the shares' total (dashes when the query failed).
+  const totalRow = html`<tr class="analytics-total-row"><td class="proj"><b>Total</b></td><td class="r num">${num(posts.reduce((s, p) => s + p.opens, 0))}</td><td class="r num">${num(stats.value.totals.readers.current)}</td><td class="r num">${minSec(perReader(posts.reduce((s, p) => s + p.seconds, 0), stats.value.totals.readers.current))}</td>${shares ? (sh ? html`<td class="r num">${num(sh.total.current)}</td>` : html`<td class="r num">—</td>`) : ''}</tr>`;
   const rows = posts.slice(0, BLOG_TOP).map((p) => html`<tr data-slug="${p.slug}"><td class="proj"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num">${num(p.opens)}</td><td class="r num">${num(p.readers)}</td><td class="r num">${minSec(perReader(p.seconds, p.readers))}</td>${shares ? shareCell(p.slug) : ''}</tr>`);
   return html`<div class="card ga-blog"><h2>Top Blog Articles</h2>${rows.length
-    ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${rows}</tbody></table></div>${posts.length > BLOG_TOP ? html`<p class="small muted">The ${BLOG_TOP} most opened of ${num(posts.length)}.</p>` : ''}`
+    ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${totalRow}${rows}</tbody></table></div>${posts.length > BLOG_TOP ? html`<p class="small muted">The ${BLOG_TOP} most opened of ${num(posts.length)}.</p>` : ''}`
     : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`;
 }
 
@@ -373,6 +397,8 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
 
   let top: Html | string = '';
   const tg = topGames(ov, o.scope);
+  // The pinned Total row: the whole ranked list's figures (a Load more page, never), above the rows.
+  const totalRow = tg ? topTotalRow(topGamesTotals(tg)) : '';
   const rows = tg ? tg.items.slice(0, TOP_PAGE).map((g) => topRow(g, o.titleOf)) : [];
   // More games than the first page: a Load more button, which asks topUrl for the next ones (analytics.js).
   const more = tg && o.topUrl && tg.items.length > TOP_PAGE
@@ -382,13 +408,13 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
     // No game has plays (yet): the games whose pages were viewed most.
     top = html`<div class="card ga-games"><h2>Top games <small>by page views, ${spanLabel(sel.current)}</small></h2>
       ${!tp.ok ? problem(tp.error, o.staff, 'the game pages')
-        : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Page views</th><th class="r" title="Outbound link clicks from the game’s page: the old site’s Play button linked out to the game">Play-button clicks</th></tr></thead><tbody>${rows}</tbody></table></div>${more}
+        : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Page views</th><th class="r" title="Outbound link clicks from the game’s page: the old site’s Play button linked out to the game">Play-button clicks</th></tr></thead><tbody>${totalRow}${rows}</tbody></table></div>${more}
           <p class="small muted">No plays by game yet${p && !p.timed ? ' (Google Analytics doesn’t know the custom dimension game_slug yet)' : ''}, so these are views of each game’s page. Play-button clicks: outbound clicks from the game’s page.</p>`
         : html`<p class="small muted">No views of game pages in this range.</p>`}</div>`;
   } else if (tg?.by === 'plays' && p) {
     top = html`<div class="card ga-games"><h2>Top games <small>by plays, ${spanLabel(sel.current)}</small></h2>
       ${!p.timed ? html`<p class="small muted">Games can be told apart once the custom dimension game_slug is registered in Google Analytics.</p>`
-        : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Plays</th><th class="r">Avg time</th></tr></thead><tbody>${rows}</tbody></table></div>${more}`
+        : rows.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Game</th><th class="r">Plays</th><th class="r">Avg time</th></tr></thead><tbody>${totalRow}${rows}</tbody></table></div>${more}`
         : html`<p class="small muted">No plays in this range yet.</p>`}</div>`;
   }
 
@@ -520,10 +546,13 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     } else if (!h.isStaff(u)) return c.text('Only Vault staff can see this.', 403);
     else cat = catalog();
     const { offset, limit } = pageParams(c.req.query('offset'), c.req.query('limit'));
-    const items = scope.studio && !scope.games!.length ? [] : topGames(await analytics.overview(analytics.selection(queryOf(c)), scope, cat), scope)?.items ?? [];
+    const tg = scope.studio && !scope.games!.length ? null : topGames(await analytics.overview(analytics.selection(queryOf(c)), scope, cat), scope);
+    const items = tg?.items ?? [];
     const page = items.slice(offset, offset + limit), ttl = titleOf(u, !scope.studio);
-    return c.json({ items: page.map((g) => ({ slug: g.slug, html: topRow(g, ttl).toString() })), offset, total: items.length, hasMore: offset + page.length < items.length },
-      200, { 'Cache-Control': 'no-store' });
+    // totals: the whole ranked list's figures (the page, never), for the table's Total row; additive, old clients
+    // ignore it.
+    return c.json({ items: page.map((g) => ({ slug: g.slug, html: topRow(g, ttl).toString() })), offset, total: items.length, hasMore: offset + page.length < items.length,
+      totals: tg ? topGamesTotals(tg) : null }, 200, { 'Cache-Control': 'no-store' });
   });
 
   return {

@@ -65,6 +65,12 @@ function fieldProblems(fields: Record<string, unknown>, draft: ListingFields): s
       if (JSON.stringify(draft[f]) !== JSON.stringify(v.map((x) => x.trim()))) out.push(`${k} has empty, repeated or over-long items, or too many of them.`);
       continue;
     }
+    // The hero layout's art: a link to the game's own upload (its address is checked by the save's own rules), or null.
+    if (f === 'hero_background' || f === 'logo_image') {
+      if (v !== null && typeof v !== 'string') out.push(`${k} must be a link to one of the game’s uploaded images, or null for none.`);
+      else if (typeof v === 'string' && v.trim().length > 500) out.push(`${k} is too long (${v.trim().length} characters; 500 would be kept).`);
+      continue;
+    }
     if (typeof v !== 'string') { out.push(`${k} must be a string.`); continue; }
     if (f === 'fit') continue;                                   // checked by the save's own rules
     if (f === 'cdn_path') { if (v.trim() && !draft.cdn_path) out.push('cdn_path must be plain folder names like "earthquake/".'); continue; }
@@ -203,7 +209,7 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
       const problems = fieldProblems(fields as Record<string, unknown>, draft);
       if (link && !link.id && (publish ? draft : l.published)?.play_source === 'cdn')
         problems.push('It plays from the Vault CDN; switch it back to its web address (play_source "url") to disconnect it.');
-      if (!problems.length) problems.push(...draftProblems(db, link ? { game_id: link.id } : l, draft, publish));
+      if (!problems.length) problems.push(...draftProblems(db, link ? { game_id: link.id, studio_slug: l.studio_slug, slug: l.slug } : l, draft, publish, deps.prodPublicUrl));
       const pending = changedFields(l.published, l.draft).filter((k) => !(k in (fields as object)));
       if (publish && body.publish_pending !== true && (!l.published || pending.length || l.review === 'submitted')) {
         problems.push(l.published

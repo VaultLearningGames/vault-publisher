@@ -18,6 +18,7 @@ import { compareByTestingStatus, deriveTestingStatus } from './testingStatus.ts'
 import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '../featured.ts';
 import type { PortalDeps } from './routes.ts';
 import { imageField, imageToolScript } from './listing-assets.ts';
+import { iconPicker, layoutIcon, PAGE_LAYOUTS, themeIcon, THEMES } from './listing-layout.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
 import { cdnRedirectNote, unpublishedWarning } from './unpublished-warning.ts';
 import { addMaker, createProposedStudios, makersField, proposedLine, pruneMakerProposals } from './listing-makers.ts';
@@ -159,6 +160,17 @@ export function listingPieces(h: ListingHelpers) {
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'thumb_image', label: 'Thumbnail', value: f.thumb_image, hint: 'A path on the site or an https link.' })}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'screenshots', label: 'Screenshots', value: f.screenshots, hint: 'One path or link per line, in the order the site shows them; delete a line to remove it.' })}
         ${edit && h.deps.production ? imageToolScript() : ''}
+      </div>
+      <h2 style="margin-top:18px">Page design</h2>
+      <div class="fields">
+        ${iconPicker({ name: 'page_layout', label: 'Page layout', value: f.page_layout, disabled: !edit,
+          hint: 'The site offers two: Standard (a cover image above the text) or Hero (a full-width background with the logo over it).',
+          options: PAGE_LAYOUTS.map((v) => ({ value: v, caption: v === 'hero' ? 'Hero' : 'Standard', icon: layoutIcon(v) })) })}
+        ${iconPicker({ name: 'theme', label: 'Colour theme', value: f.theme, disabled: !edit,
+          hint: 'The site offers two: Light or Dark.',
+          options: THEMES.map((v) => ({ value: v, caption: v === 'dark' ? 'Dark' : 'Light', icon: themeIcon(v) })) })}
+        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'hero_background', label: 'Hero background', value: f.hero_background ?? '', hint: 'For the Hero layout: a full-width background (21:9). When it is empty the site uses the hero image instead.' })}
+        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'logo_image', label: 'Logo art', value: f.logo_image ?? '', hint: 'For the Hero layout: the game’s logo, with transparency (any shape).' })}
       </div>
       <h2 style="margin-top:18px">Playing</h2>
       <div class="fields">
@@ -374,7 +386,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     // Studio saves go to Vault for review when the member can request publish (else they stay a draft); Vault staff
     // save and publish in one step.
     const wantsSubmit = !wantsPublish && P.canSubmit(u, s);
-    const bad = draftProblems(db, l, draft, wantsPublish || wantsSubmit);
+    const bad = draftProblems(db, l, draft, wantsPublish || wantsSubmit, h.deps.prodPublicUrl);
     if (bad.length) fail(400, bad.join(' '));
     // A name left in "Made by"’s "Add a new studio…" fields is added with the save (listing-makers.ts).
     if (typeof b.maker_new_name === 'string' && b.maker_new_name.trim()) {
@@ -409,10 +421,10 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const u = h.apiUser(c);
     if (!P.canPublish(u)) fail(403, 'Only Vault staff who can edit game/studio content can publish to the site.');
     const { l } = apiListing(c, u);
-    const bad = draftProblems(db, l, l.draft, true);
+    const bad = draftProblems(db, l, l.draft, true, h.deps.prodPublicUrl);
     if (bad.length) fail(400, bad.join(' '));
     createProposedStudios(db, h.actor(u), l.slug, l.draft.makers);
-    publishListing(db, l, h.actor(u));
+    publishListing(db, l, h.actor(u), h.deps.prodPublicUrl);
     return c.json({ ok: true });
   });
 

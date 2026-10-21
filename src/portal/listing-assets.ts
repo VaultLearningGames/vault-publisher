@@ -1,6 +1,6 @@
 // Uploading a site listing's images from its editor: every image field of image-fields.ts (the hero image, the
-// thumbnail, screenshots, and card B's hero background and logo art once the listing has them). The browser's image
-// tool (public/portal-image-tool.js) crops and compresses the image to the field's row first; the body is the result,
+// thumbnail, screenshots, the hero background and the logo art). The browser's image tool
+// (public/portal-image-tool.js) crops and compresses the image to the field's row first; the body is the result,
 // and it's refused unless it matches that row (type by content, width, shape and bytes: validateFieldImage). The file
 // goes to the Vault CDN at STUDIO/GAME/_vault-assets/KIND-HASH.EXT (assets.ts) straight away, and its public URL goes
 // into the listing's draft (the field, or appended to screenshots), so it reaches the site through the usual submit →
@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import type { Hono } from 'hono';
 import { fail } from '../app.ts';
 import { storeImage, type ImageCheck } from '../assets.ts';
-import { changedFields, normalize } from '../listings.ts';
+import { changedFields, EMPTY_LISTING, normalize } from '../listings.ts';
 import { html, type Html } from './html.ts';
 import { formatKB, IMAGE_FIELDS, imageFieldByKind, imageSpecJson, validateFieldImage, type ImageFieldKey, type ImageFieldSpec } from './image-fields.ts';
 import { listingPieces, type ListingHelpers } from './listings.ts';
@@ -45,8 +45,8 @@ export function registerListingAssetsApi(app: Hono, h: ListingHelpers) {
     if (!s || !l || l.studio_id !== s.id) fail(404, 'unknown listing');
     if (!P.canEdit(u, s)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can change site listings.');
     const target = imageFieldByKind(c.req.param('kind'));
-    // A registered field the listing doesn't have yet (card B's) can't be uploaded.
-    if (!target || !Object.hasOwn(l.draft, target.key)) fail(404, 'unknown image kind');
+    // A registered kind the listing model has no field for can't be uploaded (it would land nowhere).
+    if (!target || !Object.hasOwn(EMPTY_LISTING, target.key)) fail(404, 'unknown image kind');
     const field = target.key as keyof typeof l.draft;
     if (target.spec.multiple && (l.draft[field] as string[]).length >= 40) fail(400, `A listing can have at most 40 ${target.spec.label.toLowerCase()}s.`);
     const { url, bytes } = await storeImage(c.req.raw, h.deps, s.slug, l.slug, target.spec.kind, fieldCheck(target.spec));

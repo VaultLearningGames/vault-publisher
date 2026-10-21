@@ -2,8 +2,8 @@
 // at, the compression it starts at and how low it may go, and the most bytes it may have. The listing editor hands
 // each field's row to the browser's image tool (public/portal-image-tool.js: crop, then WebP, else JPEG, or PNG for
 // fields that keep transparency, compressed until it fits), and the upload API (listing-assets.ts) refuses any file
-// that doesn't match it. A new image field (card B's hero background and logo art) only adds a row; it can be
-// uploaded as soon as the listing has a field of that name.
+// that doesn't match it. A new image field only adds a row here; once the listing model has a field of its name
+// (EMPTY_LISTING), it can be uploaded (listing-assets.ts).
 //
 // The ratios: vault-site's templates draw each Squarespace image at its own ratio (--ratio in
 // themes/vault-squarespace/static/sq/css/vault-sq.css, from data/squarespace/games.json), and no hero, card or

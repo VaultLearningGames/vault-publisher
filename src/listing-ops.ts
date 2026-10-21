@@ -32,9 +32,10 @@ export function importFromExport(db: Db, pages: unknown, overrides: unknown, act
 // ---------- save, publish ----------
 export const cdnReady = (db: Db, l: { game_id: number | null }) => !!(l.game_id && db.currentRelease(l.game_id));
 
-// What stops this draft from being saved (or, with forPublish, from going on the site).
-export function draftProblems(db: Db, l: { game_id: number | null }, draft: ListingFields, forPublish: boolean): string[] {
-  return problems(draft, { forPublish, cdnReady: cdnReady(db, l) });
+// What stops this draft from being saved (or, with forPublish, from going on the site). With the listing's
+// address and the CDN's base (publicUrl), the page layout's art links are checked to be the listing's own uploads.
+export function draftProblems(db: Db, l: { game_id: number | null; studio_slug?: string; slug?: string }, draft: ListingFields, forPublish: boolean, publicUrl?: string): string[] {
+  return problems(draft, { forPublish, cdnReady: cdnReady(db, l), publicUrl, studio: l.studio_slug, slug: l.slug });
 }
 
 // Save a checked draft, then publish it (Vault), submit it for review (a studio) or leave it a draft.
@@ -51,8 +52,8 @@ export function saveListing(db: Db, l: ListingRow, draft: ListingFields, actor: 
 }
 
 // Publish the draft as it stands.
-export function publishListing(db: Db, l: ListingRow, actor: string) {
-  const bad = draftProblems(db, l, l.draft, true);
+export function publishListing(db: Db, l: ListingRow, actor: string, publicUrl?: string) {
+  const bad = draftProblems(db, l, l.draft, true, publicUrl);
   if (bad.length) fail(400, bad.join(' '));
   db.publishListing(l.id, actor);
   db.audit(actor, 'listing.publish', `${l.studio_slug}:${l.slug}`, { fields: changedFields(l.published, l.draft) });

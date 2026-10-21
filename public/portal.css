@@ -610,3 +610,22 @@ th.r .th-sort { text-align: right; }
 }
 .env-sync { flex-basis: 100%; font-size: 13px; }
 .env-sync-left { font-weight: 600; }
+
+/* ---------- page layout / colour theme pickers (card B) ---------- */
+/* Each choice is a picture of the result, picked with native radios: no JavaScript, arrow keys move the selection,
+   and the checked choice gets a visible outline. */
+.opt-pick { display: flex; gap: 10px; flex-wrap: wrap; }
+.opt-pick .opt { display: flex; align-items: center; gap: 9px; border: 1.5px solid var(--line); border-radius: 10px;
+  padding: 9px 12px; background: var(--surface); cursor: pointer; font-size: 13px; font-weight: 600; min-width: 106px; }
+.opt-pick .opt:has(input:checked) { border-color: var(--slate); background: var(--slate-soft); box-shadow: inset 0 0 0 1px var(--slate); }
+.opt-pick .opt:has(input:focus-visible) { outline: 2px solid var(--slate); outline-offset: 2px; }
+.opt-pick .opt:has(input:disabled) { cursor: default; color: var(--ink-3); }
+.opt-pick input[type=radio] { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.opt-icon { width: 36px; height: 28px; flex: none; }
+.opt-icon .opt-img { fill: var(--slate); opacity: .38; }
+.opt-icon .opt-lines rect { fill: var(--ink-2); opacity: .65; }
+.opt-icon .swatch { stroke: var(--line); }
+.opt-icon .swatch-light { fill: #FFFFFF; }
+.opt-icon .swatch-dark { fill: #161C23; }
+.opt-icon .bars-light rect { fill: #E6EAEE; }
+.opt-icon .bars-dark rect { fill: #17212B; }

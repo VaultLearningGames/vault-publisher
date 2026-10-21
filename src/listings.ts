@@ -4,6 +4,7 @@
 // A listing is hosted either at an HTML URL in Vault's in-page player (the first version of the site), or on the
 // Vault CDN: the current release of one of the studio's games at https://cdn.vaultlearninggames.org/STUDIO/GAME/.
 import { isSlug } from './paths.ts';
+import { DEFAULT_PAGE_LAYOUT, DEFAULT_THEME, effectivePageLayout, effectiveTheme, layoutAssetError, normalizeLayoutFields, validateLayoutFields } from './portal/listing-layout.ts';
 
 // "Grades 13+" is undergraduate and beyond (David, 2026-10-03; ThermoLab is the first).
 export const GRADES = ['Grades K-3', 'Grades 3-5', 'Grades 5-8', 'Grades 9-12', 'Grades 13+'] as const;
@@ -22,6 +23,14 @@ export interface ListingFields {
   hero_image: string;          // a path on the site ("games/agrinautica/img/hero.png") or an https URL
   thumb_image: string;
   screenshots: string[];
+  // Page design (card B): one of the two layouts and one of the two themes the site offers (portal/listing-layout.ts);
+  // problems() rejects anything else.
+  page_layout: string;   // 'standard' | 'hero'
+  theme: string;         // 'light' | 'dark'
+  // The hero layout's art, each a link to one of the listing's own uploaded images (card A's tool), or null for
+  // none — the site then falls back (hero_background to hero_image, the cover to thumb_image).
+  hero_background: string | null;
+  logo_image: string | null;
   play_source: 'url' | 'cdn';
   play_url: string;            // the game's HTML page; used when play_source is "url" (and as the fallback for "cdn")
   cdn_path: string;            // optional folder inside the linked CDN game, e.g. "earthquake/" for one game of The Yard
@@ -36,6 +45,7 @@ export interface ListingFields {
 export const EMPTY_LISTING: ListingFields = {
   title: '', short_description: '', about: '', makers: [], grades: [], subjects: [], topics: [], standards: [],
   related_curriculum: '', gameplay_video: '', hero_image: '', thumb_image: '', screenshots: [],
+  page_layout: DEFAULT_PAGE_LAYOUT, theme: DEFAULT_THEME, hero_background: null, logo_image: null,
   play_source: 'url', play_url: '', cdn_path: '', embed: true, fit: '', min_width: null, min_height: null,
 };
 
@@ -84,6 +94,8 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
   // the page (so a name can contain a comma, which the comma-separated text can't).
   const makerBoxes = Object.keys(input).filter((k) => k.startsWith('makers:'));
   const makers = makerBoxes.length ? list(makerBoxes.filter((k) => input[k] === true || input[k] === 'on').map((k) => k.slice(7)), false) : null;
+  // Page design (card B): defaults for empty values, unknown values kept for problems() to reject.
+  const layout = normalizeLayoutFields(input);
   return {
     title: pick('title', str(input.title, 200)),
     short_description: pick('short_description', str(input.short_description, 600)),
@@ -98,6 +110,10 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
     hero_image: pick('hero_image', str(input.hero_image, 500)),
     thumb_image: pick('thumb_image', str(input.thumb_image, 500)),
     screenshots: pick('screenshots', list(input.screenshots, false)),
+    page_layout: pick('page_layout', layout.page_layout),
+    theme: pick('theme', layout.theme),
+    hero_background: pick('hero_background', layout.hero_background),
+    logo_image: pick('logo_image', layout.logo_image),
     play_source: pick('play_source', input.play_source === 'cdn' ? 'cdn' : 'url'),
     play_url: pick('play_url', str(input.play_url, 1000)),
     cdn_path: pick('cdn_path', cleanPath(str(input.cdn_path, 200))),
@@ -110,7 +126,7 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
 
 // What stops a listing from being saved (hard errors) or published (also needs a title and a way to play).
 // cdnReady: the listing is linked to a CDN game that has a current release.
-export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady: boolean }): string[] {
+export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady: boolean; publicUrl?: string; studio?: string; slug?: string }): string[] {
   const out: string[] = [];
   if (f.play_url && !isHttpUrl(f.play_url)) out.push('The play URL must start with https:// (or http://).');
   if (f.gameplay_video && !isHttpUrl(f.gameplay_video)) out.push('The gameplay video must be a link.');
@@ -122,6 +138,13 @@ export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady
     if (!isMinSize(v)) out.push(`The minimum play ${name} must be a whole number of pixels from ${MIN_SIZE_RANGE.min} to ${MIN_SIZE_RANGE.max}, or empty for the site’s default.`);
   }
   for (const g of f.grades) if (!(GRADES as readonly string[]).includes(g)) out.push(`Unknown grade band “${g}”.`);
+  // The page's layout and theme (card B): always checked; the art links only when this listing's own address is
+  // known (the save, the publish and the preview all pass it).
+  const { publicUrl, studio, slug } = opts;
+  const asset = publicUrl && studio && slug
+    ? (field: 'hero_background' | 'logo_image', value: string) => layoutAssetError(field, value, { publicUrl, studio, game: slug })
+    : null;
+  for (const errs of Object.values(validateLayoutFields(f, asset))) for (const e of errs) out.push(e);
   if (f.play_source === 'cdn' && !opts.cdnReady) out.push('To be hosted on the Vault CDN, the game needs a CDN game with a current release.');
   if (opts.forPublish) {
     if (!f.title) out.push('Add a title.');
@@ -134,15 +157,23 @@ export function isListingSlug(v: unknown): v is string {
   return isSlug(v);
 }
 
-// Field-by-field differences, for "what will change on the site".
+// Field-by-field differences, for "what will change on the site". The layout and theme compare after
+// normalization, so a stored empty (or absent) value is equal to the default it stands for.
 export function changedFields(a: ListingFields | null, b: ListingFields): (keyof ListingFields)[] {
-  return (Object.keys(EMPTY_LISTING) as (keyof ListingFields)[]).filter((k) => JSON.stringify(a?.[k] ?? EMPTY_LISTING[k]) !== JSON.stringify(b[k] ?? EMPTY_LISTING[k]));
+  return (Object.keys(EMPTY_LISTING) as (keyof ListingFields)[]).filter((k) => {
+    const av = a?.[k] ?? EMPTY_LISTING[k];
+    const bv = b[k] ?? EMPTY_LISTING[k];
+    if (k === 'page_layout') return effectivePageLayout(av) !== effectivePageLayout(bv);
+    if (k === 'theme') return effectiveTheme(av) !== effectiveTheme(bv);
+    return JSON.stringify(av) !== JSON.stringify(bv);
+  });
 }
 
 export const FIELD_LABEL: Record<keyof ListingFields, string> = {
   title: 'Title', short_description: 'Short description', about: 'About this game', makers: 'Made by', grades: 'Grades',
   subjects: 'Subjects', topics: 'Topics', standards: 'Standards', related_curriculum: 'Related curriculum',
   gameplay_video: 'Gameplay video', hero_image: 'Hero image', thumb_image: 'Thumbnail', screenshots: 'Screenshots',
+  page_layout: 'Page layout', theme: 'Colour theme', hero_background: 'Hero background', logo_image: 'Logo art',
   play_source: 'Hosted by', play_url: 'Play URL', cdn_path: 'CDN folder', embed: 'Opens in', fit: 'Player fit',
   min_width: 'Minimum play width', min_height: 'Minimum play height',
 };
@@ -166,6 +197,12 @@ export function catalogEntry(
     related_curriculum: f.related_curriculum,
     gameplay_video: f.gameplay_video,
     hero_image: f.hero_image, thumb_image: f.thumb_image, screenshots: f.screenshots,
+    // The page design (card B): the two layouts and two themes the site renders, plus the hero layout's art
+    // (null: the site falls back to hero_image / thumb_image).
+    page_layout: effectivePageLayout(f.page_layout),
+    theme: effectiveTheme(f.theme),
+    hero_background: f.hero_background ?? null,
+    logo_image: f.logo_image ?? null,
     play: {
       url: fromCdn ? cdn.url + f.cdn_path : f.play_url,
       source: fromCdn ? 'cdn' : 'url',

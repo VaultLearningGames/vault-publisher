@@ -4,11 +4,10 @@
 // a date range picked the way Google Analytics' picker does it (presets, a custom range, compare with the period
 // before), a top row of figures — the site's: unique users, plays, pages per user, blog reads and average play time;
 // a studio's or a game's: plays and average play time — above a chart of plays and users (and for the site, blog
-// reads), a realtime map of where people are playing, top games (site and studio), and for the site the blog's
-// figures and top posts. A game's (a studio's) sessions and users are visits that showed its page or started one of
-// its plays.
-// The site view also has the blog (Vault staff only): opens, readers and average time on screen, share-button clicks
-// (by network), and the top posts.
+// reads), a realtime map of where people are playing, top games (site and studio), and for the site the blog's top
+// posts. A game's (a studio's) sessions and users are visits that showed its page or started one of its plays.
+// The site view's top posts are the blog's (Vault staff only): each post's opens, readers, average time on screen
+// and its share clicks (by network).
 // The play events began on PLAYS_SINCE: before it there are no plays (the page says so), but sessions, users, page
 // views and outbound clicks of the game pages go back through the Squarespace years (the same addresses): the top
 // games fall back to page views when there are no plays.
@@ -169,7 +168,8 @@ const firstError = (...rs: (Result<unknown> | null)[]) => rs.find((r): r is { ok
 // studio's Analytics page.
 export interface GameTitle { title: string; href: string | null; studio?: { name: string; href: string } }
 // topUrl: where Load more asks for the next top games (the view's scope and range); none, no button.
-// blog: the site view's Blog section (Vault staff only), with each post's title by slug and its share clicks.
+// blog: the site view's blog (Vault staff only): its stats (the top posts' table comes from them), each post's
+// title by slug and its share clicks.
 interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; topUrl?: string; assets: Assets; titleOf(slug: string): GameTitle
   readsError?: AnalyticsError | null;   // the site view's blog reads couldn't be read (the chart draws without them)
   blog?: { stats: Result<BlogStats>; titles: Map<string, string>; shares?: Result<ShareStats> | null } | null }
@@ -268,23 +268,19 @@ export function pageParams(offset: string | undefined, limit: string | undefined
 }
 
 // ---------- the blog ----------
-// The posts shown in the Blog section's table.
+// The posts shown in the top posts' table.
 export const BLOG_TOP = 20;
 // A post's name in the table: the blog's home, its title (from the posts in vault-site), else its path.
 export const blogTitle = (slug: string, path: string, titles: Map<string, string>) => (slug === '' ? 'Blog home' : titles.get(slug) || path);
 // A post's (or the blog's) share clicks by network, e.g. "LinkedIn 3 · WhatsApp 1": the networks with clicks only.
 export const networkBreakdown = (n: NetworkCounts): string => SHARE_NETWORKS.filter(([k]) => n[k] > 0).map(([k, name]) => `${name} ${num(n[k])}`).join(' · ');
-// The Blog section of the site view: opens, readers and average time on screen (m:ss), share clicks (the total, and by
-// network), and the top posts by opens with their shares. Two parts: stats (the heading and the figures, which stay
-// with the site’s own) and card (the top posts, which the view sets next to the top games, under the full-width map).
-// shares: null, not asked for (no Shares figures); failed, the usual notice under the figures, and dashes in the table.
-export function blogSection(stats: Result<BlogStats>, sel: Selection, staff: boolean, titles: Map<string, string>, shares: Result<ShareStats> | null = null): { stats: Html; card: Html | string } {
-  const head = html`<h3 class="sec">Blog <small class="muted small">${spanLabel(sel.current)}</small></h3>`;
-  if (!stats.ok) return { stats: html`${head}${problem(stats.error, staff, 'the blog')}`, card: '' };
-  const { totals: t, posts } = stats.value;
+// The blog's top posts (the site view, Vault staff only), by opens, with each's share clicks: the card the view sets
+// next to the top games, under the full-width map. stats: the same range's blog figures (the table's posts come from
+// them); failed, no table. shares: null, not asked for (no Shares column); failed, dashes in it.
+export function blogCard(stats: Result<BlogStats>, titles: Map<string, string>, shares: Result<ShareStats> | null = null): Html | string {
+  if (!stats.ok) return '';
+  const { posts } = stats.value;
   const sh = shares?.ok ? shares.value : null;
-  const avg = (p: 'current' | 'previous') => perReader(t.seconds[p], t.readers[p]);
-  const k = (label: string, v: Pair, title: string) => kpi(label, num(v.current), delta(v.current, v.previous, sel), title);
   const shareCell = (slug: string) => {
     if (!sh) return html`<td class="r num">—</td>`;
     const s = slug ? sh.posts.get(slug) : undefined;
@@ -292,16 +288,9 @@ export function blogSection(stats: Result<BlogStats>, sel: Selection, staff: boo
     return html`<td class="r num ga-shares">${num(s?.total ?? 0)}${by ? html`<span class="small muted">${by}</span>` : ''}</td>`;
   };
   const rows = posts.slice(0, BLOG_TOP).map((p) => html`<tr data-slug="${p.slug}"><td class="proj"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num">${num(p.opens)}</td><td class="r num">${num(p.readers)}</td><td class="r num">${minSec(perReader(p.seconds, p.readers))}</td>${shares ? shareCell(p.slug) : ''}</tr>`);
-  // Share clicks: the total and each network's, compared with the period before like the other figures.
-  const shareKpis = sh ? html`<div class="kpis ga-k3 ga-share-k">${k('Shares', sh.total, 'Clicks on the posts’ share buttons, every network')}${SHARE_NETWORKS.map(([key, name]) => k(name, sh.networks[key], `Clicks on the ${name} share button`))}</div>` : '';
-  return {
-    stats: html`${head}
-      <div class="kpis ga-k3">${k('Opens', t.opens, 'Blog pages shown: the blog’s home and its posts')}${k('Readers', t.readers, 'People (browsers) who opened the blog')}${kpi('Average time on screen', minSec(avg('current')), delta(avg('current'), avg('previous'), sel), 'Time the blog was on screen (Google Analytics engagement time), per reader')}</div>
-      ${shareKpis}${shares && !shares.ok ? problem(shares.error, staff, 'share clicks can’t be counted', 'the share buttons’ custom definitions (network, post_slug)') : ''}`,
-    card: html`<div class="card ga-blog"><h2>Top Blog Articles</h2>${rows.length
-      ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${rows}</tbody></table></div>${posts.length > BLOG_TOP ? html`<p class="small muted">The ${BLOG_TOP} most opened of ${num(posts.length)}.</p>` : ''}`
-      : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`,
-  };
+  return html`<div class="card ga-blog"><h2>Top Blog Articles</h2>${rows.length
+    ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${rows}</tbody></table></div>${posts.length > BLOG_TOP ? html`<p class="small muted">The ${BLOG_TOP} most opened of ${num(posts.length)}.</p>` : ''}`
+    : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`;
 }
 
 export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
@@ -376,8 +365,8 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
       ${!ov.pages.ok ? problem(ov.pages.error, o.staff, its) : ''}`;
   }
 
-  // The blog's: its figures stay with the site's, its top posts go in the top lists below.
-  const blog = kind === 'site' && o.blog && o.staff ? blogSection(o.blog.stats, sel, o.staff, o.blog.titles, o.blog.shares ?? null) : null;
+  // The blog's top posts (the site view, Vault staff only), in the top lists below.
+  const blog = kind === 'site' && o.blog && o.staff ? blogCard(o.blog.stats, o.blog.titles, o.blog.shares ?? null) : '';
 
   const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">${kind === 'site' ? 'On the site now' : 'Playing now'}</span><small>last 30 minutes · updates every minute</small></h2>
     <div data-realtime="${o.realtimeUrl}">${realtimeBody(rt, { staff: o.staff, land: o.assets.land, game: !!o.scope.game })}</div></div>`;
@@ -405,10 +394,10 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
 
   // The map's card takes the full width on its own row; then the top lists: the top games and the blog's top posts,
   // side by side (one of them only, the other spans the row).
-  const lists = top || blog?.card ? html`<div class="grid analytics-top-lists">${top}${blog?.card ?? ''}</div>` : '';
+  const lists = top || blog ? html`<div class="grid analytics-top-lists">${top}${blog}</div>` : '';
 
   return html`${assets}<div class="ga">${picker}${headline}${chartCard}${page}
-    ${realtime}${lists}${blog ? blog.stats : ''}
+    ${realtime}${lists}
     <p class="small muted ga-foot">From Google Analytics (the site’s visits and ${p && !p.timed ? 'play counts' : 'play events'}, which began on ${longDate(PLAYS_SINCE)}; days are ${o.timeZone.replace(/_/g, ' ')} days, weeks start on Sunday). Figures are cached for up to 10 minutes; the realtime map for a minute.</p></div>`;
 }
 

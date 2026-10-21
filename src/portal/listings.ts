@@ -19,7 +19,7 @@ import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '..
 import type { PortalDeps } from './routes.ts';
 import { imageField } from './listing-assets.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
-import { unpublishedWarning } from './unpublished-warning.ts';
+import { cdnRedirectNote, unpublishedWarning } from './unpublished-warning.ts';
 import { addMaker, createProposedStudios, makersField, proposedLine, pruneMakerProposals } from './listing-makers.ts';
 
 // "Smallest screen" (min_width × min_height): editable by Vault, shown read-only to the studio. Empty: the site default.
@@ -104,7 +104,7 @@ export function listingPieces(h: ListingHelpers) {
     let status: Html, next: Html | string = '';
     if (!l) status = html`<p>${pill('off', 'Not on the site')} This CDN game isn’t shown on vaultlearninggames.org yet.</p>`;
     else if (onCdn) {
-      status = html`<p>${pill('brass', 'Vault CDN')} Classrooms play release <b class="mono">${cur!.version}</b> from <a class="mono" href="${cdnUrl(s, g!)}${pub!.cdn_path}" target="_blank" rel="noopener">${cdnUrl(s, g!)}${pub!.cdn_path}</a>.</p>`;
+      status = html`<p>${pill('brass', 'Vault CDN')} Classrooms play release <b class="mono">${cur!.version}</b> from <a class="mono" href="${cdnUrl(s, g!)}${pub!.cdn_path}" target="_blank" rel="noopener">${cdnUrl(s, g!)}${pub!.cdn_path}</a>.<br>${cdnRedirectNote()}</p>`;
       next = action('url', 'Switch back to the web address', `Play ${f!.title || l.slug} from ${pub!.play_url || 'its web address'} again?`);
     } else {
       status = html`<p>${pill('off', 'Web address')} Classrooms play ${pub?.play_url ? html`<a class="mono" href="${pub.play_url}" target="_blank" rel="noopener">${pub.play_url}</a>` : html`<span class="muted">nothing yet (not published)</span>`} in Vault’s player.</p>`;

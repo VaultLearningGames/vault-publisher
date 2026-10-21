@@ -3,8 +3,10 @@
 .ga-head h2 { font: inherit; font-size: 14px; margin: 0; }
 .ga-tot { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* The date range picker: a button, and a panel like Google Analytics' (presets on the left, dates and Compare). */
-.ga-dates { position: relative; font-weight: 400; }
+/* The date range picker: a button, and a panel like Google Analytics' (presets on the left, dates and Compare).
+   At the top of the view, right above the metrics row: it takes the row's width, with a small gap above the tiles.
+   The panel opens below it, its right edge aligned with the row. */
+.ga-dates { position: relative; font-weight: 400; margin-bottom: 12px; }
 .ga-dates > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
   padding: 6px 30px 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 13px; position: relative; }
 .ga-dates > summary::-webkit-details-marker { display: none; }

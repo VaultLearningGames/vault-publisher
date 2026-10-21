@@ -176,8 +176,9 @@ interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: strin
 interface Assets { css: string; js: string; land: string }
 
 // The date range picker, laid out like Google Analytics': a button showing the range, which opens the presets (in GA's
-// order), a custom start and end, and Compare. It is a plain GET form, so it works without the page's script, which
-// fills in a preset's dates when one is picked and picks Custom when the dates are edited (analytics.js).
+// order), a custom start and end, and Compare. It sits at the top of the view, right above the metrics row. It is a
+// plain GET form, so it works without the page's script, which fills in a preset's dates when one is picked and picks
+// Custom when the dates are edited (analytics.js).
 export function datePicker(base: string, sel: Selection): Html {
   const [path, query = ''] = base.split('?');
   const keep = [...new URLSearchParams(query)].filter(([k]) => !['range', 'start', 'end', 'compare'].includes(k));
@@ -333,7 +334,7 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   })}${sel.compare ? html`<div class="ga-lk ga-lprev small"><span class="k prev"></span>${sel.vs[0].toUpperCase()}${sel.vs.slice(1)}</div>` : ''}</div>`;
   const s = ov.series;
   const chartCard = html`<div class="card ga-top">
-    <div class="card-h ga-head"><h2>${chartTitle({ reads })}</h2>${picker}</div>
+    <div class="card-h ga-head"><h2>${chartTitle({ reads })}</h2></div>
     ${playsNote(sel)}
     ${legend}
     ${s.ok ? html`${chart(s.value, sel)}${s.value.plays ? '' : problem(new AnalyticsError('failed', 'the plays line'), o.staff, 'the chart’s plays')}` : problem(s.error, o.staff, 'the chart')}
@@ -342,7 +343,8 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
     ${!ov.traffic.ok ? problem(ov.traffic.error, o.staff, 'the users') : ''}
   </div>`;
 
-  // The headline row: the website's and the plays' figures combined, at the very top of the view (above the plot).
+  // The headline row: the website's and the plays' figures combined, at the very top of the view under the date
+  // picker (above the plot).
   // The site's view has the five; a studio's or a game's — which never had the website's or the blog's figures — has
   // its plays' two.
   const p = ov.plays.ok ? ov.plays.value : null;
@@ -405,7 +407,7 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   // side by side (one of them only, the other spans the row).
   const lists = top || blog?.card ? html`<div class="grid analytics-top-lists">${top}${blog?.card ?? ''}</div>` : '';
 
-  return html`${assets}<div class="ga">${headline}${chartCard}${page}
+  return html`${assets}<div class="ga">${picker}${headline}${chartCard}${page}
     ${realtime}${lists}${blog ? blog.stats : ''}
     <p class="small muted ga-foot">From Google Analytics (the site’s visits and ${p && !p.timed ? 'play counts' : 'play events'}, which began on ${longDate(PLAYS_SINCE)}; days are ${o.timeZone.replace(/_/g, ' ')} days, weeks start on Sunday). Figures are cached for up to 10 minutes; the realtime map for a minute.</p></div>`;
 }

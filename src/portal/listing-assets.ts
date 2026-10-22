@@ -15,6 +15,7 @@ import { changedFields, EMPTY_LISTING, inheritedListing, normalize } from '../li
 import { html, type Html } from './html.ts';
 import { formatKB, IMAGE_FIELDS, imageFieldByKind, imageSpecJson, validateFieldImage, type ImageFieldKey, type ImageFieldSpec } from './image-fields.ts';
 import { listingPieces, type ListingHelpers } from './listings.ts';
+import type { CropSpec } from './listing-fields.ts';
 
 const toolJs = readFileSync(fileURLToPath(new URL('../../public/portal-image-tool.js', import.meta.url)));
 const toolSrc = `/assets/portal-image-tool.js?v=${createHash('sha256').update(toolJs).digest('hex').slice(0, 10)}`;
@@ -66,7 +67,14 @@ export const imageToolScript = (): Html => html`<script type="module" src="${too
 // file picker that opens the image tool (portal-image-tool.js) with the field's row of image-fields.ts; the tool crops,
 // compresses and uploads, and puts the new URL into the field, so unsaved edits elsewhere in the form are kept. The
 // picker has no name, so saving the form doesn't send it.
-export function imageField(o: { api: string; name: ImageFieldKey; label: string; hint: string; value: string | string[]; edit: boolean; canUpload: boolean }): Html {
+// The shape a field's crop needs, drawn at that shape next to its label (a checkerboard for transparent art), with the
+// ratio under it; the why is in the field's hint (listing-fields.ts).
+export function cropShape(c: CropSpec): Html {
+  const shape = c.ratio ? `--crop:${c.ratio.replace(':', '/')}` : '--crop:1/1';
+  return html`<span class="crop" title="${c.label}: ${c.why}"><span class="crop-box${c.transparent ? ' crop-alpha' : ''}" style="${shape}" aria-hidden="true"></span><span class="crop-cap">${c.label}</span></span>`;
+}
+
+export function imageField(o: { api: string; name: ImageFieldKey; label: string; hint: string; value: string | string[]; edit: boolean; canUpload: boolean; crop?: CropSpec | null }): Html {
   const spec = IMAGE_FIELDS[o.name];
   const many = Array.isArray(o.value);
   const values = many ? o.value as string[] : [o.value as string].filter(Boolean);
@@ -81,6 +89,7 @@ export function imageField(o: { api: string; name: ImageFieldKey; label: string;
     : html`<span class="small muted">Uploads need the Vault CDN storage, which isn’t configured here.</span>`;
   const shape = spec.aspect ? `cropped to ${spec.aspect.w}:${spec.aspect.h}` : 'any shape, transparency kept';
   const limit = `${shape}, at most ${spec.maxWidth} px wide and ${formatKB(spec.maxBytes)}, as WebP`;
-  return html`<div class="field${many ? ' full' : ''}"><label class="lab" for="f-${o.name}">${o.label}</label>${input}
+  const lab = o.crop ? html`<span class="lab-row"><label class="lab" for="f-${o.name}">${o.label}</label>${cropShape(o.crop)}</span>` : html`<label class="lab" for="f-${o.name}">${o.label}</label>`;
+  return html`<div class="field${many ? ' full' : ''}">${lab}${input}
     <div class="img-row">${prev}${up}</div><span class="hint">${o.hint}${o.edit && o.canUpload ? ` Or upload one (${limit}): you crop it, it’s compressed in your browser, and it’s saved to the draft straight away.` : ''}</span></div>`;
 }

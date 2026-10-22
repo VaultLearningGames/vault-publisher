@@ -16,6 +16,8 @@ import { inheritedListing, normalize, problems, VAULT_ONLY, type ListingFields }
 import type { PreviewSite } from '../config.ts';
 import { html, type Html } from './html.ts';
 import { listingPieces, type ListingHelpers, type ListingRow } from './listings.ts';
+import { effectivePageLayout, type PageLayout, type Theme } from './listing-layout.ts';
+import { deriveTheme } from './listing-theme.ts';
 import { EXPIRED, NOT_FOUND, PREVIEW_HEADERS, TOKEN_RE, UNAVAILABLE } from './site-preview.ts';
 
 export const PREVIEW_TTL_MS = 30 * 60 * 1000;
@@ -84,7 +86,8 @@ export function registerListingPreview(app: Hono, h: ListingHelpers, store = new
     const published = db.listings({ published: true });
     const studios = catalogStudios([...published, l], db.studios(), [...published.map((x) => x.published!), draft]);
     const { token, expires } = store.put({ version: 1, game, studios });
-    return c.json({ ok: true, token, expires_at: new Date(expires).toISOString(), urls: sites.map((site) => ({ label: site.label, url: `${site.url}/_preview/${token}/` })) });
+    // layout: what fills each part of the chosen layout (the editor's live preview says it under the frame).
+    return c.json({ ok: true, token, expires_at: new Date(expires).toISOString(), urls: sites.map((site) => ({ label: site.label, url: `${site.url}/_preview/${token}/` })), layout: layoutSlots(draft) });
   });
 
   // The preview as a page. Always no-store, noindex and sandboxed (PREVIEW_HEADERS), whatever the answer.
@@ -129,6 +132,62 @@ export function wantsJson(accept: string | undefined): boolean {
 export function saveControls(canPublish: boolean, l: ListingRow, canSubmit = true): Html {
   if (canPublish) return html`<input type="hidden" name="publish" value="1"><button class="btn pri">Save and Publish Changes</button>`;
   return canSubmit ? html`<button class="btn pri">Save and Submit for Review</button>` : html`<button class="btn pri">Save draft</button>`;
+}
+
+// ---------- The live layout preview (card H) ----------
+// The page design section shows the chosen layout with this game's own art, before saving. It is the Preview
+// button's page (the site's own templates, built by Hugo: site-preview.ts), framed small: the editor posts the form
+// to the same preview endpoint whenever the layout, the title or one of the layout's images changes, and frames the
+// first preview site's page (portal.js). Under it, layoutSlots says in words what fills each part of the layout.
+
+// The form fields that change what the preview shows (portal.js rebuilds it when one of them changes).
+export const LAYOUT_PREVIEW_FIELDS = ['page_layout', 'title', 'hero_image', 'hero_background', 'logo_image'] as const;
+
+export interface LayoutSlot {
+  slot: 'cover' | 'background' | 'logo';
+  // The field whose image fills it, or null when nothing does.
+  source: 'hero_image' | 'hero_background' | 'logo_image' | null;
+  src: string | null;
+  note: string;
+}
+export interface LayoutPlan { layout: PageLayout; theme: Theme; slots: LayoutSlot[] }
+
+// What fills each part of the chosen layout, with the site's fallbacks (vault-site games/single.html): Standard is a
+// light page with the hero image as the cover beside the title; Hero is a dark page whose background is the hero
+// background, else the hero image, with the logo art over it, else the title as text. (A game with an old
+// Squarespace page can still show that page's art where these are empty; the framed preview shows exactly what.)
+export function layoutSlots(f: Pick<ListingFields, 'page_layout' | 'hero_image' | 'hero_background' | 'logo_image'>): LayoutPlan {
+  const layout: PageLayout = effectivePageLayout(f.page_layout) === 'hero' ? 'hero' : 'standard';
+  const theme = deriveTheme(layout);
+  const img = (v: string | null | undefined) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  if (layout === 'standard') {
+    const cover = img(f.hero_image);
+    return { layout, theme, slots: [cover
+      ? { slot: 'cover', source: 'hero_image', src: cover, note: 'Cover: your hero image, beside the title.' }
+      : { slot: 'cover', source: null, src: null, note: 'No cover yet: add a hero image to show one beside the title.' }] };
+  }
+  const bg = img(f.hero_background), hero = img(f.hero_image), logo = img(f.logo_image);
+  return { layout, theme, slots: [
+    bg ? { slot: 'background', source: 'hero_background', src: bg, note: 'Background: your hero background.' }
+      : hero ? { slot: 'background', source: 'hero_image', src: hero, note: 'Background: your hero image (there’s no hero background yet).' }
+      : { slot: 'background', source: null, src: null, note: 'No background yet: add a hero background (or a hero image).' },
+    logo ? { slot: 'logo', source: 'logo_image', src: logo, note: 'Over it: your logo art.' }
+      : { slot: 'logo', source: null, src: null, note: 'No logo art: the title shows as text.' },
+  ] };
+}
+
+// The preview's frame in the editor. With no preview sites (nothing can build the page here) it says so instead.
+export function layoutPreview(api: string, sites: PreviewSite[] = [], f: ListingFields): Html {
+  const plan = layoutSlots(f);
+  const notes = html`<span data-lp-slots>${plan.slots.map((s) => s.note).join(' ')}</span>`;
+  if (!sites.length) return html`<div class="field full layout-preview off"><span class="lab">Your page in this layout</span>
+    <span class="hint">A live preview needs a preview site, which isn’t configured here. ${notes}</span></div>`;
+  return html`<figure class="field full layout-preview" data-layout-preview="${api}/preview" data-site="0" data-watch="${LAYOUT_PREVIEW_FIELDS.join(' ')}">
+    <span class="lab">Your page in this layout <a class="small" data-lp-open href="#" target="_blank" rel="noopener" hidden>Open it full size ↗</a></span>
+    <div class="lp-frame"><iframe title="${f.title || 'This game'}’s page in the chosen layout (preview)" sandbox="allow-scripts" referrerpolicy="no-referrer" tabindex="-1"></iframe>
+      <span class="lp-status" data-lp-status role="status" aria-live="polite">The preview appears here.</span></div>
+    <figcaption class="hint">This game’s page as the site draws it, with the edits on this form; it updates when you change the layout, the title or an image here. Nothing is saved. ${notes}</figcaption>
+  </figure>`;
 }
 
 // Preview buttons: the first site is "Preview", the others "Preview (Label)". None without preview sites.

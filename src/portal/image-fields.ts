@@ -57,7 +57,8 @@ export function imageFieldByKind(kind: string): { key: ImageFieldKey; spec: Imag
 export const ACCEPTED_TYPES: Record<ImageFieldSpec['format'], ImageHeader['type'][]> = { opaque: ['webp', 'jpeg'], alpha: ['webp', 'png'] };
 
 export const formatKB = (n: number) => `${Math.round(n / 1000)} KB`;
-const ratio = (a: { w: number; h: number }) => `${a.w}:${a.h}`;
+// "16:9": a crop's shape as people say it (the editor's crop hints, listing-fields.ts, and the upload errors).
+export const ratio = (a: { w: number; h: number }) => `${a.w}:${a.h}`;
 
 // Whether `body` may be stored for the field: its type (by content), pixel size, shape and byte size. The height may be
 // a pixel off the exact ratio (the tool rounds it).

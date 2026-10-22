@@ -288,6 +288,61 @@
     }
   });
 
+  // The listing editor's live layout preview ([data-layout-preview], listing-preview.ts): the Preview button's page,
+  // framed small in the page design section. It's built when the section first scrolls into view, and again shortly
+  // after one of the fields in data-watch changes (the layout picker, the title, an image: a text field counts when it
+  // is left, so typing doesn't start a build per letter). Only the newest answer is shown. The frame is drawn at
+  // desktop width and scaled to fit.
+  document.querySelectorAll('[data-layout-preview]').forEach((fig) => {
+    const form = fig.closest('form');
+    const frame = fig.querySelector('iframe');
+    const box = fig.querySelector('.lp-frame');
+    const status = fig.querySelector('[data-lp-status]');
+    const slots = fig.querySelector('[data-lp-slots]');
+    const open = fig.querySelector('[data-lp-open]');
+    const watched = new Set((fig.dataset.watch || '').split(' ').filter(Boolean));
+    let seq = 0, timer = 0, started = false;
+    const say = (msg) => { status.textContent = msg; status.hidden = !msg; };
+    const fit = () => box.style.setProperty('--lp-scale', String(box.clientWidth / 1280 || 0.5));
+    fit();
+    if (window.ResizeObserver) new ResizeObserver(fit).observe(box);
+    frame.addEventListener('load', () => { if (frame.getAttribute('src')) { say(''); fig.removeAttribute('aria-busy'); } });
+    async function build() {
+      const mine = ++seq;
+      started = true;
+      fig.setAttribute('aria-busy', 'true');
+      say('Drawing your page in this layout…');
+      try {
+        const res = await fetch(fig.dataset.layoutPreview, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'vault-portal' },
+          body: JSON.stringify(formJson(form)),
+          credentials: 'same-origin',
+        });
+        const body = await res.json().catch(() => ({}));
+        if (mine !== seq) return;
+        if (!res.ok) throw new Error(body.error || `Something went wrong (HTTP ${res.status}).`);
+        const url = body.urls[Number(fig.dataset.site) || 0].url;
+        if (body.layout && slots) slots.textContent = body.layout.slots.map((s) => s.note).join(' ');
+        frame.src = url;
+        open.href = url;
+        open.hidden = false;
+      } catch (ex) {
+        if (mine !== seq) return;
+        fig.removeAttribute('aria-busy');
+        say(ex.message);
+      }
+    }
+    const soon = () => { clearTimeout(timer); timer = setTimeout(build, 600); };
+    form.addEventListener('change', (e) => { if (e.target && watched.has(e.target.name)) soon(); });
+    if (window.IntersectionObserver) {
+      const io = new IntersectionObserver((entries) => {
+        if (entries.some((x) => x.isIntersecting)) { io.disconnect(); if (!started) build(); }
+      });
+      io.observe(fig);
+    } else build();
+  });
+
   // Site checks: a click anywhere on a check's row (not on a link or a control) opens its details like its button, and
   // a #check-NAME address opens that check's. Each details table ([data-findings]) filters as you type, sorts by a
   // column (its header button; again for the other way), and copies the rows it shows as CSV.

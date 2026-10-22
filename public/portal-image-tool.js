@@ -316,6 +316,8 @@ function wire() {
         if (!lines.includes(body.url)) lines.push(body.url);
         field.value = lines.join('\n');
       } else field.value = body.url;
+      // As if typed: the editor's live layout preview (portal.js) redraws when a layout image changes.
+      field.dispatchEvent(new Event('change', { bubbles: true }));
     }
     const prev = document.querySelector(`[data-prev-for="${input.dataset.field}"]`);
     if (prev) {

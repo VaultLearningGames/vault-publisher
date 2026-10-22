@@ -19,9 +19,19 @@
 // caller passes the reason only when the site's view of the listing changes (a save that changes nothing does not
 // build).
 //
-// Needs VAULT_SITE_GITHUB_TOKEN with *Actions: write* on vault-site (docs/setup.md), the same token the portal
-// commits Markdown with. SITE_DEPLOY_WORKFLOW overrides the workflow file name (default deploy.yml).
-import { readSiteRepoConfig, sitePublishingEnabled } from '../site-repo/config.ts';
+// Credentials: the GitHub App this portal already commits Markdown with (VAULT_SITE_APP_ID and friends), or the
+// legacy VAULT_SITE_GITHUB_TOKEN when that is all there is — site-content/config.ts, so there is nothing extra to
+// set up for a rebuild to work. SITE_DEPLOY_WORKFLOW overrides the workflow file name (default deploy.yml).
+//
+// Two ways to start the run, because the credential decides what is possible:
+//   workflow_dispatch  needs *Actions: write*. Preferred: it starts a run without writing to the repository.
+//   an empty commit    needs only *Contents: write*, which the App has. deploy.yml runs `on: push` to the branch,
+//                      so a commit to it starts exactly the same run. Used when dispatch is refused (403/404).
+// The Apps installed on vault-site have contents:write and metadata:read only, so in production this takes the
+// commit path; dispatch stays for a token that does have Actions: write.
+import { sitePublishingEnabled, siteBranchFor, commitIdentity } from '../site-repo/config.ts';
+import { readSiteContentConfig } from '../site-content/config.ts';
+import { createInstallationTokenSource } from '../site-content/app-auth.ts';
 import { markDeployPending, type SettingsStore } from '../deploy-status.ts';
 
 // How long the first change waits for more before the run starts; a later change extends the window to its own end.
@@ -94,47 +104,104 @@ export function flushPendingRebuild(): Promise<SiteRebuildOutcome | null> {
   return dispatch({ reasons: p.reasons, deps: p.deps, at: p.at });
 }
 
-// The dispatch itself: POST to GitHub's workflow_dispatch, 204 is success. Never throws; the outcome is logged.
+// The credentials and target for a rebuild: the App when it is configured (preferred, and all production has), else
+// the legacy token. Throws the underlying config error when neither is set.
+async function siteAuth(env: Record<string, string | undefined>, doFetch: typeof fetch) {
+  const branch = siteBranchFor(env);
+  const c = readSiteContentConfig(env);   // accepts App *or* token; throws when neither is set
+  const token = c.app ? await createInstallationTokenSource(c.app, c.apiBase, doFetch)() : c.token;
+  return { token, repo: c.repo, branch, apiBase: c.apiBase, author: commitIdentity(env) };
+}
+
+// Start the run by committing to the branch: deploy.yml runs `on: push` to staging/production, so an empty commit
+// (the same tree as its parent) starts the same build without changing a file. Needs only Contents: write.
+async function rebuildByCommit(
+  a: { token: string; repo: string; branch: string; apiBase: string; author: { name: string; email: string } },
+  reason: string, doFetch: typeof fetch,
+): Promise<{ ok: true; commit: string } | { ok: false; error: string }> {
+  const h = {
+    Authorization: `Bearer ${a.token}`, Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': API_VERSION, 'User-Agent': USER_AGENT, 'Content-Type': 'application/json',
+  };
+  const api = async (method: string, path: string, body?: unknown) => {
+    const res = await doFetch(`${a.apiBase}/repos/${a.repo}${path}`, {
+      method, headers: h, body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(DISPATCH_TIMEOUT_MS),
+    });
+    const text = await res.text().catch(() => '');
+    let json: unknown = null;
+    try { json = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+    return { status: res.status, json, text: text.slice(0, 200) };
+  };
+  const ref = `/git/refs/heads/${encodeURIComponent(a.branch)}`;
+  const head = await api('GET', `/git/ref/heads/${encodeURIComponent(a.branch)}`);
+  if (head.status !== 200) return { ok: false, error: `reading ${a.branch}: GitHub ${head.status} ${head.text}` };
+  const headSha = String((head.json as { object?: { sha?: string } } | null)?.object?.sha ?? '');
+  const parent = await api('GET', `/git/commits/${headSha}`);
+  if (parent.status !== 200) return { ok: false, error: `reading commit ${headSha.slice(0, 7)}: GitHub ${parent.status} ${parent.text}` };
+  const tree = String((parent.json as { tree?: { sha?: string } } | null)?.tree?.sha ?? '');
+  // Same tree as the parent: nothing in the site's files changes, the push is only the trigger.
+  const made = await api('POST', '/git/commits', {
+    message: `chore: rebuild the site (${reason})\n\nThe portal's catalog changed, so the built site is out of date. Same tree as the parent:\nthis commit only starts Deploy (site) (deploy.yml, on: push).\n`,
+    tree, parents: [headSha], author: a.author, committer: a.author,
+  });
+  if (made.status !== 201) return { ok: false, error: `committing to ${a.branch}: GitHub ${made.status} ${made.text}` };
+  const sha = String((made.json as { sha?: string } | null)?.sha ?? '');
+  const upd = await api('PATCH', ref, { sha, force: false });
+  if (upd.status !== 200) return { ok: false, error: `moving ${a.branch} to ${sha.slice(0, 7)}: GitHub ${upd.status} ${upd.text}` };
+  return { ok: true, commit: sha };
+}
+
+// The dispatch itself: workflow_dispatch when the credential may (204), otherwise a commit to the branch. Never
+// throws; the outcome is logged.
 async function dispatch(opts: { reasons: string[]; deps: SiteRebuildDeps; at?: number }): Promise<SiteRebuildOutcome> {
   const { deps } = opts;
   const env = deps.env ?? process.env;
   const reason = opts.reasons.join(', ');
   const doFetch = deps.fetch ?? globalThis.fetch;
   const redact = (s: string, token: string) => (token ? s.split(token).join('[redacted]') : s);
+  let tok = '';
   try {
     if (!sitePublishingEnabled(env)) {
       const outcome: SiteRebuildOutcome = { ok: false, error: `site rebuild: SITE_PUBLISHING_ENABLED is off, so no site run is started (for ${reason}).` };
       console.error(outcome.error);
       return outcome;
     }
-    const cfg = readSiteRepoConfig(env);
+    const a = await siteAuth(env, doFetch);
+    tok = a.token;
     const workflow = siteDeployWorkflow(env);
+    const waited = () => (opts.at !== undefined ? (deps.now ?? Date.now)() - opts.at : 0);
+    const coalesced = () => `${reason} (coalesced ${opts.reasons.length} change${opts.reasons.length === 1 ? '' : 's'} over ${waited()} ms)`;
     // ref: the branch the portal commits to (staging/production, never main); the workflow's environment input
     // chooses the same system (README: "Run workflow, choose the system").
-    const res = await doFetch(`${cfg.apiBase}/repos/${cfg.repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
+    const res = await doFetch(`${a.apiBase}/repos/${a.repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${cfg.token}`,
+        Authorization: `Bearer ${a.token}`,
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': API_VERSION,
         'User-Agent': USER_AGENT,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ ref: cfg.branch, inputs: { environment: cfg.branch } }),
+      body: JSON.stringify({ ref: a.branch, inputs: { environment: a.branch } }),
       signal: AbortSignal.timeout(DISPATCH_TIMEOUT_MS),
     });
-    if (res.status === 204) {
-      const waited = opts.at !== undefined ? (deps.now ?? Date.now)() - opts.at : 0;
-      return { ok: true, repo: cfg.repo, branch: cfg.branch, workflow, reason: `${reason} (coalesced ${opts.reasons.length} change${opts.reasons.length === 1 ? '' : 's'} over ${waited} ms)` };
-    }
+    if (res.status === 204) return { ok: true, repo: a.repo, branch: a.branch, workflow, reason: coalesced() };
     const text = (await res.text().catch(() => '')).slice(0, 300);
-    const outcome: SiteRebuildOutcome = { ok: false, error: `site rebuild: ${cfg.repo} ${workflow} on ${cfg.branch} (for ${reason}): GitHub ${res.status}${text ? ` ${text}` : ''}` };
+    // No Actions: write (the Apps on vault-site have contents:write only), so start the same run with a commit.
+    if (res.status === 403 || res.status === 404) {
+      const c = await rebuildByCommit(a, reason, doFetch);
+      if (c.ok) return { ok: true, repo: a.repo, branch: a.branch, workflow: `push to ${a.branch} (${c.commit.slice(0, 7)})`, reason: coalesced() };
+      const outcome: SiteRebuildOutcome = { ok: false, error: redact(`site rebuild: ${a.repo} on ${a.branch} (for ${reason}): workflow_dispatch ${res.status}, then ${c.error}`, tok) };
+      console.error(outcome.error);
+      return outcome;
+    }
+    const outcome: SiteRebuildOutcome = { ok: false, error: redact(`site rebuild: ${a.repo} ${workflow} on ${a.branch} (for ${reason}): GitHub ${res.status}${text ? ` ${text}` : ''}`, tok) };
     console.error(outcome.error);
     return outcome;
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
-    const token = env.VAULT_SITE_GITHUB_TOKEN?.trim() ?? '';
-    const outcome: SiteRebuildOutcome = { ok: false, error: redact(`site rebuild: could not start the site's deploy run (for ${reason}): ${raw}`, token) };
+    const outcome: SiteRebuildOutcome = { ok: false, error: redact(redact(`site rebuild: could not start the site's deploy run (for ${reason}): ${raw}`, tok), env.VAULT_SITE_GITHUB_TOKEN?.trim() ?? '') };
     console.error(outcome.error);
     return outcome;
   }

@@ -671,21 +671,31 @@ Publishing or unpublishing a listing changes `/v1/catalog`, not the site: the si
 to there (`VAULT_SITE_BRANCH`, else `staging` or `production` — never `main`), with the run's `environment` input set
 to that same system (README, [The website](../README.md#the-website): "Run workflow, choose the system"). Changes
 are coalesced in-process: several within 30 s start ONE run, fired at the end of the window, so a burst of
-publishes and unpublishes deploys the site once. A run starts when the published flag changes — a listing newly on
-the site (`publish:<slug>`) or taken off it (`unpublish:<slug>`); re-publishing a listing that is already on the
-site starts no run (the deploy bar still says a deploy is scheduled, and *Deploy (site)* can be run by hand as
-before for that, for featured changes and for everything else).
+edits deploys the site once. A run starts on every change to what the site shows: a listing newly on the site
+(`publish:<slug>`), an edit to a listing already on it (`publish:<slug>:<fields>`), one taken off
+(`unpublish:<slug>`), one moved to another studio (`move:<slug>`), the home page's featured games (`featured`) and
+re-pointed images (`images:<n>`). A save that changes nothing the site shows starts no run. The 15-minute
+`catalog-check` schedule in vault-site stays only as a safety net for a dispatch that was lost.
 
-The dispatch uses `VAULT_SITE_GITHUB_TOKEN`, which therefore needs *Actions: write* on `vault-site` in addition to
-*Contents: read and write* (step 3 of [ops-checklist.md](ops-checklist.md)). A failed dispatch is logged and
-changes nothing: the listing action stands, and with several portal instances the run may start twice — the build
-is idempotent, so that is harmless. Settings:
+Credentials: the rebuild uses whatever the portal already commits Markdown with — the GitHub App
+(`VAULT_SITE_APP_ID` and friends) or the legacy `VAULT_SITE_GITHUB_TOKEN` — so there is nothing extra to set up.
+How the run is started depends on what that credential may do:
+
+- **`workflow_dispatch`** needs *Actions: write*. Preferred, because it starts a run without writing to the repository.
+- **an empty commit** needs only *Contents: write*. `deploy.yml` also runs `on: push` to `staging`/`production`, so a
+  commit to the branch (the same tree as its parent — no file changes) starts exactly the same run. Used
+  automatically when dispatch is refused with 403 or 404.
+
+The Apps installed on `vault-site` have *Contents: write* and *Metadata: read* only, so both portals take the
+commit path today; grant *Actions: write* and they use the dispatch instead, with no other change. A failed start is
+logged and changes nothing: the listing action stands, and with several portal instances the run may start twice —
+the build is idempotent, so that is harmless. Settings:
 
 | Variable | Default | |
 |---|---|---|
 | `SITE_DEPLOY_WORKFLOW` | `deploy.yml` | the file name of vault-site's *Deploy (site)* workflow to dispatch |
 | `VAULT_SITE_BRANCH` | `staging` or `production` by system | the branch the dispatch runs on, as for the commits (site-repo/config.ts) |
-| `VAULT_SITE_GITHUB_TOKEN` | (none: required) | needs *Actions: write* on `vault-site` for the dispatch |
+| `VAULT_SITE_APP_ID` etc. / `VAULT_SITE_GITHUB_TOKEN` | (none: one required) | the App or token the portal commits with; *Actions: write* uses the dispatch, *Contents: write* alone the commit |
 | `SITE_PUBLISHING_ENABLED` | on | `false` (or `0`, `no`, `off`) also refuses the dispatch, as every other write to vault-site |
 
 ### The blog: posts as Markdown in vault-site

@@ -132,6 +132,54 @@ describe('a change to what the site shows starts the deploy run', () => {
     assert.ok(outcome?.ok);
   });
 
+
+  // The GitHub Apps installed on vault-site have Contents: write and Metadata: read, with NO Actions: write, so
+  // workflow_dispatch is refused there. deploy.yml also runs `on: push` to the branch, so the rebuild falls back to
+  // an empty commit, which starts the same run. Verified against the live installations on 2026-10-22.
+  test('a dispatch the credential may not make still starts the run, by committing to the branch', async () => {
+    const seen: string[] = [];
+    const fetch = (async (url: string | URL, init?: RequestInit) => {
+      const u = String(url);
+      const method = init?.method ?? 'GET';
+      seen.push(`${method} ${u.replace('https://api.github.com/repos/VaultLearningGames/vault-site', '')}`);
+      if (u.includes('/actions/workflows/')) return new Response('no Actions: write', { status: 403 });
+      if (u.includes('/git/ref/heads/')) return Response.json({ object: { sha: 'a'.repeat(40) } });
+      if (u.includes('/git/commits/' + 'a'.repeat(40))) return Response.json({ tree: { sha: 'b'.repeat(40) } });
+      if (method === 'POST' && u.endsWith('/git/commits')) return Response.json({ sha: 'c'.repeat(40) }, { status: 201 });
+      if (method === 'PATCH' && u.includes('/git/refs/heads/')) return Response.json({ object: { sha: 'c'.repeat(40) } });
+      throw new Error(`unexpected ${method} ${u}`);
+    }) as unknown as typeof globalThis.fetch;
+
+    const { requestSiteRebuild } = await import('../src/portal/site-rebuild.ts');
+    requestSiteRebuild('listing.publish:wake', { fetch, debounceMs: 0, env: env });
+    const out = await flushPendingRebuild();
+
+    assert.ok(out?.ok, `the rebuild should fall back to a commit: ${out && !out.ok ? out.error : ''}`);
+    assert.match(out.workflow, /^push to staging \(ccccccc\)$/);
+    // It tried the cheap way first, then committed the same tree as the parent.
+    assert.equal(seen[0], 'POST /actions/workflows/deploy.yml/dispatches');
+    assert.ok(seen.includes('POST /git/commits'), seen.join(' | '));
+    assert.ok(seen.some((s) => s.startsWith('PATCH /git/refs/heads/staging')), seen.join(' | '));
+  });
+
+  // A credential that DOES have Actions: write keeps the cheap path: no commit is written to the site repository.
+  test('a dispatch the credential may make writes no commit', async () => {
+    const seen: string[] = [];
+    const fetch = (async (url: string | URL, init?: RequestInit) => {
+      seen.push(`${init?.method ?? 'GET'} ${String(url)}`);
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const { requestSiteRebuild } = await import('../src/portal/site-rebuild.ts');
+    requestSiteRebuild('listing.publish:wake', { fetch, debounceMs: 0, env: env });
+    const out = await flushPendingRebuild();
+
+    assert.ok(out?.ok);
+    assert.equal(out.workflow, 'deploy.yml');
+    assert.equal(seen.length, 1, `only the dispatch, got: ${seen.join(' | ')}`);
+    assert.ok(!seen.some((s) => s.includes('/git/')), seen.join(' | '));
+  });
+
   test('an empty reason starts nothing', async () => {
     let calls = 0;
     const fetch = (async () => { calls++; return new Response(null, { status: 204 }); }) as unknown as typeof globalThis.fetch;

@@ -95,6 +95,12 @@ jobs:
       env:
         SITE_DIR: vault-site-src
 
+    # `github.run_at` is not a GitHub Actions context value — it renders empty, which left the
+    # portal's build line with no time at all. Stamp the deploy time here instead.
+    - name: Stamp the build time
+      id: buildtime
+      run: echo "iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v3
       with:
@@ -141,7 +147,7 @@ jobs:
           # rolled-back revision's own build. From this run's own context; nothing to set in the environment.
           VAULT_BUILD_NUMBER=${{ github.run_number }}
           VAULT_BUILD_SHA=${{ github.sha }}
-          VAULT_BUILD_TIME=${{ github.run_at }}
+          VAULT_BUILD_TIME=${{ steps.buildtime.outputs.iso }}
         secrets: |-
           R2_BUILDS_ACCESS_KEY_ID=${{ vars.SERVICE }}-r2-builds-access-key-id:latest
           R2_BUILDS_SECRET_ACCESS_KEY=${{ vars.SERVICE }}-r2-builds-secret-access-key:latest

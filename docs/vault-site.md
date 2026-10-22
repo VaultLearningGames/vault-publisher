@@ -12,7 +12,7 @@ commit in `vault-site.ref` (README, [Previews and vault-site](../README.md#previ
 |---|---|---|
 | Owns | Hugo source, content, theme, its deploy workflow | the admin app and its own deploy |
 | Source of truth for site content | its files (blog posts: `content/blog/<slug>/index.md`; drafts: `draft: true`) | nothing: it keeps no copy |
-| Builds and publishes the site | *Deploy (site)*, on every push to `staging` (vaultlearninggames-staging.org) or `production` | never |
+| Builds and publishes the site | *Deploy (site)*, on every push to `staging` (vaultlearninggames-staging.org) or `production`, or when the portal starts it after a listing is published or taken off | never (it only starts the run) |
 | Changes the site | people, by commits and PRs | only by commits as `vault-portal-bot` (`src/site-repo/`, `src/site-content/`) |
 
 - The staging portal commits to vault-site's `staging` branch, the production portal to `production`

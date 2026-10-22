@@ -51,10 +51,18 @@ function as(login: string, vaultRole: 'none' | 'release_manager' | 'admin' = 'no
 }
 
 const L = '/portal/api/s/fieldday/listings';
-const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2, 3]);
-const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 1, 2, 3]);
-const WEBP = new Uint8Array([...Buffer.from('RIFF'), 20, 0, 0, 0, ...Buffer.from('WEBPVP8 '), 1, 2, 3]);
-const sized = (n: number) => { const b = new Uint8Array(n); b.set(PNG); return b; };
+// Headers of images that match their fields' rows in src/portal/image-fields.ts (what the image tool uploads).
+const le16 = (n: number) => [n & 0xff, n >> 8];
+const be16 = (n: number) => [n >> 8, n & 0xff];
+const webp = (w: number, h: number, tail = 0) => new Uint8Array([...Buffer.from('RIFF'), 20, 0, 0, 0, ...Buffer.from('WEBPVP8 '), 10, 0, 0, 0, 0, 0, 0, 0x9d, 0x01, 0x2a, ...le16(w), ...le16(h), tail]);
+const jpeg = (w: number, h: number) => new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, ...be16(h), ...be16(w), 3, 1, 2, 3]);
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, ...Buffer.from('IHDR'), 0, 0, 7, 128, 0, 0, 4, 56, 8, 2, 0, 0, 0]);
+const WEBP = webp(1920, 1080);
+const WEBP2 = webp(1920, 1080, 1);
+const THUMB = webp(1200, 675);
+const JPEG = jpeg(1920, 1080);
+const THUMB_JPEG = jpeg(1200, 675);
+const sized = (n: number, base = WEBP) => { const b = new Uint8Array(n); b.set(base); return b; };
 const MB = 1024 * 1024;
 const draft = () => db.listing('wake')!.draft;
 const errorOf = async (res: Response) => ((await res.json()) as { error: string }).error;
@@ -72,9 +80,9 @@ beforeEach(async () => {
 
 describe('listing image uploads', () => {
   test('who may upload: whoever may edit the draft', async () => {
-    assert.equal((await as('mia', 'none', 'maintainer').upload('hero', PNG)).status, 200);
-    assert.equal((await as('ada', 'none', 'admin').upload('thumb', PNG)).status, 200);
-    assert.equal((await as('boss', 'release_manager').upload('screenshot', PNG)).status, 200);
+    assert.equal((await as('mia', 'none', 'maintainer').upload('hero', WEBP)).status, 200);
+    assert.equal((await as('ada', 'none', 'admin').upload('thumb', THUMB)).status, 200);
+    assert.equal((await as('boss', 'release_manager').upload('screenshot', JPEG)).status, 200);
     const viewer = await as('vera', 'none', 'viewer').upload('hero', WEBP);
     assert.equal(viewer.status, 403);
     assert.match(await errorOf(viewer), /studio members who can edit, and Vault staff who can edit game\/studio content/);
@@ -94,11 +102,12 @@ describe('listing image uploads', () => {
     assert.match(await errorOf(svg), /PNG, JPEG or WebP/);
     assert.equal((await mia.upload('hero', new Uint8Array())).status, 400);
     assert.equal((await mia.upload('hero', sized(5 * MB + 1))).status, 413);
-    assert.equal((await mia.upload('hero', sized(3 * MB))).status, 200, 'hero images may be up to 5 MB');
-    const big = await mia.upload('thumb', sized(2 * MB + 1));
+    assert.equal((await mia.upload('hero', sized(400_001))).status, 413);
+    assert.equal((await mia.upload('hero', sized(300_000))).status, 200, 'hero images may be up to 400 KB');
+    const big = await mia.upload('thumb', sized(200_001, THUMB));
     assert.equal(big.status, 413);
-    assert.match(await errorOf(big), /at most 2 MB/);
-    assert.equal((await mia.upload('screenshot', sized(2 * MB + 1))).status, 413);
+    assert.match(await errorOf(big), /at most 200 KB/);
+    assert.equal((await mia.upload('screenshot', sized(400_001))).status, 413);
     assert.equal(production.objects.size, 1);
   });
 
@@ -111,13 +120,13 @@ describe('listing image uploads', () => {
     assert.deepEqual(production.headers.get(key), { contentType: 'image/webp', cacheControl: 'public, max-age=31536000, immutable' });
     assert.deepEqual(production.data.get(key), WEBP);
 
-    const thumb = ((await (await mia.upload('thumb', JPEG)).json()) as { url: string }).url;
+    const thumb = ((await (await mia.upload('thumb', THUMB_JPEG)).json()) as { url: string }).url;
     assert.match(thumb, /\/fieldday\/wake\/_vault-assets\/thumb-[0-9a-f]{16}\.jpg$/);
     assert.equal(production.headers.get(thumb.slice(18))?.contentType, 'image/jpeg');
-    const s1 = ((await (await mia.upload('screenshot', PNG)).json()) as { url: string }).url;
+    const s1 = ((await (await mia.upload('screenshot', JPEG)).json()) as { url: string }).url;
     const s2 = ((await (await mia.upload('screenshot', WEBP)).json()) as { url: string }).url;
-    assert.match(s1, /\/_vault-assets\/screenshot-[0-9a-f]{16}\.png$/);
-    assert.equal((await (await mia.upload('screenshot', PNG)).json() as { value: string[] }).value.length, 2, 'the same file twice is one screenshot');
+    assert.match(s1, /\/_vault-assets\/screenshot-[0-9a-f]{16}\.jpg$/);
+    assert.equal((await (await mia.upload('screenshot', JPEG)).json() as { value: string[] }).value.length, 2, 'the same file twice is one screenshot');
 
     const d = draft();
     assert.equal(d.hero_image, hero.url);
@@ -126,7 +135,7 @@ describe('listing image uploads', () => {
     assert.equal(db.listing('wake')!.published!.hero_image, 'games/wake/img/hero.png', 'the site keeps the published image until Vault publishes');
 
     // Replacing the hero image keeps the old object: drafts and published versions may still use it.
-    const hero2 = ((await (await mia.upload('hero', PNG)).json()) as { url: string }).url;
+    const hero2 = ((await (await mia.upload('hero', WEBP2)).json()) as { url: string }).url;
     assert.notEqual(hero2, hero.url);
     assert.ok(production.objects.has(key));
     assert.equal(draft().hero_image, hero2);
@@ -140,7 +149,7 @@ describe('listing image uploads', () => {
   test('uploads go through the usual submit → Vault publish review', async () => {
     const mia = as('mia', 'none', 'maintainer');
     const boss = as('boss', 'release_manager');
-    const url = ((await (await mia.upload('hero', PNG)).json()) as { url: string }).url;
+    const url = ((await (await mia.upload('hero', WEBP)).json()) as { url: string }).url;
     assert.match(await (await mia.get('/s/fieldday/g/wake')).text(), /Not on the site yet:<\/b> Hero image/);
     assert.equal((await mia.post(`${L}/wake`, { submit: true })).status, 200);
     assert.equal(db.listing('wake')!.review, 'submitted');
@@ -156,7 +165,7 @@ describe('listing image uploads', () => {
 
   test('the editor offers uploads to editors, with previews; without the CDN storage it says so (503)', async () => {
     const mia = as('mia', 'none', 'maintainer');
-    await mia.upload('hero', PNG);
+    await mia.upload('hero', WEBP);
     const page = await (await mia.get('/s/fieldday/g/wake')).text();
     for (const kind of ['hero', 'thumb', 'screenshot']) assert.match(page, new RegExp(`data-upload-image="/portal/api/s/fieldday/listings/wake/images/${kind}"`));
     assert.match(page, /<img class="feat-thumb" src="https:\/\/prod\.test\/fieldday\/wake\/_vault-assets\/hero-/);

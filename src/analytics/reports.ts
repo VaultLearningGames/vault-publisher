@@ -445,6 +445,10 @@ export function readTopPages(res: GaResponse, catalog: Record<string, string[]>)
   }
   return [...games.values()].filter((g) => g.views > 0 || g.clicks > 0).sort((a, b) => b.views - a.views || a.slug.localeCompare(b.slug));
 }
+// The top games' Total row (the page views' table): the whole ranked list's views and clicks, summed — a page of it,
+// never, so Load more's pages don't change it.
+export const topPagesTotals = (games: GamePages[]): { views: number; clicks: number } =>
+  games.reduce((t, g) => ({ views: t.views + g.views, clicks: t.clicks + g.clicks }), { views: 0, clicks: 0 });
 
 // The blog's figures: totals in each period, and per post (slug; '' is the blog's home: /blog and its pages).
 export interface BlogFigures { opens: number; readers: number; seconds: number }

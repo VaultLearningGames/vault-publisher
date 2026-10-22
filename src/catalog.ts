@@ -4,6 +4,7 @@ import type { Db, Listing, Studio } from './db.ts';
 import { catalogFeatured, readFeatured } from './featured.ts';
 import { catalogImages } from './image-variants.ts';
 import { catalogEntry, type ListingFields } from './listings.ts';
+import { GRADES, SUBJECTS, TOPICS } from './portal/listing-enums.ts';
 
 type Row = Listing & { studio_slug: string; studio_name: string; studio_website?: string | null };
 
@@ -39,5 +40,11 @@ export function buildCatalog(db: Db, prodPublicUrl: string) {
   const titles = new Map(games.map((g) => [g.slug, g.title]));
   const featured = catalogFeatured(readFeatured(db), (slug) => titles.get(slug));
   const studios = catalogStudios(published, db.studios(), games);
-  return { version: 1, generated_at: new Date().toISOString(), featured, studios, games, images: catalogImages(db, prodPublicUrl, { featured, games }) };
+  return {
+    version: 1, generated_at: new Date().toISOString(), featured, studios, games,
+    // The card's option lists (card C): the site's filters read these, and the labels of a card's
+    // categories/tags ({ kind, value }) come from here (and from the studios above for kind "studio").
+    enums: { grades: GRADES, subjects: SUBJECTS, topics: TOPICS },
+    images: catalogImages(db, prodPublicUrl, { featured, games }),
+  };
 }

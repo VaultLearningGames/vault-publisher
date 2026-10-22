@@ -348,6 +348,7 @@ export interface Listing {
   published_at: string | null;
   updated_by: string;
   updated_at: string;
+  created_at: string;
 }
 
 export interface Studio {
@@ -1309,6 +1310,17 @@ export class Db {
 
   saveListingDraft(id: number, draft: ListingFields, by: string) {
     this.sqlite.prepare(`UPDATE listings SET draft_json = ?, updated_by = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(draft), by, now(), id);
+  }
+
+  // The draft and the published fields together, without touching the publish or the review state: a one-time
+  // migration that backfills both the same way (card C's listing fields, like card A's images).
+  setListingContent(id: number, draft: ListingFields, published: ListingFields | null) {
+    this.sqlite.prepare(`UPDATE listings SET draft_json = ?, published_json = ? WHERE id = ?`).run(JSON.stringify(draft), published ? JSON.stringify(published) : null, id);
+  }
+
+  // The listing's date (the record's created date; the site sorts the cards newest-first by it). Vault staff only.
+  setListingDate(id: number, createdAt: string) {
+    this.sqlite.prepare(`UPDATE listings SET created_at = ? WHERE id = ?`).run(createdAt, id);
   }
 
   setListingReview(id: number, review: 'editing' | 'submitted' | 'returned', by: string, note: string | null) {

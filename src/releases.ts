@@ -68,7 +68,7 @@ export async function storageCall<T>(b: Budget, what: string, fn: (signal: Abort
 // Runs `work` on each item, `concurrency` at a time, starting none after the deadline. After the first failure (or
 // the signal) nothing new starts, and the error is thrown only once every item already started has settled, so a
 // caller cleaning up never races a copy still in flight. Answers the items never started.
-async function pool<T>(items: T[], b: Budget, work: (item: T) => Promise<void>): Promise<T[]> {
+export async function pool<T>(items: T[], b: Budget, work: (item: T) => Promise<void>): Promise<T[]> {
   const queue = [...items];
   let failure: { err: unknown } | undefined;
   const next = () => (failure || b.signal?.aborted || pastDeadline(b) ? undefined : queue.shift());

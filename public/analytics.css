@@ -3,8 +3,10 @@
 .ga-head h2 { font: inherit; font-size: 14px; margin: 0; }
 .ga-tot { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* The date range picker: a button, and a panel like Google Analytics' (presets on the left, dates and Compare). */
-.ga-dates { position: relative; font-weight: 400; }
+/* The date range picker: a button, and a panel like Google Analytics' (presets on the left, dates and Compare).
+   At the top of the view, right above the metrics row: it takes the row's width, with a small gap above the tiles.
+   The panel opens below it, its right edge aligned with the row. */
+.ga-dates { position: relative; font-weight: 400; margin-bottom: 12px; }
 .ga-dates > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
   padding: 6px 30px 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 13px; position: relative; }
 .ga-dates > summary::-webkit-details-marker { display: none; }
@@ -39,6 +41,11 @@
 .ga-plot { position: relative; height: 220px; border-bottom: 1px solid var(--axis); }
 .ga-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; display: block; }
 .ga-yl { position: absolute; left: -40px; width: 34px; text-align: right; transform: translateY(50%); font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+/* Blog reads' own scale: a right-hand axis in their colour, titled above it. */
+.ga-chart.ga-dual { padding-right: 40px; }
+.ga-yl.ga-yr { left: auto; right: -40px; text-align: left; }
+.ga-yl.s4, .ga-yt.s4 { color: var(--s4); }
+.ga-yt { text-align: right; margin: 0 -40px 4px 0; font-size: 11px; font-weight: 600; }
 .ga-chart .gridl { stroke: var(--grid); stroke-width: 1; }
 .ga-cur { fill: none; stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
 .ga-prev { fill: none; stroke-width: 1.5; stroke-dasharray: 5 4; stroke-linejoin: round; stroke-linecap: round; opacity: .55; }
@@ -65,17 +72,24 @@
 .kpis.ga-k3 .kpi:nth-child(n) { border-top: 0; grid-column: auto; }
 .kpis.ga-k3 .kpi + .kpi { border-left: 1px solid var(--line) !important; }
 .kpis.ga-k3 .kpi .d { line-height: 1.35; }
-/* The blog's shares: the total and five networks, two rows of three. */
-.kpis.ga-share-k { margin-top: 0; }
-.kpis.ga-share-k .kpi:nth-child(3n+1) { border-left: 0 !important; }
-.kpis.ga-share-k .kpi:nth-child(n+4) { border-top: 1px solid var(--line); }
 .ga-blog td.ga-shares span { display: block; font-size: 11px; white-space: nowrap; }
+/* The top lists' Total row: pinned above the rows (Load more appends below it), bold and set off by a stronger rule. */
+.analytics-total-row > td { font-weight: 700; border-bottom: 2px solid var(--line); }
 
 /* The top lists: the top games and the blog's top posts, side by side under the realtime card, which takes the row
    above at the full width. .grid (portal.css) gives display: grid and the card gap. */
 .analytics-top-lists { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin-top: 16px; }
 .analytics-top-lists > :only-child { grid-column: 1 / -1; }   /* the other list absent: the one shown spans the row */
 .analytics-top-lists .proj { overflow-wrap: anywhere; }
+/* The top blog posts table (the top games' keeps its own layout): the Post column is the wide one — it takes all
+   the spare width, while the metric columns shrink to their content (width: 1%), so a long title stays readable at
+   low widths instead of being squeezed to a sliver. Titles and links wrap (no truncation: the whole title stays
+   visible); at the very lowest widths (320px) the card's .tbl-wrap scrolls sideways, the Post column's 12rem
+   minimum keeping it legible. */
+.analytics-blog-table { width: 100%; table-layout: auto; }
+.analytics-blog-table .col-post { width: 100%; min-width: 12rem; white-space: normal; overflow-wrap: anywhere; word-break: normal; text-align: left; }
+.analytics-blog-table .col-num { width: 1%; white-space: nowrap; text-align: right; padding-left: .5rem; padding-right: .5rem; }
+@media (max-width: 600px) { .analytics-blog-table .col-num { font-size: .85em; padding-left: .4rem; padding-right: .4rem; } }
 .ga-map { position: relative; width: 100%; margin: 4px 0 10px; overflow: hidden; border-radius: 6px; }
 .ga-map.zoomed { touch-action: none; }
 .ga-map svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
@@ -94,6 +108,11 @@
 .ga-off .fix { margin: 0; }
 .ga-foot { margin-top: 18px; }
 .ga-more { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+/* A button that reads as a text link (the top lists' Load more): no box, the links' colour, underlined on hover and
+   keyboard focus (which keeps the portal's focus ring). */
+.link-button { background: none; border: 0; padding: 0; box-shadow: none; color: var(--slate); font: inherit; cursor: pointer; }
+.link-button:hover, .link-button:focus-visible { text-decoration: underline; }
+.link-button:disabled { color: var(--ink-3); cursor: default; text-decoration: none; }
 .ga .fix { margin: 10px 0 0; }
 h3.sec small { font: 400 12.5px var(--body); }
 

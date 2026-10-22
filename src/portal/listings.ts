@@ -10,6 +10,7 @@ import type { StudioPermission, VaultPermission } from '../permissions.ts';
 import { markDeployPending } from '../deploy-status.ts';
 import { draftProblems, importFromExport, moveListingToStudio, publishListing, saveListing } from '../listing-ops.ts';
 import { changedFields, FIELD_LABEL, GRADES, isListingSlug, MIN_SIZE_RANGE, normalize, VAULT_ONLY, type ListingFields } from '../listings.ts';
+import { GRADES as GRADE_OPTIONS, SUBJECTS, TOPICS, studioOptions, type CardTag, type CardTagKind, type EnumOption } from './listing-enums.ts';
 import { getHosting, hostingCell } from './hosting.ts';
 import { html, type Html } from './html.ts';
 import { ago, head, pill, who } from './routes.ts';
@@ -17,9 +18,11 @@ import { availabilityCells, availabilityLine, AVAILABILITY_HEADS } from './avail
 import { compareByTestingStatus, deriveTestingStatus } from './testingStatus.ts';
 import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '../featured.ts';
 import type { PortalDeps } from './routes.ts';
-import { imageField } from './listing-assets.ts';
+import { imageField, imageToolScript } from './listing-assets.ts';
+import { iconPicker, layoutIcon, PAGE_LAYOUTS, themeIcon, THEMES } from './listing-layout.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
-import { unpublishedWarning } from './unpublished-warning.ts';
+import { requestSiteRebuild } from './site-rebuild.ts';
+import { cdnRedirectNote, unpublishedWarning } from './unpublished-warning.ts';
 import { addMaker, createProposedStudios, makersField, proposedLine, pruneMakerProposals } from './listing-makers.ts';
 
 // "Smallest screen" (min_width × min_height): editable by Vault, shown read-only to the studio. Empty: the site default.
@@ -104,7 +107,7 @@ export function listingPieces(h: ListingHelpers) {
     let status: Html, next: Html | string = '';
     if (!l) status = html`<p>${pill('off', 'Not on the site')} This CDN game isn’t shown on vaultlearninggames.org yet.</p>`;
     else if (onCdn) {
-      status = html`<p>${pill('brass', 'Vault CDN')} Classrooms play release <b class="mono">${cur!.version}</b> from <a class="mono" href="${cdnUrl(s, g!)}${pub!.cdn_path}" target="_blank" rel="noopener">${cdnUrl(s, g!)}${pub!.cdn_path}</a>.</p>`;
+      status = html`<p>${pill('brass', 'Vault CDN')} Classrooms play release <b class="mono">${cur!.version}</b> from <a class="mono" href="${cdnUrl(s, g!)}${pub!.cdn_path}" target="_blank" rel="noopener">${cdnUrl(s, g!)}${pub!.cdn_path}</a>.<br>${cdnRedirectNote()}</p>`;
       next = action('url', 'Switch back to the web address', `Play ${f!.title || l.slug} from ${pub!.play_url || 'its web address'} again?`);
     } else {
       status = html`<p>${pill('off', 'Web address')} Classrooms play ${pub?.play_url ? html`<a class="mono" href="${pub.play_url}" target="_blank" rel="noopener">${pub.play_url}</a>` : html`<span class="muted">nothing yet (not published)</span>`} in Vault’s player.</p>`;
@@ -141,6 +144,47 @@ export function listingPieces(h: ListingHelpers) {
       <input type="text" name="${name}" value="${Array.isArray(f[name]) ? (f[name] as string[]).join(', ') : String(f[name] ?? '')}" ${dis} ${attrs}>${hint ? html`<span class="hint">${hint}</span>` : ''}</label>`;
     const area = (name: keyof ListingFields, label: string, hint = '', rows = 3) => html`<label class="field full"><span class="lab">${label}</span>
       <textarea name="${name}" rows="${rows}" ${dis}>${Array.isArray(f[name]) ? (f[name] as string[]).join('\n') : String(f[name] ?? '')}</textarea>${hint ? html`<span class="hint">${hint}</span>` : ''}</label>`;
+    // The game card (card C): its title and excerpt (empty: the title / short description), and its categories and
+    // tags as chip pickers over the portal's option lists (listing-enums.ts) — the site's filters read those.
+    const tagChips = (field: 'card_categories' | 'card_tags', kind: CardTagKind, label: string, opts: EnumOption[]) => html`<div class="field full"><span class="lab">${label}</span>
+      <div class="chips">${opts.map((o) => html`<label><input type="checkbox" name="${field}:${kind}:${o.value}" ${f[field].some((t) => t.kind === kind && t.value === o.value) ? 'checked' : ''} ${dis}> ${o.label}</label>`)}</div></div>`;
+    const cardSection = html`<h2 style="margin-top:18px">Site card</h2>
+      <p class="small muted">The game’s card on the Games page: the title and the excerpt under it, and the categories and tags the site’s filters read. The card’s image is the thumbnail. A field left empty falls back to the title or the short description.</p>
+      <div class="fields">
+        ${txt('card_title', 'Card title', 'Shown on the game card. Empty: the title.')}
+        ${area('card_excerpt', 'Card excerpt', 'One or two sentences under the card title. Empty: the short description.', 2)}
+        ${tagChips('card_categories', 'grade', 'Grades', GRADE_OPTIONS)}
+        ${tagChips('card_categories', 'studio', 'Developer (studio)', studioOptions(db))}
+        ${tagChips('card_tags', 'subject', 'Subjects', SUBJECTS)}
+        ${tagChips('card_tags', 'topic', 'Topics', TOPICS)}
+      </div>`;
+    // Search (card C): the title and description search engines show, with a character counter; empty falls back.
+    const counter = (id: string, max: number) => html`<span class="char-count" id="${id}-count" aria-hidden="true"></span>`;
+    const seoSection = html`<h2 style="margin-top:18px">Search (SEO)</h2>
+      <div class="fields">
+        <label class="field"><span class="lab">SEO title</span>
+          <input type="text" id="f-seo-title" name="seo_title" value="${f.seo_title}" data-count="${60}" ${dis} autocomplete="off">
+          <span class="hint">What search engines show for the game. Empty: the title. ${counter('f-seo-title', 60)}</span></label>
+        <label class="field"><span class="lab">SEO description</span>
+          <input type="text" id="f-seo-description" name="seo_description" value="${f.seo_description}" data-count="${160}" ${dis} autocomplete="off">
+          <span class="hint">The snippet under the title. Empty: the short description. ${counter('f-seo-description', 160)}</span></label>
+      </div>`;
+    // The game's page on the site (card C): the page address (default: the slug) and the old addresses that 301 to
+    // it — Vault staff only, so a studio's save can never move or shadow another game's page. The listing's date is
+    // the record's created date, the site's newest-first sort; studios see it read-only.
+    const addressSection = html`<h2 style="margin-top:18px">Site address</h2>
+      <p class="small">The page the site builds for this game: vaultlearninggames.org/games/<i>${f.page_address || l.slug}</i>/. Old addresses (aliases) send visitors there with a 301, so every old URL keeps working.</p>
+      ${vault ? html`<div class="fields">
+        <label class="field"><span class="lab">Page address</span>
+          <input type="text" name="page_address" value="${f.page_address}" pattern="[a-z0-9][a-z0-9-]*" placeholder="${l.slug}" ${dis} autocomplete="off" spellcheck="false">
+          <span class="hint">Empty: the slug (${l.slug}). The old address becomes an alias, if you want it to keep working.</span></label>
+        <label class="field full"><span class="lab">Aliases</span>
+          <textarea name="aliases" rows="3" ${dis} spellcheck="false">${f.aliases.join('\n')}</textarea>
+          <span class="hint">One old address per line (lowercase letters, numbers and dashes, or an old game-cards/ address); each sends its visitors to the page address.</span></label>
+      </div>` : html`<p class="small">Page address: <b class="mono">${f.page_address || l.slug}</b>${f.aliases.length ? html` — old addresses (301): ${f.aliases.map((a) => html`<span class="mono">${a}</span> `)}` : ''}. Only Vault staff can change the address.</p>`}
+      <label class="field"><span class="lab">Listing date</span>
+        <input type="date" name="created_at" value="${l.created_at.slice(0, 10)}" ${vault ? dis : 'disabled'} style="width:11em">
+        <span class="hint">The date the site sorts the cards newest-first (the record’s created date).${vault ? '' : ' Only Vault staff can change it.'}</span></label>`;
     const form = html`<form data-api="${api}" data-then="reload" class="card form-card">
       <h2>Site listing <small>vaultlearninggames.org/games/${l.slug}/</small></h2>
       ${l.published ? '' : html`<p>${unpublishedWarning(l, 'site')}</p>`}
@@ -153,11 +197,25 @@ export function listingPieces(h: ListingHelpers) {
         ${txt('subjects', 'Subjects', 'Comma-separated, e.g. Math, Science')}
         ${txt('topics', 'Topics', 'Comma-separated, e.g. Algebra, Physics')}
         ${area('standards', 'Standards', 'Codes, one per line or comma-separated (Common Core, NGSS), e.g. 4.OA.A.2', 2)}
-        ${txt('related_curriculum', 'Related curriculum', 'A link to teacher materials')}
+        ${txt('related_curriculum', 'Related curriculum', 'A link to teacher materials. When it is empty the game’s page says there is no curriculum yet and invites teachers to share one with the Vault (no email address is shown).')}
         ${txt('gameplay_video', 'Gameplay video', 'A YouTube or other video link')}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'hero_image', label: 'Hero image', value: f.hero_image, hint: 'A path on the site (games/x/img/hero.png) or an https link.' })}
-        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'thumb_image', label: 'Thumbnail', value: f.thumb_image, hint: 'A path on the site or an https link.' })}
+        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'thumb_image', label: 'Thumbnail', value: f.thumb_image, hint: 'The game card’s image (16:9). A path on the site or an https link.' })}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'screenshots', label: 'Screenshots', value: f.screenshots, hint: 'One path or link per line, in the order the site shows them; delete a line to remove it.' })}
+        ${edit && h.deps.production ? imageToolScript() : ''}
+      </div>
+      ${cardSection}
+      ${seoSection}
+      <h2 style="margin-top:18px">Page design</h2>
+      <div class="fields">
+        ${iconPicker({ name: 'page_layout', label: 'Page layout', value: f.page_layout, disabled: !edit,
+          hint: 'The site offers two: Standard (a cover image above the text) or Hero (a full-width background with the logo over it).',
+          options: PAGE_LAYOUTS.map((v) => ({ value: v, caption: v === 'hero' ? 'Hero' : 'Standard', icon: layoutIcon(v) })) })}
+        ${iconPicker({ name: 'theme', label: 'Colour theme', value: f.theme, disabled: !edit,
+          hint: 'The site offers two: Light or Dark.',
+          options: THEMES.map((v) => ({ value: v, caption: v === 'dark' ? 'Dark' : 'Light', icon: themeIcon(v) })) })}
+        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'hero_background', label: 'Hero background', value: f.hero_background ?? '', hint: 'For the Hero layout: a full-width background (21:9). When it is empty the site uses the hero image instead.' })}
+        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'logo_image', label: 'Logo art', value: f.logo_image ?? '', hint: 'For the Hero layout: the game’s logo, with transparency (any shape).' })}
       </div>
       <h2 style="margin-top:18px">Playing</h2>
       <div class="fields">
@@ -172,6 +230,7 @@ export function listingPieces(h: ListingHelpers) {
         ${vault ? txt('fit', 'Player fit (Vault)', 'For fixed-size games: page width, page height, x, y, width, height of the game on that page.') : ''}
         ${minSizeField(f, vault && edit)}
       </div>
+      ${addressSection}
       ${edit ? html`<div class="form-foot">${saveControls(vault, l, canSubmit(u, s))}${previewButtons(api, h.deps.previewSites)}${err}</div>` : ''}
     </form>`;
     const side = html`<div class="card"><h2>Site listing</h2><p>${state(l)}</p>
@@ -331,6 +390,9 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const slug = String(b.slug ?? '').trim().toLowerCase();
     if (!isListingSlug(slug)) fail(400, 'The page address can use lowercase letters, numbers and dashes.');
     if (db.listing(slug)) fail(409, `vaultlearninggames.org/games/${slug}/ is already taken.`);
+    // The new game's page must not land on another game's page address or one of its aliases (card C).
+    const clash = db.listings().find((x) => (x.draft.page_address || '') === slug || (x.draft.aliases ?? []).includes(slug));
+    if (clash) fail(409, `That address is already used by ${clash.slug} (its page address or an alias).`);
     const draft = normalize({ title: b.title, makers: [s.name] });
     if (!draft.title) fail(400, 'Add a title.');
     let game: Game | undefined;
@@ -366,14 +428,22 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     if (!P.canEdit(u, s)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can edit site listings.');
     const b = await jsonBody(c);
     if (typeof b.embed === 'string') b.embed = b.embed === 'true';
-    if (!P.canPublish(u)) for (const k of VAULT_ONLY) delete b[k];  // player fit and minimum size are Vault's call
+    if (!P.canPublish(u)) for (const k of VAULT_ONLY) delete b[k];  // player fit, size and the page address/aliases are Vault's call
+    // The listing's date (the record's created date; the site's newest-first sort) is Vault staff only: a studio's
+    // save — even a crafted one — can never re-sort the site.
+    let listingDate: string | null = null;
+    if (h.isStaff(u) && b.created_at !== undefined && b.created_at !== null && String(b.created_at).trim() !== '') {
+      const d = String(b.created_at).trim();
+      if (!/^\d{4}-\d{2}-\d{2}([T ].*)?$/.test(d) || Number.isNaN(Date.parse(d))) fail(400, 'The listing date must be a date like 2026-10-21.');
+      listingDate = new Date(Date.parse(d)).toISOString();
+    } else delete b.created_at;
     const draft = normalize(b, l.draft);
     const flag = (v: unknown) => v === true || v === '1' || v === 'on';
     const wantsPublish = flag(b.publish) && P.canPublish(u);
     // Studio saves go to Vault for review when the member can request publish (else they stay a draft); Vault staff
     // save and publish in one step.
     const wantsSubmit = !wantsPublish && P.canSubmit(u, s);
-    const bad = draftProblems(db, l, draft, wantsPublish || wantsSubmit);
+    const bad = draftProblems(db, l, draft, wantsPublish || wantsSubmit, h.deps.prodPublicUrl);
     if (bad.length) fail(400, bad.join(' '));
     // A name left in "Made by"’s "Add a new studio…" fields is added with the save (listing-makers.ts).
     if (typeof b.maker_new_name === 'string' && b.maker_new_name.trim()) {
@@ -383,6 +453,10 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     pruneMakerProposals(db, l.slug, draft.makers);
     if (wantsPublish) createProposedStudios(db, h.actor(u), l.slug, draft.makers);
     saveListing(db, l, draft, h.actor(u), wantsPublish ? 'publish' : wantsSubmit ? 'submit' : 'save');
+    if (listingDate && l.created_at !== listingDate) {
+      db.setListingDate(l.id, listingDate);
+      db.audit(h.actor(u), 'listing.date', `${s.slug}:${l.slug}`, { from: l.created_at, to: listingDate });
+    }
     return c.json({ ok: true });
   });
 
@@ -408,10 +482,10 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const u = h.apiUser(c);
     if (!P.canPublish(u)) fail(403, 'Only Vault staff who can edit game/studio content can publish to the site.');
     const { l } = apiListing(c, u);
-    const bad = draftProblems(db, l, l.draft, true);
+    const bad = draftProblems(db, l, l.draft, true, h.deps.prodPublicUrl);
     if (bad.length) fail(400, bad.join(' '));
     createProposedStudios(db, h.actor(u), l.slug, l.draft.makers);
-    publishListing(db, l, h.actor(u));
+    publishListing(db, l, h.actor(u), h.deps.prodPublicUrl);
     return c.json({ ok: true });
   });
 
@@ -430,9 +504,13 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const u = h.apiUser(c);
     if (!P.canPublish(u)) fail(403, 'Only Vault staff who can edit game/studio content can take games off the site.');
     const { s, l } = apiListing(c, u);
+    const wasPublished = !!l.published;
     db.unpublishListing(l.id);
     db.audit(h.actor(u), 'listing.unpublish', `${s.slug}:${l.slug}`);
     markDeployPending(db, 'listing.unpublish');
+    // Only a listing the site shows is gone from it: start the site's deploy run (site-rebuild.ts) so the change
+    // reaches the built site; the bar above already says a deploy is scheduled.
+    if (wasPublished) requestSiteRebuild(`unpublish:${l.slug}`);
     return c.json({ ok: true });
   });
 

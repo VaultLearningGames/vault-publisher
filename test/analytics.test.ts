@@ -500,10 +500,16 @@ describe('formatting', () => {
     assert.match(svg, /<path class="ga-prev s2" d=""/);                  // none counted the days before
     assert.match(svg, /<title>Sun Oct 4: 0 plays · 30 users\nFri Oct 2: plays not counted yet · 25 users<\/title>/);
     assert.match(svg, /aria-label="Plays and users per day/);
-    // Blog reads (the site view's): a fourth colour, in the title.
+    // Blog reads (the site view's): a fourth colour, in the title, on their own right-hand axis.
     const withReads = { ...s, reads: { current: [5, 2], previous: [1, null] } };
     const rsvg = String(chart(withReads, after));
-    assert.match(rsvg, /<path class="ga-cur s4" d="M0\.5 83\.33L1\.5 93\.33"/);
+    // Reads scale on their own 0–5 axis (not the left 0–30 one): 5 tops the plot, 2 sits at 60%.
+    assert.match(rsvg, /<path class="ga-cur s4" d="M0\.5 0L1\.5 60"/);
+    // The right-hand axis is labelled and ticked for reads only.
+    assert.match(rsvg, /<div class="ga-yt s4" aria-hidden="true">Blog reads<\/div>/);
+    assert.match(rsvg, /<span class="ga-yl ga-yr s4" style="bottom:100%">5<\/span>/);
+    // The left axis is unchanged by the reads series: users still span 0–30.
+    assert.match(rsvg, /<path class="ga-cur s3" d="M0\.5 0L1\.5 66\.67"/);
     assert.match(rsvg, /aria-label="Plays, users and blog reads per day[^"]*Blog reads: 7\."/);
     assert.match(rsvg, /<title>Sun Oct 4: 0 plays · 30 users · 5 blog reads\n/);
     const alone = { ...after, compare: false };

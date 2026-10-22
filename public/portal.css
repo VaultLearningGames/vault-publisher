@@ -494,6 +494,15 @@ tr.feat-edit > td { padding-top: 0; background: var(--sunk); }
 .img-prev:empty { display: none; }
 .img-up { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .field .img-up input[type=file] { font-size: 12px; max-width: 240px; width: auto; border: 0; padding: 1px; background: none; }
+/* The image tool's dialog (portal-image-tool.js): the crop as it will look, on a checkerboard (transparency shows). */
+dialog.iet { width: min(700px, calc(100vw - 32px)); }
+.iet-stage { display: flex; justify-content: center; background: repeating-conic-gradient(#e6e6e6 0 25%, #fff 0 50%) 0 0 / 16px 16px; border-radius: 8px; overflow: hidden; }
+.iet-canvas { display: block; max-width: 100%; cursor: grab; touch-action: none; }
+.iet-canvas:active { cursor: grabbing; }
+.iet-canvas:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.iet-zoom { display: flex; gap: 10px; align-items: center; }
+.iet-zoom input { flex: 1; }
+.iet-sizes { font-size: 13px; }
 
 /* Listing editor: the "Made by" chooser. The makers are ticked chips in the site's order; the other studios are
    unticked chips until portal.js (which adds .js) moves them into the "Add a studio…" dropdown. */
@@ -601,3 +610,26 @@ th.r .th-sort { text-align: right; }
 }
 .env-sync { flex-basis: 100%; font-size: 13px; }
 .env-sync-left { font-weight: 600; }
+
+/* ---------- page layout / colour theme pickers (card B) ---------- */
+/* Each choice is a picture of the result, picked with native radios: no JavaScript, arrow keys move the selection,
+   and the checked choice gets a visible outline. */
+.opt-pick { display: flex; gap: 10px; flex-wrap: wrap; }
+.opt-pick .opt { display: flex; align-items: center; gap: 9px; border: 1.5px solid var(--line); border-radius: 10px;
+  padding: 9px 12px; background: var(--surface); cursor: pointer; font-size: 13px; font-weight: 600; min-width: 106px; }
+.opt-pick .opt:has(input:checked) { border-color: var(--slate); background: var(--slate-soft); box-shadow: inset 0 0 0 1px var(--slate); }
+.opt-pick .opt:has(input:focus-visible) { outline: 2px solid var(--slate); outline-offset: 2px; }
+.opt-pick .opt:has(input:disabled) { cursor: default; color: var(--ink-3); }
+.opt-pick input[type=radio] { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.opt-icon { width: 36px; height: 28px; flex: none; }
+.opt-icon .opt-img { fill: var(--slate); opacity: .38; }
+.opt-icon .opt-lines rect { fill: var(--ink-2); opacity: .65; }
+.opt-icon .swatch { stroke: var(--line); }
+.opt-icon .swatch-light { fill: #FFFFFF; }
+.opt-icon .swatch-dark { fill: #161C23; }
+.opt-icon .bars-light rect { fill: #E6EAEE; }
+.opt-icon .bars-dark rect { fill: #17212B; }
+
+/* Character counter in a field's hint (the SEO title/description of the listing editor). */
+.char-count { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.char-count.over { color: var(--bad, #b3261e); }

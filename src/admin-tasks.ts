@@ -13,6 +13,7 @@
 //   POST /v1/admin/listings/update              { updates: [{ slug, fields?, cdn_game? }], publish, publish_pending? }
 //   GET  /v1/admin/image-variants               the listing images on the CDN, and which have their smaller copies
 //   POST /v1/admin/image-variants               { url, width, height, variants: [{ width, webp (base64) }] }
+//   /v1/admin/legacy-games/…                    the one-time games.json import (migrations/legacy-games/routes.ts)
 //
 // Every POST takes dry_run: true, which answers with what would change and writes nothing.
 import type { Context, Hono } from 'hono';
@@ -24,6 +25,7 @@ import { StudioNotEmptyError, studioWebsite } from './db.ts';
 import { changedFields, EMPTY_LISTING, normalize, type ListingFields } from './listings.ts';
 import { IMAGE_CACHE } from './assets.ts';
 import { isOriginalKey, keyOfUrl, listingImageUrls, MAX_VARIANT_BYTES, readVariants, recordVariants, variantKey, variantWidths, webpWidth } from './image-variants.ts';
+import { registerLegacyGamesApi } from './migrations/legacy-games/routes.ts';
 import { baseUrl, copySiteImages, draftProblems, importFromExport, moveListingToStudio, saveListing, type ListingRow } from './listing-ops.ts';
 
 // Cloud Run ends a request after its timeout (300 s unless the service sets --timeout), so the image migration
@@ -63,6 +65,12 @@ function fieldProblems(fields: Record<string, unknown>, draft: ListingFields): s
     if (LIST_FIELDS.includes(f)) {
       if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) { out.push(`${k} must be a list of strings.`); continue; }
       if (JSON.stringify(draft[f]) !== JSON.stringify(v.map((x) => x.trim()))) out.push(`${k} has empty, repeated or over-long items, or too many of them.`);
+      continue;
+    }
+    // The hero layout's art: a link to the game's own upload (its address is checked by the save's own rules), or null.
+    if (f === 'hero_background' || f === 'logo_image') {
+      if (v !== null && typeof v !== 'string') out.push(`${k} must be a link to one of the game’s uploaded images, or null for none.`);
+      else if (typeof v === 'string' && v.trim().length > 500) out.push(`${k} is too long (${v.trim().length} characters; 500 would be kept).`);
       continue;
     }
     if (typeof v !== 'string') { out.push(`${k} must be a string.`); continue; }
@@ -203,7 +211,7 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
       const problems = fieldProblems(fields as Record<string, unknown>, draft);
       if (link && !link.id && (publish ? draft : l.published)?.play_source === 'cdn')
         problems.push('It plays from the Vault CDN; switch it back to its web address (play_source "url") to disconnect it.');
-      if (!problems.length) problems.push(...draftProblems(db, link ? { game_id: link.id } : l, draft, publish));
+      if (!problems.length) problems.push(...draftProblems(db, link ? { game_id: link.id, studio_slug: l.studio_slug, slug: l.slug } : l, draft, publish, deps.prodPublicUrl));
       const pending = changedFields(l.published, l.draft).filter((k) => !(k in (fields as object)));
       if (publish && body.publish_pending !== true && (!l.published || pending.length || l.review === 'submitted')) {
         problems.push(l.published
@@ -388,4 +396,7 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
     }
     return c.json({ dry_run: dry, url, widths: want, keys });
   });
+
+  // The one-time import of the Squarespace snapshot (games.json), driven by scripts/import-legacy-games.ts.
+  registerLegacyGamesApi(app, deps, admin);
 }

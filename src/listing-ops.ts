@@ -4,6 +4,7 @@
 import { fail } from './app.ts';
 import type { Db, Listing, Studio } from './db.ts';
 import { markDeployPending } from './deploy-status.ts';
+import { requestSiteRebuild } from './portal/site-rebuild.ts';
 import { migrateListingImages, type MigrationResult } from './image-migration.ts';
 import { importListings, type ExportedPage, type ImportResult, type Override } from './listings-import.ts';
 import { changedFields, problems, type ListingFields } from './listings.ts';
@@ -32,9 +33,17 @@ export function importFromExport(db: Db, pages: unknown, overrides: unknown, act
 // ---------- save, publish ----------
 export const cdnReady = (db: Db, l: { game_id: number | null }) => !!(l.game_id && db.currentRelease(l.game_id));
 
-// What stops this draft from being saved (or, with forPublish, from going on the site).
-export function draftProblems(db: Db, l: { game_id: number | null }, draft: ListingFields, forPublish: boolean): string[] {
-  return problems(draft, { forPublish, cdnReady: cdnReady(db, l) });
+// What stops this draft from being saved (or, with forPublish, from going on the site). With the listing's
+// address and the CDN's base (publicUrl), the page layout's art links are checked to be the listing's own uploads;
+// with the database, the card's enum choices and the page address/aliases are checked against the other listings.
+export function draftProblems(db: Db, l: { game_id: number | null; studio_slug?: string; slug?: string }, draft: ListingFields, forPublish: boolean, publicUrl?: string): string[] {
+  return problems(draft, {
+    forPublish, cdnReady: cdnReady(db, l), publicUrl, studio: l.studio_slug, slug: l.slug,
+    studios: db.studios(),
+    address: l.slug ? { self: l.slug, others: db.listings().filter((x) => x.slug !== l.slug).map((x) => ({
+      slug: x.slug, page_address: x.draft.page_address ?? '', aliases: x.draft.aliases ?? [],
+    })) } : undefined,
+  });
 }
 
 // Save a checked draft, then publish it (Vault), submit it for review (a studio) or leave it a draft.
@@ -43,20 +52,26 @@ export function saveListing(db: Db, l: ListingRow, draft: ListingFields, actor: 
   db.saveListingDraft(l.id, draft, actor);
   db.audit(actor, 'listing.save', target, { fields: changedFields(l.draft, draft) });
   if (then === 'publish') {
+    const wasPublished = !!l.published;
     db.publishListing(l.id, actor);
     db.audit(actor, 'listing.publish', target, { fields: changedFields(l.published, draft) });
     markDeployPending(db, 'listing.publish');
+    // Newly on the site only once the site is rebuilt: start that run (site-rebuild.ts) when the flag changes.
+    if (!wasPublished) requestSiteRebuild(`publish:${l.slug}`);
   }
   else if (then === 'submit') { db.setListingReview(l.id, 'submitted', actor, null); db.audit(actor, 'listing.submit', target); }
 }
 
 // Publish the draft as it stands.
-export function publishListing(db: Db, l: ListingRow, actor: string) {
-  const bad = draftProblems(db, l, l.draft, true);
+export function publishListing(db: Db, l: ListingRow, actor: string, publicUrl?: string) {
+  const bad = draftProblems(db, l, l.draft, true, publicUrl);
   if (bad.length) fail(400, bad.join(' '));
+  const wasPublished = !!l.published;
   db.publishListing(l.id, actor);
   db.audit(actor, 'listing.publish', `${l.studio_slug}:${l.slug}`, { fields: changedFields(l.published, l.draft) });
   markDeployPending(db, 'listing.publish');
+  // Newly on the site only once the site is rebuilt: start that run (site-rebuild.ts) when the flag changes.
+  if (!wasPublished) requestSiteRebuild(`publish:${l.slug}`);
 }
 
 // ---------- move to another studio ----------

@@ -482,12 +482,16 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     if (path && !isSafeFilePath(path.slice(0, -1))) return denied(c, 'That isn’t a valid folder.', 404);
     const link = (p: string, e = env) => `/s/${s.slug}/files?${new URLSearchParams({ ...(e === 'production' ? { env: e } : {}), ...(p ? { path: p } : {}) })}`;
     const parts = path.split('/').filter(Boolean);
+    // Only the production address has this trap: a Cloudflare rule redirects the CDN to the site page, which 404s
+    // for a game whose listing is unpublished (or missing). The staging builds address is always open directly.
+    const folderGame = parts[0] ? db.game(s.id, parts[0]) : undefined;
+    const addressWarn = env === 'production' && folderGame ? unpublishedWarning(db.listingsForGame(folderGame.id), 'cdn') : '';
     const crumbs = html`<a href="${link('')}">${s.slug}</a>${parts.map((part, i) => html` / ${i === parts.length - 1 ? part : html`<a href="${link(parts.slice(0, i + 1).join('/') + '/')}">${part}</a>`}`)}`;
     const toggle = html`<div class="seg" role="group" aria-label="Bucket">
       <a href="${link(path, 'staging')}" class="${env === 'staging' ? 'on' : ''}">Staging</a>
       <a href="${link(path, 'production')}" class="${env === 'production' ? 'on' : ''}">Production</a></div>`;
     const title = html`Files`;
-    const sub = html`<span class="mono">${publicUrl}/${s.slug}/${path}</span>`;
+    const sub = html`<span class="mono">${publicUrl}/${s.slug}/${path}</span>${addressWarn}`;
     if (!store) return page(c, 'Files', html`${head(title, sub, toggle, crumbs)}<div class="card"><p class="muted">Production isn’t configured on this server.</p></div>`, { studio: s, active: 'files' });
 
     const prefix = `${s.slug}/${path}`;
@@ -522,7 +526,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const requests = db.releaseRequests({ gameId: g.id });
     const release = canRelease(u), request = canRequest(u, s);
     const stable = `${deps.prodPublicUrl}/${s.slug}/${g.slug}/`;
-    const stableWarn = unpublishedWarning(db.listingsForGame(g.id) as { published?: unknown }[], 'cdn');
+    const stableWarn = unpublishedWarning(db.listingsForGame(g.id), 'cdn');
     const api = `/portal/api/s/${s.slug}/g/${g.slug}`;
     // A build that didn't come from a push (a .zip uploaded here, or a copy of a monitored web address) has no commit.
     const buildRows = builds.map((b: Build) => { const origin = buildOrigin(b.commit_sha); const type = origin === 'upload' ? 'upload' : b.ref_type; return html`<tr>
@@ -564,7 +568,8 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
               : html`<p class="muted">Nothing on staging yet. <a href="/s/${s.slug}/register">Upload a build</a>: from GitHub, as a .zip, or from a web address.</p>`}${UP.monitorNote(s, g)}</div>
           <div class="card"><h2>Production · released versions <small>immutable; only Vault releases new versions${g.frozen_at ? '; frozen by Vault' : '; members who can request publish choose which approved version is current'}</small></h2>
             ${releases.length ? html`<div class="tbl-wrap"><table><thead><tr><th>Release</th><th>Status</th><th>Built from</th><th>Approved</th><th>Link</th><th></th></tr></thead><tbody>${relRows}</tbody></table></div>`
-              : html`<p class="muted">Nothing released yet.${request ? ' Choose “Request release” on a test version above.' : ''}</p>`}</div>
+              : html`<p class="muted">Nothing released yet.${request ? ' Choose “Request release” on a test version above.' : ''}</p>`}
+            ${releases.length && stableWarn ? html`<p class="small">${stableWarn}</p>` : ''}</div>
           ${requests.length ? html`<div class="card"><h2>Release requests</h2><div class="tbl-wrap"><table><thead><tr><th>Version</th><th>Build</th><th>Status</th><th>Requested</th><th></th></tr></thead><tbody>${reqRows}</tbody></table></div></div>` : ''}
         </div>`;
     const side = html`<div class="grid" style="align-content:start">
@@ -635,7 +640,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const asked = c.req.query('tab');
     const tab = asked === 'cdn' || asked === 'listing' || asked === 'analytics' ? asked : l || (g && db.listingsForGame(g.id).length) ? 'listing' : 'cdn';
     const title = l?.draft.title || g!.slug;
-    const sub = html`${l?.published ? html`<a href="https://vaultlearninggames.org/games/${l.slug}/" target="_blank" rel="noopener">vaultlearninggames.org/games/${l.slug}/</a>` : l ? html`<span class="muted">vaultlearninggames.org/games/${l.slug}/ (not published)</span>` : html`<span class="muted">not on the site</span>`}
+    const sub = html`${l?.published ? html`<a href="https://vaultlearninggames.org/games/${l.slug}/" target="_blank" rel="noopener">vaultlearninggames.org/games/${l.slug}/</a>` : l ? html`<span class="muted">vaultlearninggames.org/games/${l.slug}/</span> ${unpublishedWarning(l, 'site')}` : html`<span class="muted">not on the site</span>`}
       ${g?.repository ? html` · <a href="https://github.com/${g.repository}" title="${g.repository}">GitHub Repo</a>` : ''}`;
     const tabs = html`<div class="tabs"><a href="?tab=listing" class="${tab === 'listing' ? 'on' : ''}">Site listing</a><a href="?tab=cdn" class="${tab === 'cdn' ? 'on' : ''}">Vault CDN${g ? html` · ${db.currentRelease(g.id)?.version ?? 'no release'}` : ''}</a><a href="?tab=analytics" class="${tab === 'analytics' ? 'on' : ''}">Analytics</a></div>`;
     let content: Html | string;

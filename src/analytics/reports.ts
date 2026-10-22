@@ -268,6 +268,27 @@ export function realtimeVisitorsRequest(): GaRequest {
   return { metrics: [{ name: 'activeUsers' }] };
 }
 
+// The live panel under the map (src/portal/analytics-realtime.ts): what is being played and read now. Realtime reports
+// see the last 30 minutes at most (a standard property's minuteRanges go back 29 minutes), so a shorter window is a
+// minute range and anything longer is the whole 30. games: a studio's games (null: every game).
+export const REALTIME_MAX_MINUTES = 30;
+const minutes = (n: number) => (n < REALTIME_MAX_MINUTES ? { minuteRanges: [{ startMinutesAgo: Math.max(1, Math.round(n)) - 1, endMinutesAgo: 0 }] } : {});
+const someGame = (games: string[] | null): Expr => (games ? inList(DIM_RT_GAME, games)
+  : all({ filter: { fieldName: DIM_RT_GAME, stringFilter: { matchType: 'FULL_REGEXP', value: '.+' } } }, notSet(DIM_RT_GAME)));
+// People playing each game: those whose vault_game is it (as the map counts them).
+export function realtimeGamesRequest(games: string[] | null, window = REALTIME_MAX_MINUTES): GaRequest {
+  return { dimensions: [{ name: DIM_RT_GAME }], metrics: [{ name: 'activeUsers' }], dimensionFilter: someGame(games), limit: 250, ...minutes(window) };
+}
+// Plays started (play_start) by game: eventName goes with eventCount (not with activeUsers), so its own report.
+export function realtimeGamePlaysRequest(games: string[] | null, window = REALTIME_MAX_MINUTES): GaRequest {
+  return { dimensions: [{ name: DIM_RT_GAME }, { name: 'eventName' }], metrics: [{ name: 'eventCount' }], dimensionFilter: all(eventIn(['play_start']), someGame(games)), limit: 250, ...minutes(window) };
+}
+// Readers and opens by page title: realtime reports have no pagePath, so a post is told by its page's title
+// (readRealtimePosts matches them to the blog's posts).
+export function realtimeScreensRequest(window = REALTIME_MAX_MINUTES): GaRequest {
+  return { dimensions: [{ name: 'unifiedScreenName' }], metrics: [{ name: 'activeUsers' }, { name: 'screenPageViews' }], limit: 250, ...minutes(window) };
+}
+
 // ---------- reading answers ----------
 export interface GaResponse {
   dimensionHeaders?: { name: string }[];
@@ -527,4 +548,35 @@ export interface Place { countryId: string; country: string; city: string; users
 export function readPlaces(res: GaResponse): Place[] {
   return rowsOf(res).map((r) => ({ countryId: r.dims.countryId ?? '', country: r.dims.country ?? '', city: r.dims.city ?? '', users: r.mets.activeUsers ?? 0 }))
     .filter((p) => p.users > 0).sort((a, b) => b.users - a.users);
+}
+
+// The live panel's rows: a game or post (slug), people on it now (active) and its plays or opens (events).
+export interface LiveItem { slug: string; active: number; events: number }
+const liveOrder = (a: LiveItem, b: LiveItem) => b.active - a.active || b.events - a.events || a.slug.localeCompare(b.slug);
+// The games being played (realtimeGamesRequest), with their plays (realtimeGamePlaysRequest; null: not read, 0 each).
+// A game with plays but no one counted on it still shows: GA can attribute a play to someone it has since lost.
+export function readRealtimeGames(users: GaResponse, plays: GaResponse | null): LiveItem[] {
+  const by = new Map<string, LiveItem>();
+  const item = (slug: string) => { let it = by.get(slug); if (!it) by.set(slug, it = { slug, active: 0, events: 0 }); return it; };
+  const slugOf = (r: Row) => (r.dims[DIM_RT_GAME] ?? '').trim();
+  for (const r of rowsOf(users)) { const s = slugOf(r); if (s && s !== '(not set)') item(s).active += r.mets.activeUsers ?? 0; }
+  if (plays) for (const r of rowsOf(plays)) { const s = slugOf(r); if (s && s !== '(not set)' && (r.dims.eventName ?? 'play_start') === 'play_start') item(s).events += r.mets.eventCount ?? 0; }
+  return [...by.values()].filter((it) => it.active > 0 || it.events > 0).sort(liveOrder);
+}
+// The blog posts being read (realtimeScreensRequest): the pages whose title is a post's — "<title> — <the site's
+// title>" as the site writes it, or the title alone — added up per post. titles: each post's title by slug. Any other
+// page (a game's, the blog's home) isn't a post, so isn't listed.
+export function readRealtimePosts(res: GaResponse, titles: Map<string, string>): LiveItem[] {
+  const slugOf = new Map<string, string>();
+  for (const [slug, title] of titles) if (slug && title.trim()) slugOf.set(title.trim(), slug);
+  const by = new Map<string, LiveItem>();
+  for (const r of rowsOf(res)) {
+    const name = (r.dims.unifiedScreenName ?? '').trim(), cut = name.lastIndexOf(' — ');
+    const slug = slugOf.get(name) ?? (cut > 0 ? slugOf.get(name.slice(0, cut).trim()) : undefined);
+    if (!slug) continue;
+    const it = by.get(slug) ?? { slug, active: 0, events: 0 };
+    it.active += r.mets.activeUsers ?? 0; it.events += r.mets.screenPageViews ?? 0;
+    by.set(slug, it);
+  }
+  return [...by.values()].filter((it) => it.active > 0 || it.events > 0).sort(liveOrder);
 }

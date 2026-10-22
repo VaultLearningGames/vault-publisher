@@ -101,6 +101,73 @@
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') refresh(); });
 })();
 
+// The live panel under the map (src/portal/analytics-realtime.ts): refreshed from its API every minute while the page
+// is on screen (the timer stops while it is hidden, and when the page is left), rebuilt from the JSON with text only
+// (titles are never markup). A failed refresh keeps the last figures and says so.
+(function () {
+  var card = document.querySelector('[data-live]');
+  if (!card || !window.fetch) return;
+  var url = card.getAttribute('data-live'), blog = !!card.getAttribute('data-blog');
+  var body = card.querySelector('[data-live-body]'), updated = card.querySelector('[data-live-updated]'), err = card.querySelector('[data-live-error]');
+  var nf = new Intl.NumberFormat('en-US');
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  function stamp(iso) {
+    var d = new Date(iso), t = el('time', '', d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }));
+    t.setAttribute('datetime', iso);
+    updated.textContent = 'Updated ';
+    updated.appendChild(t);
+  }
+  function list(heading, cols, rows, total, failed, noEvents) {
+    var box = el('div', 'ga-live-list');
+    box.appendChild(el('h3', '', heading));
+    if (failed) { box.appendChild(el('p', 'small muted', 'Google Analytics couldn’t answer.')); return box; }
+    if (!rows.length) { box.appendChild(el('p', 'small muted', 'None right now.')); return box; }
+    var wrap = el('div', 'tbl-wrap'), table = el('table'), head = el('tr'), tbody = el('tbody');
+    cols.forEach(function (c, i) { head.appendChild(el('th', i ? 'r' : '', c)); });
+    table.appendChild(el('thead')).appendChild(head);
+    rows.forEach(function (r) {
+      var tr = el('tr'), name = el('td', 'proj'), b = el('b', '', r.title);
+      tr.setAttribute('data-slug', r.slug);
+      if (r.href) { var a = el('a'); a.href = r.href; a.appendChild(b); name.appendChild(a); } else name.appendChild(b);
+      tr.appendChild(name);
+      tr.appendChild(el('td', 'r num', nf.format(r.active)));
+      tr.appendChild(el('td', 'r num', noEvents ? '—' : nf.format(r.events)));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody); wrap.appendChild(table); box.appendChild(wrap);
+    if (total > rows.length) box.appendChild(el('p', 'small muted ga-live-more', 'and ' + nf.format(total - rows.length) + ' more'));
+    return box;
+  }
+  function render(d) {
+    var e = d.errors || {}, out;
+    if (!d.gamesTotal && !d.blogsTotal && !e.games && !e.blogs) out = el('p', 'small muted ga-live-empty', 'No activity in the last ' + d.windowMinutes + ' minutes');
+    else {
+      out = el('div', 'ga-live-lists' + (blog ? '' : ' one'));
+      out.appendChild(list('Games being played', ['Game', 'Playing', 'Plays'], d.games, d.gamesTotal, e.games, !!e.plays));
+      if (blog) out.appendChild(list('Blog posts being read', ['Post', 'Readers', 'Reads'], d.blogs, d.blogsTotal, e.blogs, false));
+    }
+    body.replaceChildren(out);
+    stamp(d.generatedAt);
+  }
+  function refresh() {
+    if (document.visibilityState !== 'visible') return;
+    fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'vault-portal', Accept: 'application/json' } })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (d) { render(d); err.hidden = true; })
+      .catch(function () { err.hidden = false; });
+  }
+  // The page's own time zone for the first stamp (the server wrote the property's).
+  var first = updated.querySelector('time');
+  if (first) stamp(first.getAttribute('datetime'));
+  var timer = null;
+  function start() { if (!timer && document.visibilityState === 'visible') timer = setInterval(refresh, 60000); }
+  function stop() { if (timer) { clearInterval(timer); timer = null; } }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { refresh(); start(); } else stop(); });
+  window.addEventListener('pagehide', stop);
+  window.addEventListener('pageshow', function (e) { if (e.persisted) { refresh(); start(); } });
+  start();
+})();
+
 // The top lists (top games, the blog's top posts): Load more asks for the next page (offset: the rows shown) and
 // appends its rows, skipping any already shown; the link goes once every row is listed. A failed request says so and
 // leaves the link to try again.

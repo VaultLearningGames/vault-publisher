@@ -27,6 +27,7 @@ import { html, raw, type Html } from './html.ts';
 import type { ListingHelpers, ListingRow } from './listings.ts';
 import { head } from './routes.ts';
 import { computeAxisScale } from './chart-scale.ts';
+import { getRealtimeActivity, liveCard, windowParam } from './analytics-realtime.ts';
 
 // ---------- formatting ----------
 const nf = new Intl.NumberFormat('en-US');
@@ -181,7 +182,8 @@ export interface GameTitle { title: string; href: string | null; studio?: { name
 // title by slug and its share clicks; moreUrl: where Load more asks for the next top posts (none, no link).
 interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; topUrl?: string; assets: Assets; titleOf(slug: string): GameTitle
   readsError?: AnalyticsError | null;   // the site view's blog reads couldn't be read (the chart draws without them)
-  blog?: { stats: Result<BlogStats>; titles: Map<string, string>; shares?: Result<ShareStats> | null; moreUrl?: string } | null }
+  blog?: { stats: Result<BlogStats>; titles: Map<string, string>; shares?: Result<ShareStats> | null; moreUrl?: string } | null
+  live?: Html | null }   // the live panel (analytics-realtime.ts), right under the map: the site's and a studio's views
 interface Assets { css: string; js: string; land: string }
 
 // The date range picker, laid out like Google Analytics': a button showing the range, which opens the presets (in GA's
@@ -443,7 +445,7 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   const lists = top || blog ? html`<div class="grid analytics-top-lists">${top}${blog}</div>` : '';
 
   return html`${assets}<div class="ga">${picker}${headline}${chartCard}${page}
-    ${realtime}${lists}
+    ${realtime}${o.live ?? ''}${lists}
     <p class="small muted ga-foot">From Google Analytics (the site’s visits and ${p && !p.timed ? 'play counts' : 'play events'}, which began on ${longDate(PLAYS_SINCE)}; days are ${o.timeZone.replace(/_/g, ' ')} days, weeks start on Sunday). Figures are cached for up to 10 minutes; the realtime map for a minute.</p></div>`;
 }
 
@@ -504,8 +506,11 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     const sel = analytics.selection(q);
     // The site view (Vault staff): the blog too.
     const site = !scope.game && !scope.studio && h.isStaff(u);
-    const [ov, rt, blog] = await Promise.all([analytics.overview(sel, full, cat), analytics.realtime(scope),
-      site ? Promise.all([analytics.blog(sel), blogTitles(), analytics.blogShares(sel)]).then(([stats, titles, shares]) => ({ stats, titles, shares })) : null]);
+    const titles = site ? blogTitles() : null;
+    const [ov, rt, blog, live] = await Promise.all([analytics.overview(sel, full, cat), analytics.realtime(scope),
+      site ? Promise.all([analytics.blog(sel), titles!, analytics.blogShares(sel)]).then(([stats, titles, shares]) => ({ stats, titles, shares })) : null,
+      // The live panel: the site's (Vault staff) and a studio's views, not a game's (its map is the one game already).
+      scope.game ? null : getRealtimeActivity(analytics, { now: new Date(), games: scope.studio ? scope.games ?? [] : null, titles, gameTitle: titleOf(u, false) })]);
     // The chart's blog reads: the site view's summary carries them (site-wide, so a studio's or a game's never does,
     // nor anyone but Vault staff).
     const charted = ov.reads?.ok && ov.series.ok ? { ...ov, series: { ok: true as const, value: { ...ov.series.value, reads: ov.reads.value } } } : ov;
@@ -515,7 +520,8 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     return view(charted, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`,
       topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio),
       blog: blog && { ...blog, moreUrl: `/portal/analytics/top-posts${bq.size ? `?${bq}` : ''}` },
-      readsError: ov.reads && !ov.reads.ok ? ov.reads.error : null });
+      readsError: ov.reads && !ov.reads.ok ? ov.reads.error : null,
+      live: live && liveCard(live, { url: `/api/analytics/realtime${rtq}`, blog: site, timeZone: analytics.timeZone }) });
   }
 
   app.get('/vault/analytics', async (c) => {
@@ -553,6 +559,25 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     } else if (!h.isStaff(u)) return c.text('Only Vault staff can see this.', 403);
     const rt = await analytics.realtime(scope);
     return c.html(realtimeBody(rt, { staff: h.isStaff(u), land: assets.land, game: !!slug }).toString(), 200, { 'Cache-Control': 'no-store' });
+  });
+
+  // The live panel's figures, for the page's script to refresh every minute: ?studio= (else the site, Vault staff
+  // only) and ?minutes= (a whole number from 1 to 120; realtime reports reach back 30 minutes at most, so that is the
+  // window; anything else is a 400). The blog's posts are Vault staff's, on the site's view only; otherwise blogs is [].
+  app.get('/api/analytics/realtime', async (c) => {
+    const u = h.signedIn(c); if (u instanceof Response) return u;
+    const noStore = { 'Cache-Control': 'no-store' };
+    const windowMinutes = windowParam(c.req.query('minutes'));
+    if (windowMinutes === null) return c.json({ error: 'minutes must be a whole number from 1 to 120' }, 400, noStore);
+    const studio = c.req.query('studio');
+    let games: string[] | null = null;
+    if (studio) {
+      const s = db.studioBySlug(studio);
+      if (!s || !canSeeStudio(u, s)) return c.json({ error: 'Not found' }, 404, noStore);
+      games = studioScope(s).scope.games ?? [];
+    } else if (!h.isStaff(u)) return c.json({ error: 'Only Vault staff can see this.' }, 403, noStore);
+    const a = await getRealtimeActivity(analytics, { now: new Date(), windowMinutes, games, titles: studio ? null : blogTitles(), gameTitle: titleOf(u, false) });
+    return c.json(a, 200, noStore);
   });
 
   // The top games' next page, for Load more (analytics.js): ?studio= (else the site), the page's range, and

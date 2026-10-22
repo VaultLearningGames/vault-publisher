@@ -5,8 +5,8 @@
 import { googleTokenSource, NoCredentialsError, type TokenSource } from './google-auth.ts';
 import {
   averageSeconds, basicPlaysRequest, blogReadsSeriesRequest, blogRequest, blogTotalsRequest, localNow, pagesRequest, playersRequest, playSeriesRequest, playsRequest, readBasicPlays, readBlog, readPages, readPairs, readPlaces,
-  readPlays, readReads, readSeries, readShares, readTopPages, realtimePlayersRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest,
-  selectionOf, sharesRequest, topPagesRequest, trafficRequest, trafficSeriesRequest, type BlogStats, type GamePages, type GaRequest, type GaResponse, type Line, type PageStats, type Pair,
+  readPlays, readReads, readRealtimeGames, readRealtimePosts, readSeries, readShares, readTopPages, realtimeGamePlaysRequest, realtimeGamesRequest, realtimePlayersRequest, realtimeScreensRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest,
+  selectionOf, sharesRequest, topPagesRequest, trafficRequest, trafficSeriesRequest, type BlogStats, type GamePages, type GaRequest, type LiveItem, type GaResponse, type Line, type PageStats, type Pair,
   type Place, type PlayStats, type Scope, type Selection, type Series, type ShareStats,
 } from './reports.ts';
 export { blogRequest, blogTotalsRequest, readBlog, readShares, sharesRequest, type BlogStats, type ShareStats } from './reports.ts';
@@ -102,6 +102,9 @@ export interface Overview {
   headline: Headline;                       // the top row's figures, for the range
 }
 // who: whose places these are: 'visitors' (everyone on the site, the site view) or 'players' (a game's or a studio's).
+// The live panel: the games being played (and their plays: its own result, so failing alone leaves dashes) and, the
+// site view only, the blog posts being read (null: not asked for).
+export interface Live { games: Result<LiveItem[]>; plays: Result<null>; blogs: Result<LiveItem[]> | null }
 export interface Realtime { places: Result<Place[]>; visitors: Result<number> | null; who: 'players' | 'visitors'; playing?: Result<number> }
 
 export interface AnalyticsOptions {
@@ -218,5 +221,22 @@ export class Analytics {
       settle(this.call('runRealtimeReport', realtimePlayersRequest(scope)).then((r) => readPlaces(r).reduce((n, p) => n + p.users, 0))),
     ]);
     return { places, visitors, who: 'visitors', playing };
+  }
+
+  // What is being played and read now (the live panel under the map). games: a studio's games (none on the site: no
+  // one, without asking), or null for every game. titles: the blog's posts' titles by slug, when the blog is shown.
+  async live(games: string[] | null, window: number, titles: Promise<Map<string, string>> | null): Promise<Live> {
+    if (games && !games.length) return { games: { ok: true, value: [] }, plays: { ok: true, value: null }, blogs: titles && { ok: true, value: [] } };
+    const plays = this.call('runRealtimeReport', realtimeGamePlaysRequest(games, window));
+    const [users, playsRes, blogs] = await Promise.all([
+      settle(this.call('runRealtimeReport', realtimeGamesRequest(games, window))),
+      settle(plays),
+      titles ? settle(Promise.all([this.call('runRealtimeReport', realtimeScreensRequest(window)), titles]).then(([r, t]) => readRealtimePosts(r, t))) : null,
+    ]);
+    return {
+      games: users.ok ? { ok: true, value: readRealtimeGames(users.value, playsRes.ok ? playsRes.value : null) } : users,
+      plays: playsRes.ok ? { ok: true, value: null } : playsRes,
+      blogs,
+    };
   }
 }

@@ -134,22 +134,31 @@ async function rebuildByCommit(
     return { status: res.status, json, text: text.slice(0, 200) };
   };
   const ref = `/git/refs/heads/${encodeURIComponent(a.branch)}`;
-  const head = await api('GET', `/git/ref/heads/${encodeURIComponent(a.branch)}`);
-  if (head.status !== 200) return { ok: false, error: `reading ${a.branch}: GitHub ${head.status} ${head.text}` };
-  const headSha = String((head.json as { object?: { sha?: string } } | null)?.object?.sha ?? '');
-  const parent = await api('GET', `/git/commits/${headSha}`);
-  if (parent.status !== 200) return { ok: false, error: `reading commit ${headSha.slice(0, 7)}: GitHub ${parent.status} ${parent.text}` };
-  const tree = String((parent.json as { tree?: { sha?: string } } | null)?.tree?.sha ?? '');
-  // Same tree as the parent: nothing in the site's files changes, the push is only the trigger.
-  const made = await api('POST', '/git/commits', {
-    message: `chore: rebuild the site (${reason})\n\nThe portal's catalog changed, so the built site is out of date. Same tree as the parent:\nthis commit only starts Deploy (site) (deploy.yml, on: push).\n`,
-    tree, parents: [headSha], author: a.author, committer: a.author,
-  });
-  if (made.status !== 201) return { ok: false, error: `committing to ${a.branch}: GitHub ${made.status} ${made.text}` };
-  const sha = String((made.json as { sha?: string } | null)?.sha ?? '');
-  const upd = await api('PATCH', ref, { sha, force: false });
-  if (upd.status !== 200) return { ok: false, error: `moving ${a.branch} to ${sha.slice(0, 7)}: GitHub ${upd.status} ${upd.text}` };
-  return { ok: true, commit: sha };
+  // Read the branch, build on its tip, move it: a blog commit landing in between makes the fast-forward fail, and
+  // force:false is deliberate (never discard someone else's commit). Read and retry instead, so a push that races
+  // us costs a retry rather than the rebuild. The last attempt's failure is reported.
+  let lastError = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const head = await api('GET', `/git/ref/heads/${encodeURIComponent(a.branch)}`);
+    if (head.status !== 200) return { ok: false, error: `reading ${a.branch}: GitHub ${head.status} ${head.text}` };
+    const headSha = String((head.json as { object?: { sha?: string } } | null)?.object?.sha ?? '');
+    const parent = await api('GET', `/git/commits/${headSha}`);
+    if (parent.status !== 200) return { ok: false, error: `reading commit ${headSha.slice(0, 7)}: GitHub ${parent.status} ${parent.text}` };
+    const tree = String((parent.json as { tree?: { sha?: string } } | null)?.tree?.sha ?? '');
+    // Same tree as the parent: nothing in the site's files changes, the push is only the trigger.
+    const made = await api('POST', '/git/commits', {
+      message: `chore: rebuild the site (${reason})\n\nThe portal's catalog changed, so the built site is out of date. Same tree as the parent:\nthis commit only starts Deploy (site) (deploy.yml, on: push).\n`,
+      tree, parents: [headSha], author: a.author, committer: a.author,
+    });
+    if (made.status !== 201) return { ok: false, error: `committing to ${a.branch}: GitHub ${made.status} ${made.text}` };
+    const sha = String((made.json as { sha?: string } | null)?.sha ?? '');
+    const upd = await api('PATCH', ref, { sha, force: false });
+    if (upd.status === 200) return { ok: true, commit: sha };
+    lastError = `moving ${a.branch} to ${sha.slice(0, 7)}: GitHub ${upd.status} ${upd.text}`;
+    // Not a lost race (422 is the branch having moved): nothing to retry.
+    if (upd.status !== 422) break;
+  }
+  return { ok: false, error: lastError };
 }
 
 // The dispatch itself: workflow_dispatch when the credential may (204), otherwise a commit to the branch. Never

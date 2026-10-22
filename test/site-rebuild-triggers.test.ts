@@ -133,6 +133,43 @@ describe('a change to what the site shows starts the deploy run', () => {
   });
 
 
+  // A blog commit can land on the branch between our read of its tip and our push. force:false means that push
+  // fails (422) rather than discarding the blog post, so the rebuild has to re-read and try again: a race must
+  // cost a retry, not the build.
+  test('a commit racing the rebuild push costs a retry, not the rebuild', async () => {
+    const { requestSiteRebuild } = await import('../src/portal/site-rebuild.ts');
+    const calls: string[] = [];
+    let pushes = 0;
+    const fetchStub = (async (url: string | URL, init?: { method?: string }) => {
+      const u = String(url);
+      const method = init?.method ?? 'GET';
+      calls.push(`${method} ${u.replace('https://api.github.com/repos/VaultLearningGames/vault-site', '')}`);
+      if (u.includes('/dispatches')) return new Response('no actions:write', { status: 403 });
+      if (u.includes('/git/ref/heads/')) {
+        // The tip moves after the first read: a blog commit landed.
+        return Response.json({ object: { sha: pushes === 0 ? 'aaa' : 'bbb' } }, { status: 200 });
+      }
+      if (u.includes('/git/commits/')) return Response.json({ tree: { sha: 'tree1' } }, { status: 200 });
+      if (method === 'POST' && u.endsWith('/git/commits')) return Response.json({ sha: 'newsha' }, { status: 201 });
+      if (method === 'PATCH' && u.includes('/git/refs/heads/')) {
+        pushes += 1;
+        // First push loses the race, second succeeds.
+        return pushes === 1
+          ? new Response('{"message":"Update is not a fast forward"}', { status: 422 })
+          : Response.json({ ok: true }, { status: 200 });
+      }
+      return new Response('unexpected', { status: 500 });
+    }) as unknown as typeof fetch;
+
+    // debounceMs 0 fires at once; wait for the in-flight dispatch (and its retry) to finish.
+    requestSiteRebuild('publish:racing-game:about', { env, fetch: fetchStub, debounceMs: 0 });
+    await flushPendingRebuild();
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(pushes, 2, 'should have retried the push exactly once after the 422');
+    const reads = calls.filter((c) => c.includes('/git/ref/heads/')).length;
+    assert.equal(reads, 2, 'should have re-read the branch tip before retrying');
+  });
+
   // The GitHub Apps installed on vault-site have Contents: write and Metadata: read, with NO Actions: write, so
   // workflow_dispatch is refused there. deploy.yml also runs `on: push` to the branch, so the rebuild falls back to
   // an empty commit, which starts the same run. Verified against the live installations on 2026-10-22.

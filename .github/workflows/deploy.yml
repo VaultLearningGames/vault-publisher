@@ -137,6 +137,11 @@ jobs:
           SITE_COMMIT_AUTHOR_EMAIL=${{ vars.SERVICE == 'vault-publisher-staging' && '344094146+vault-portal-staging[bot]@users.noreply.github.com' || '344094182+vault-portal-production[bot]@users.noreply.github.com' }}
           VAULT_SITE_APP_BOT_LOGIN=${{ vars.SERVICE == 'vault-publisher-staging' && 'vault-portal-staging[bot]' || 'vault-portal-production[bot]' }}
           SITE_REBUILD_ENVIRONMENT=${{ inputs.environment || (github.ref_name == 'production' && 'production' || 'staging') }}
+          # Build identity under the portal's logo (src/build-info.ts): per-revision, so a rollback shows the
+          # rolled-back revision's own build. From this run's own context; nothing to set in the environment.
+          VAULT_BUILD_NUMBER=${{ github.run_number }}
+          VAULT_BUILD_SHA=${{ github.sha }}
+          VAULT_BUILD_TIME=${{ github.run_at }}
         secrets: |-
           R2_BUILDS_ACCESS_KEY_ID=${{ vars.SERVICE }}-r2-builds-access-key-id:latest
           R2_BUILDS_SECRET_ACCESS_KEY=${{ vars.SERVICE }}-r2-builds-secret-access-key:latest

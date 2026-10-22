@@ -104,6 +104,16 @@
 .ga-zoom button { width: 28px; height: 28px; padding: 0; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
 .ga-zoom button:hover { border-color: var(--s2); }
 .ga-places td, .ga-places th { padding-top: 6px; padding-bottom: 6px; }
+/* The live panel (analytics-realtime.ts), right under the map's card: its two lists side by side (one: the full width). */
+.ga-live { margin-top: 16px; }
+.ga-live-err { color: var(--bad); }
+.ga-live-lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; align-items: start; }
+.ga-live-lists.one { grid-template-columns: minmax(0, 1fr); }
+.ga-live-list h3 { font-size: 13px; margin: 4px 0 6px; }
+.ga-live-list .proj { overflow-wrap: anywhere; }
+.ga-live-list td, .ga-live-list th { padding-top: 6px; padding-bottom: 6px; }
+.ga-live-list p, .ga-live-empty { margin: 4px 0 0; }
+@media (max-width: 760px) { .ga-live-lists { grid-template-columns: minmax(0, 1fr); } }
 .card .tbl-wrap.ga-tight { margin: 0; }
 .ga-off .fix { margin: 0; }
 .ga-foot { margin-top: 18px; }

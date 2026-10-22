@@ -45,6 +45,13 @@ export function fakeGa(games: string[], opts: { log?: { method: GaMethod; body: 
     const daily = (d: string) => (playing && d >= since ? visits(d) : 0);
     if (method === 'runRealtimeReport') {
       if (!dims.length) return res([[[], [Math.round(140 * scale) + 3]]]);
+      // The live panel: people and plays by game (the pool's), and readers and opens by page title.
+      if (dims[0] === 'customUser:vault_game') {
+        return res(pool.map((g) => [[g, ...(dims.includes('eventName') ? ['play_start'] : [])], byName({ activeUsers: 1 + 9 * weight(g) / 2.2, eventCount: 1 + 12 * weight(g) / 2.2 })] as [string[], number[]]));
+      }
+      if (dims[0] === 'unifiedScreenName') {
+        return res([['Vault Learning Games Library', 12], ['Blog — Vault Learning Games Library', 3]].map(([t, n]) => [[String(t)], byName({ activeUsers: Number(n), screenPageViews: Number(n) * 2 })]));
+      }
       const places: [string, string, string, number][] = [['US', 'United States', 'Madison', 14], ['US', 'United States', 'Chicago', 9], ['US', 'United States', 'Austin', 6],
         ['US', 'United States', 'Seattle', 4], ['CA', 'Canada', 'Calgary', 5], ['GB', 'United Kingdom', 'London', 3], ['IN', 'India', 'Bengaluru', 2], ['AU', 'Australia', 'Sydney', 2], ['BR', 'Brazil', 'São Paulo', 1]];
       return res(places.map(([id, c, city, n]) => [[id, c, city], [Math.max(some ? 0 : 1, Math.round(n * scale * (some ? 6 : 1)))]] as [string[], number[]]).filter(([, [n]]) => n > 0));

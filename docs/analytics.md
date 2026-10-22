@@ -117,6 +117,7 @@ realtime reports (the site; a studio: five and one; a game: four and one), well 
 | On the site now (site view) | realtime `activeUsers` by `countryId`, `country`, `city` (everyone, playing or browsing), the total, and how many have `customUser:vault_game` set (playing a game) |
 | Playing now (a game) | realtime `activeUsers` by place with `customUser:vault_game` = the game's slug |
 | Playing now (a studio) | the same, with `customUser:vault_game` in the list of its games' slugs (no request when it has none on the site) |
+| Live panel, under the map (site and studio views; `GET /api/analytics/realtime`) | realtime `activeUsers` by `customUser:vault_game` (people playing each game) and `eventCount` of `play_start` by it (plays); the site view also `activeUsers` and `screenPageViews` by `unifiedScreenName` (page title: realtime has no `pagePath`), a post being a page titled “<post title> — <site title>” (Vault staff only). Top 10 of each, then “and N more”; refreshed every minute while the page is on screen |
 
 Day adds `hour` in `00`…the current hour to every two-period report, so today and yesterday cover the same hours.
 A game is filtered on its page paths (`pagePath`), and on `customEvent:game_slug` = its listing slug for play time; a

@@ -197,7 +197,7 @@ export function listingPieces(h: ListingHelpers) {
         ${txt('subjects', 'Subjects', 'Comma-separated, e.g. Math, Science')}
         ${txt('topics', 'Topics', 'Comma-separated, e.g. Algebra, Physics')}
         ${area('standards', 'Standards', 'Codes, one per line or comma-separated (Common Core, NGSS), e.g. 4.OA.A.2', 2)}
-        ${txt('related_curriculum', 'Related curriculum', 'A link to teacher materials')}
+        ${txt('related_curriculum', 'Related curriculum', 'A link to teacher materials. When it is empty the game’s page says there is no curriculum yet and invites teachers to share one with the Vault (no email address is shown).')}
         ${txt('gameplay_video', 'Gameplay video', 'A YouTube or other video link')}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'hero_image', label: 'Hero image', value: f.hero_image, hint: 'A path on the site (games/x/img/hero.png) or an https link.' })}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'thumb_image', label: 'Thumbnail', value: f.thumb_image, hint: 'The game card’s image (16:9). A path on the site or an https link.' })}

@@ -6,7 +6,7 @@ import { fail, jsonBody } from '../app.ts';
 import { applyFeaturedEdit, readFeatured, saveFeatured, type FeaturedEdit, type FeaturedLists } from '../featured.ts';
 import { storeImage } from '../assets.ts';
 import type { User } from '../db.ts';
-import { markDeployPending } from '../deploy-status.ts';
+import { siteContentChanged } from './site-rebuild.ts';
 import type { ListingHelpers } from './listings.ts';
 
 export function registerFeaturedApi(app: Hono, h: ListingHelpers) {
@@ -22,7 +22,8 @@ export function registerFeaturedApi(app: Hono, h: ListingHelpers) {
     const next = applyFeaturedEdit(readFeatured(db), edit, (s) => site.has(s));
     if (typeof next === 'string') fail(400, next);
     saveFeatured(db, next, h.actor(u));
-    markDeployPending(db, 'featured');
+    // The home page's featured games come from /v1/catalog, so this changes the site: build it.
+    siteContentChanged(db, 'featured');
     return next;
   };
 

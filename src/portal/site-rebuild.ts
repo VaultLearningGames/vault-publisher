@@ -1,7 +1,9 @@
-// Rebuild the public site after a listing's published state changes.
+// Rebuild the public site after a change to what it shows.
 //
-// The site is built from this portal's GET /v1/catalog at build time (vault-site's scripts/pull-catalog.mjs), so
-// publishing or unpublishing a listing only reaches it when vault-site's *Deploy (site)* workflow runs again. This
+// The site is built from this portal's GET /v1/catalog at build time (vault-site's scripts/pull-catalog.mjs), so a
+// change to a listing the site shows — publishing it, editing a published listing's fields, taking it off, moving it
+// to another studio, re-pointing its images, changing the featured games — only reaches it when vault-site's
+// *Deploy (site)* workflow runs again. This
 // portal starts that run itself: a GitHub workflow_dispatch of the deploy workflow (deploy.yml, the file behind
 // *Deploy (site)*; docs/ops-checklist.md) on the branch the portal commits to there (site-repo/config.ts: the
 // staging portal "staging", the production portal "production"), with the run's "environment" input set to that
@@ -13,12 +15,14 @@
 // markDeployPending the caller already made) still says a deploy is scheduled until a run is seen. With several
 // portal instances the run may start twice; the build is idempotent, so that is harmless.
 //
-// Re-publishing a listing that is already on the site (the published flag does not change) starts no run: the
-// caller passes the reason only when the site's view of the listing actually changes.
+// Re-publishing a listing that is already on the site starts a run when the published fields actually changed: the
+// caller passes the reason only when the site's view of the listing changes (a save that changes nothing does not
+// build).
 //
 // Needs VAULT_SITE_GITHUB_TOKEN with *Actions: write* on vault-site (docs/setup.md), the same token the portal
 // commits Markdown with. SITE_DEPLOY_WORKFLOW overrides the workflow file name (default deploy.yml).
 import { readSiteRepoConfig, sitePublishingEnabled } from '../site-repo/config.ts';
+import { markDeployPending, type SettingsStore } from '../deploy-status.ts';
 
 // How long the first change waits for more before the run starts; a later change extends the window to its own end.
 export const SITE_REBUILD_DEBOUNCE_MS = 30_000;
@@ -65,6 +69,20 @@ export function requestSiteRebuild(reason: string, deps: SiteRebuildDeps = {}): 
   }, ms);
   timer.unref?.();
   pending = { timer, at: now, reasons, deps };
+}
+
+// The site's content changed, so the built site is now out of date: say so on the deploy bar (markDeployPending) and
+// start the build that makes it true (requestSiteRebuild). One call for both, because the two must never drift: a bar
+// that promises a deploy nothing started is what left listing edits waiting for the catalog-check timer (David,
+// 2026-10-22: "Any changes made to game or blog data … should directly trigger a site rebuild and deploy … I don't
+// like the 15 minute timer for anything other than copying in the staging content from production").
+//
+// For listing/catalog changes only. A blog change is NOT one of these: the portal commits the post's Markdown to the
+// site's branch, and vault-site's deploy runs on a push to it (deploy.yml `on: push`), so the commit is already the
+// direct trigger; calling this there would build the same commit twice. Those call sites mark the bar only.
+export function siteContentChanged(store: SettingsStore, reason: string, deps: SiteRebuildDeps = {}): void {
+  markDeployPending(store, reason);
+  requestSiteRebuild(reason, deps);
 }
 
 // Fire a pending rebuild now (tests, shutdown): the run the window was going to start, or null when none is pending.

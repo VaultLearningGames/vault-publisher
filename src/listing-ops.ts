@@ -4,7 +4,7 @@
 import { fail } from './app.ts';
 import type { Db, Listing, Studio } from './db.ts';
 import { markDeployPending } from './deploy-status.ts';
-import { requestSiteRebuild } from './portal/site-rebuild.ts';
+import { siteContentChanged } from './portal/site-rebuild.ts';
 import { migrateListingImages, type MigrationResult } from './image-migration.ts';
 import { importListings, type ExportedPage, type ImportResult, type Override } from './listings-import.ts';
 import { changedFields, problems, type ListingFields } from './listings.ts';
@@ -53,11 +53,14 @@ export function saveListing(db: Db, l: ListingRow, draft: ListingFields, actor: 
   db.audit(actor, 'listing.save', target, { fields: changedFields(l.draft, draft) });
   if (then === 'publish') {
     const wasPublished = !!l.published;
+    const changed = changedFields(l.published, draft);
     db.publishListing(l.id, actor);
-    db.audit(actor, 'listing.publish', target, { fields: changedFields(l.published, draft) });
-    markDeployPending(db, 'listing.publish');
-    // Newly on the site only once the site is rebuilt: start that run (site-rebuild.ts) when the flag changes.
-    if (!wasPublished) requestSiteRebuild(`publish:${l.slug}`);
+    db.audit(actor, 'listing.publish', target, { fields: changed });
+    // What the site shows changed, so build it: a game new to the site, and equally an edit to one already on it
+    // (its layout, SEO, card, address, makers...). Only a publish that changes none of the published fields doesn't.
+    if (!wasPublished) siteContentChanged(db, `publish:${l.slug}`);
+    else if (changed.length) siteContentChanged(db, `edit:${l.slug}:${changed.join('+')}`);
+    else markDeployPending(db, 'listing.publish');
   }
   else if (then === 'submit') { db.setListingReview(l.id, 'submitted', actor, null); db.audit(actor, 'listing.submit', target); }
 }
@@ -67,11 +70,13 @@ export function publishListing(db: Db, l: ListingRow, actor: string, publicUrl?:
   const bad = draftProblems(db, l, l.draft, true, publicUrl);
   if (bad.length) fail(400, bad.join(' '));
   const wasPublished = !!l.published;
+  const changed = changedFields(l.published, l.draft);
   db.publishListing(l.id, actor);
-  db.audit(actor, 'listing.publish', `${l.studio_slug}:${l.slug}`, { fields: changedFields(l.published, l.draft) });
-  markDeployPending(db, 'listing.publish');
-  // Newly on the site only once the site is rebuilt: start that run (site-rebuild.ts) when the flag changes.
-  if (!wasPublished) requestSiteRebuild(`publish:${l.slug}`);
+  db.audit(actor, 'listing.publish', `${l.studio_slug}:${l.slug}`, { fields: changed });
+  // As in saveListing: a game new to the site, or an edit to one already on it, changes the site and builds it.
+  if (!wasPublished) siteContentChanged(db, `publish:${l.slug}`);
+  else if (changed.length) siteContentChanged(db, `edit:${l.slug}:${changed.join('+')}`);
+  else markDeployPending(db, 'listing.publish');
 }
 
 // ---------- move to another studio ----------
@@ -87,6 +92,9 @@ export function moveListingToStudio(db: Db, l: ListingRow, from: Studio, to: Stu
   if (!opts.dryRun) {
     db.moveListing(l.id, to.id, draft, published, actor);
     db.audit(actor, 'listing.move', l.slug, { from: from.slug, to: to.slug, ...unlinked });
+    // A move rewrites what the site shows for a published game (its studio, and "Made by" when it named the old
+    // studio), so build it.
+    if (l.published) siteContentChanged(db, `move:${l.slug}:${from.slug}->${to.slug}`);
   }
   return { slug: l.slug, from: from.slug, to: to.slug, makers: { from: (l.published ?? l.draft).makers, to: (published ?? draft).makers }, ...unlinked };
 }
@@ -104,7 +112,12 @@ export async function copySiteImages(deps: { db: Db; production: Storage | null;
   migrating.add(db);
   try {
     const r = await migrateListingImages({ db, production: deps.production, prodPublicUrl: deps.prodPublicUrl, base, actor, fetch: deps.fetch, ...opts });
-    if (!opts.dryRun) db.setSetting(LAST_MIGRATION_KEY, JSON.stringify(r));
+    if (!opts.dryRun) {
+      db.setSetting(LAST_MIGRATION_KEY, JSON.stringify(r));
+      // Re-pointing a published listing's images at the CDN changes the image URLs the built site serves, so build it.
+      // A dry run and a run that moved nothing change nothing.
+      if (r.migrated.some((m) => m.where === 'published' || m.where === 'featured')) siteContentChanged(db, 'images:cdn-migration');
+    }
     return r;
   } finally {
     migrating.delete(db);

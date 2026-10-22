@@ -505,6 +505,15 @@ export function readBlog(byPath: GaResponse, totals: GaResponse): BlogStats {
     posts: [...posts.values()].filter((p) => p.opens > 0).sort((a, b) => b.opens - a.opens || a.slug.localeCompare(b.slug)),
   };
 }
+// The top post's article on the site: the post's page (the blog's home for the blog's row) as an absolute address
+// from the site's base URL (the portal's SITE_URL: the staging's for staging, the production's for production). No
+// base, or a row without a path or slug, null: then the title stands without a link.
+export function blogPostUrl(siteBase: string | null | undefined, p: { path?: string | null; slug?: string | null }): string | null {
+  if (!siteBase) return null;
+  const base = siteBase.replace(/\/+$/, '');
+  if (p?.path && p.path.startsWith('/')) return base + p.path;
+  return p?.slug ? `${base}/blog/${p.slug}/` : null;
+}
 // Share clicks: the total and each network's in each period, and this period's per post (by slug) and network. A
 // network the buttons don't offer (or "(not set)") counts in the totals only.
 export type NetworkCounts = Record<ShareNetwork, number>;

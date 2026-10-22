@@ -6,8 +6,8 @@
 // a studio's or a game's: plays and average play time — above a chart of plays and users (and for the site, blog
 // reads), a realtime map of where people are playing, top games (site and studio), and for the site the blog's top
 // posts. A game's (a studio's) sessions and users are visits that showed its page or started one of its plays.
-// The site view's top posts are the blog's (Vault staff only): each post's opens, readers, average time on screen
-// and its share clicks (by network).
+// The site view's top posts are the blog's (Vault staff only): each post's readers, average time on screen and its
+// share clicks (by network), and each title links to the post's article on the site (the top games' list's way).
 // The play events began on PLAYS_SINCE: before it there are no plays (the page says so), but sessions, users, page
 // views and outbound clicks of the game pages go back through the Squarespace years (the same addresses): the top
 // games fall back to page views when there are no plays.
@@ -20,7 +20,7 @@ import { cityPoint } from '../analytics/cities.ts';
 import { COUNTRY_POINTS } from '../analytics/countries.ts';
 import { MAP_HEIGHT, MAP_WIDTH } from '../analytics/projection.ts';
 import { loadLegacy, pagePaths } from '../analytics/pages.ts';
-import { averageSeconds, longDate, minSec, perReader, PLAYS_SINCE, PRESETS, presetPeriods, SHARE_NETWORKS, spanLabel, topPagesTotals, type GamePages, type GamePlays, type NetworkCounts, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
+import { averageSeconds, blogPostUrl, longDate, minSec, perReader, PLAYS_SINCE, PRESETS, presetPeriods, SHARE_NETWORKS, spanLabel, topPagesTotals, type GamePages, type GamePlays, type NetworkCounts, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
 import { SiteBlogRepo } from '../blog/siteRepo.ts';
 import type { Studio, User } from '../db.ts';
 import { html, raw, type Html } from './html.ts';
@@ -182,7 +182,7 @@ export interface GameTitle { title: string; href: string | null; studio?: { name
 // title by slug and its share clicks; moreUrl: where Load more asks for the next top posts (none, no link).
 interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; topUrl?: string; assets: Assets; titleOf(slug: string): GameTitle
   readsError?: AnalyticsError | null;   // the site view's blog reads couldn't be read (the chart draws without them)
-  blog?: { stats: Result<BlogStats>; titles: Map<string, string>; shares?: Result<ShareStats> | null; moreUrl?: string } | null
+  blog?: { stats: Result<BlogStats>; titles: Map<string, string>; shares?: Result<ShareStats> | null; moreUrl?: string; siteUrl?: string | null } | null
   live?: Html | null }   // the live panel (analytics-realtime.ts), right under the map: the site's and a studio's views
 interface Assets { css: string; js: string; land: string }
 
@@ -310,9 +310,10 @@ export function pageParams(offset: string | undefined, limit: string | undefined
 export const blogTitle = (slug: string, path: string, titles: Map<string, string>) => (slug === '' ? 'Blog home' : titles.get(slug) || path);
 // A post's (or the blog's) share clicks by network, e.g. "LinkedIn 3 · WhatsApp 1": the networks with clicks only.
 export const networkBreakdown = (n: NetworkCounts): string => SHARE_NETWORKS.filter(([k]) => n[k] > 0).map(([k, name]) => `${name} ${num(n[k])}`).join(' · ');
-// A top post's row: its name, opens, readers, time on screen per reader and, when shares were asked for (not null),
-// its share clicks (failed, a dash).
-export function blogRow(p: BlogStats['posts'][number], titles: Map<string, string>, shares: Result<ShareStats> | null): Html {
+// A top post's row: its name — a link to the post's article on the site, the top games' list's way (url: null, the
+// title stands alone) — readers, time on screen per reader and, when shares were asked for (not null), its share
+// clicks (failed, a dash).
+export function blogRow(p: BlogStats['posts'][number], titles: Map<string, string>, shares: Result<ShareStats> | null, url: string | null): Html {
   const sh = shares?.ok ? shares.value : null;
   const shareCell = (slug: string) => {
     if (!sh) return html`<td class="r num col-num">—</td>`;
@@ -320,23 +321,25 @@ export function blogRow(p: BlogStats['posts'][number], titles: Map<string, strin
     const by = s ? networkBreakdown(s.networks) : '';
     return html`<td class="r num col-num ga-shares">${num(s?.total ?? 0)}${by ? html`<span class="small muted">${by}</span>` : ''}</td>`;
   };
-  return html`<tr data-slug="${p.slug}"><td class="proj col-post"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num col-num">${num(p.opens)}</td><td class="r num col-num">${num(p.readers)}</td><td class="r num col-num">${minSec(perReader(p.seconds, p.readers))}</td>${shares ? shareCell(p.slug) : ''}</tr>`;
+  const name = blogTitle(p.slug, p.path, titles);
+  return html`<tr data-slug="${p.slug}"><td class="proj col-post">${url ? html`<a href="${url}"><b>${name}</b></a>` : html`<b>${name}</b>`}<span>${p.path}</span></td><td class="r num col-num">${num(p.readers)}</td><td class="r num col-num">${minSec(perReader(p.seconds, p.readers))}</td>${shares ? shareCell(p.slug) : ''}</tr>`;
 }
 // The blog's top posts (the site view, Vault staff only), by opens, with each's share clicks: the card the view sets
 // next to the top games, under the full-width map. stats: the same range's blog figures (the table's posts come from
-// them); failed, no table. shares: null, not asked for (no Shares column); failed, dashes in it. The first page of
-// posts (as many as the top games'), then a Load more link, which asks moreUrl for the next ones.
-export function blogCard(stats: Result<BlogStats>, titles: Map<string, string>, shares: Result<ShareStats> | null = null, moreUrl?: string): Html | string {
+// them); failed, no table. shares: null, not asked for (no Shares column); failed, dashes in it. siteUrl: the site's
+// base URL (the portal's SITE_URL) the titles' article links are built from; none, the titles stand alone. The first
+// page of posts (as many as the top games'), then a Load more link, which asks moreUrl for the next ones.
+export function blogCard(stats: Result<BlogStats>, titles: Map<string, string>, shares: Result<ShareStats> | null = null, moreUrl?: string, siteUrl?: string | null): Html | string {
   if (!stats.ok) return '';
   const { posts } = stats.value;
   const sh = shares?.ok ? shares.value : null;
-  // The pinned Total row: the whole range's figures (every post, not just the page shown) — opens and time on screen
-  // summed over the posts; readers a deduplicated total (the totals' query: readers can't be added up across posts);
-  // the average on screen, the whole's seconds per reader; the shares' total (dashes when the query failed).
-  const totalRow = html`<tr class="analytics-total-row"><td class="proj col-post"><b>Total</b></td><td class="r num col-num">${num(posts.reduce((s, p) => s + p.opens, 0))}</td><td class="r num col-num">${num(stats.value.totals.readers.current)}</td><td class="r num col-num">${minSec(perReader(posts.reduce((s, p) => s + p.seconds, 0), stats.value.totals.readers.current))}</td>${shares ? (sh ? html`<td class="r num col-num">${num(sh.total.current)}</td>` : html`<td class="r num col-num">—</td>`) : ''}</tr>`;
-  const rows = posts.slice(0, TOP_PAGE).map((p) => blogRow(p, titles, shares));
+  // The pinned Total row: the whole range's figures (every post, not just the page shown) — time on screen summed
+  // over the posts; readers a deduplicated total (the totals' query: readers can't be added up across posts); the
+  // average on screen, the whole's seconds per reader; the shares' total (dashes when the query failed).
+  const totalRow = html`<tr class="analytics-total-row"><td class="proj col-post"><b>Total</b></td><td class="r num col-num">${num(stats.value.totals.readers.current)}</td><td class="r num col-num">${minSec(perReader(posts.reduce((s, p) => s + p.seconds, 0), stats.value.totals.readers.current))}</td>${shares ? (sh ? html`<td class="r num col-num">${num(sh.total.current)}</td>` : html`<td class="r num col-num">—</td>`) : ''}</tr>`;
+  const rows = posts.slice(0, TOP_PAGE).map((p) => blogRow(p, titles, shares, blogPostUrl(siteUrl, p)));
   return html`<div class="card ga-blog"><h2>Top Blog Articles</h2>${rows.length
-    ? html`<div class="tbl-wrap"><table class="analytics-blog-table"><thead><tr><th class="col-post">Post</th><th class="r col-num">Opens</th><th class="r col-num">Readers</th><th class="r col-num" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r col-num" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${totalRow}${rows}</tbody></table></div>${loadMore(moreUrl, posts.length, 'posts')}`
+    ? html`<div class="tbl-wrap"><table class="analytics-blog-table"><thead><tr><th class="col-post">Post</th><th class="r col-num">Readers</th><th class="r col-num">Avg time</th>${shares ? html`<th class="r col-num" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${totalRow}${rows}</tbody></table></div>${loadMore(moreUrl, posts.length, 'posts')}`
     : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`;
 }
 
@@ -413,7 +416,7 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   }
 
   // The blog's top posts (the site view, Vault staff only), in the top lists below.
-  const blog = kind === 'site' && o.blog && o.staff ? blogCard(o.blog.stats, o.blog.titles, o.blog.shares ?? null, o.blog.moreUrl) : '';
+  const blog = kind === 'site' && o.blog && o.staff ? blogCard(o.blog.stats, o.blog.titles, o.blog.shares ?? null, o.blog.moreUrl, o.blog.siteUrl) : '';
 
   const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">${kind === 'site' ? 'On the site now' : 'Playing now'}</span><small>last 30 minutes · updates every minute</small></h2>
     <div data-realtime="${o.realtimeUrl}">${realtimeBody(rt, { staff: o.staff, land: o.assets.land, game: !!o.scope.game })}</div></div>`;
@@ -519,7 +522,7 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     const bq = new URLSearchParams(Object.entries(q).filter((e): e is [string, string] => e[1] !== undefined));
     return view(charted, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`,
       topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio),
-      blog: blog && { ...blog, moreUrl: `/portal/analytics/top-posts${bq.size ? `?${bq}` : ''}` },
+      blog: blog && { ...blog, moreUrl: `/portal/analytics/top-posts${bq.size ? `?${bq}` : ''}`, siteUrl: h.deps.siteUrl ?? null },
       readsError: ov.reads && !ov.reads.ok ? ov.reads.error : null,
       live: live && liveCard(live, { url: `/api/analytics/realtime${rtq}`, blog: site, timeZone: analytics.timeZone }) });
   }
@@ -612,7 +615,7 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     const [stats, titles, shares] = await Promise.all([analytics.blog(sel), blogTitles(), analytics.blogShares(sel)]);
     const posts = stats.ok ? stats.value.posts : [];
     const page = posts.slice(offset, offset + limit);
-    return c.json({ items: page.map((p) => ({ slug: p.slug, html: blogRow(p, titles, shares).toString() })), offset, total: posts.length,
+    return c.json({ items: page.map((p) => ({ slug: p.slug, html: blogRow(p, titles, shares, blogPostUrl(h.deps.siteUrl, p)).toString() })), offset, total: posts.length,
       hasMore: offset + page.length < posts.length }, 200, { 'Cache-Control': 'no-store' });
   });
 

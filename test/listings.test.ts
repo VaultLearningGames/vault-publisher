@@ -82,6 +82,19 @@ describe('listing fields', () => {
     assert.equal(f.embed, false);
     assert.deepEqual(f.screenshots, ['a.png', 'b.png']);
   });
+  test('a standard is one item per line, commas and all: a description is never split or cut short', () => {
+    // Studios paste whole standard descriptions, which contain commas ("…temperature or pressure can be described,
+    // and predicted…") and run well past a tag's length. Splitting those on commas turned Locke's Gambit's 8
+    // standards into 29 fragments on its page ("desires", "safety", "cultural"), each read as a standard of its own.
+    const long = 'HS-ETS1-3 Engineering Design - Evaluate a solution to a complex real-world problem based on prioritized criteria and trade-offs that account for a range of constraints, including cost, safety, reliability, and aesthetics as well as possible social, cultural, and environmental impacts.';
+    const f = normalize({ standards: `PS1.B: Chemical Reactions - Substances react chemically in characteristic ways. In a chemical process, the atoms are regrouped.\n${long}` });
+    assert.deepEqual(f.standards, ['PS1.B: Chemical Reactions - Substances react chemically in characteristic ways. In a chemical process, the atoms are regrouped.', long]);
+    assert.equal(f.standards[1], long, 'kept whole, not cut at 200 characters');
+    // An array arrives as it is, and blank lines and repeats still go.
+    assert.deepEqual(normalize({ standards: ['4.OA.A.2', '', '4.OA.A.2', 'MS-LS1-1'] }).standards, ['4.OA.A.2', 'MS-LS1-1']);
+    // Short tag lists still take commas: that's how the forms send them.
+    assert.deepEqual(normalize({ subjects: 'Science, Math' }).subjects, ['Science', 'Math']);
+  });
   test('problems explain what blocks saving and publishing', () => {
     const f = normalize({ play_url: 'javascript:alert(1)', hero_image: '../../etc/passwd', fit: '1,2,3' });
     const p = problems(f, { forPublish: true, cdnReady: false });

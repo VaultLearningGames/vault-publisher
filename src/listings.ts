@@ -97,11 +97,13 @@ export const MIN_SIZE_RANGE = { min: 200, max: 3840 } as const;
 
 const MAX_TEXT = 5000, MAX_LIST = 40;
 const str = (v: unknown, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
-// Lists arrive as arrays, or as text with one item per line (or comma-separated for short tags).
-function list(v: unknown, splitCommas: boolean): string[] {
+// Lists arrive as arrays, or as text with one item per line (or comma-separated for short tags). `itemMax` is each
+// item's length cap: the default suits tags; a list whose items are prose (standards, each a code and its whole
+// description) needs room for a sentence, and splitting those on commas would cut them mid-sentence.
+function list(v: unknown, splitCommas: boolean, itemMax = 200): string[] {
   const raw = Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(splitCommas ? /[\n,]/ : /\n/) : [];
   const out: string[] = [];
-  for (const item of raw.map((s) => s.trim()).filter(Boolean)) if (!out.includes(item)) out.push(item.slice(0, 200));
+  for (const item of raw.map((s) => s.trim()).filter(Boolean)) if (!out.includes(item)) out.push(item.slice(0, itemMax));
   return out.slice(0, MAX_LIST);
 }
 const isHttpUrl = (s: string) => /^https?:\/\/[^\s]+$/i.test(s);
@@ -188,7 +190,7 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
     grades: grades ?? pick('grades', list(input.grades, true)),
     subjects: pick('subjects', list(input.subjects, true)),
     topics: pick('topics', list(input.topics, true)),
-    standards: pick('standards', list(input.standards, true)),
+    standards: pick('standards', list(input.standards, false, 500)),
     related_curriculum: pick('related_curriculum', str(input.related_curriculum, 2000)),
     gameplay_video: pick('gameplay_video', str(input.gameplay_video, 500)),
     hero_image: pick('hero_image', str(input.hero_image, 500)),

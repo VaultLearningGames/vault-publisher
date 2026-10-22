@@ -66,6 +66,27 @@ export const EMPTY_LISTING: ListingFields = {
   play_source: 'url', play_url: '', cdn_path: '', embed: true, fit: '', min_width: null, min_height: null,
 };
 
+// A stored listing, with any field written before it existed filled in from EMPTY_LISTING. Rows keep the shape
+// they were saved with, so an old row can be missing newer fields (card_categories, card_tags, the layout
+// fields): readers index them directly, and a missing array crashed the game page. Defaulting once here, at the
+// parse boundary, keeps every reader honest. Arrays are copied so a row can never share EMPTY_LISTING's.
+export function listingFieldsOf(json: string): ListingFields {
+  const stored = JSON.parse(json) as Partial<ListingFields> | null;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(EMPTY_LISTING as unknown as Record<string, unknown>)) {
+    out[k] = Array.isArray(v) ? [...v] : v;
+  }
+  for (const [k, v] of Object.entries(stored ?? {})) {
+    if (v !== undefined && v !== null) out[k] = v;
+  }
+  // A field stored as the wrong shape (null, or a scalar where the code indexes an array) is as fatal as a
+  // missing one: keep the default instead.
+  for (const [k, v] of Object.entries(EMPTY_LISTING as unknown as Record<string, unknown>)) {
+    if (Array.isArray(v) && !Array.isArray(out[k])) out[k] = [...v];
+  }
+  return out as unknown as ListingFields;
+}
+
 // Fields only Vault staff set; a studio member's save or preview leaves them as they are.
 // The page address and aliases are Vault staff only: they can point at, or hide, other games' pages.
 export const VAULT_ONLY = ['fit', 'min_width', 'min_height', 'page_address', 'aliases'] as const;

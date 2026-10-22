@@ -122,6 +122,29 @@ describe('listing fields', () => {
     assert.equal(page(undefined).short_description, '');
     assert.equal(shortText('#hashtag games'), '#hashtag games', 'a # without a space is text, not a heading');
   });
+  test('a row saved before a field existed reads back whole, and its page still opens', async () => {
+    // The real failure: listings written before the card enum fields had no card_categories, so the game
+    // page's chip picker indexed undefined and the route 500'd with {"error":"internal error"}.
+    const boss = as('boss', 'admin');
+    await boss.post(L, { slug: 'lockes-gambit', title: "Locke's Gambit" });
+
+    // Age the row the way the old code left it: drop the fields that didn't exist yet.
+    const row = db.listing('lockes-gambit')!;
+    const aged = { ...(row.draft as unknown as Record<string, unknown>) };
+    delete aged.card_categories; delete aged.card_tags; delete aged.screenshots;
+    aged.aliases = null;
+    db.sqlite.prepare('UPDATE listings SET draft_json = ? WHERE id = ?').run(JSON.stringify(aged), row.id);
+
+    const back = db.listing('lockes-gambit')!.draft;
+    assert.deepEqual(back.card_categories, [], 'a missing field reads back as its default');
+    assert.deepEqual(back.card_tags, []);
+    assert.deepEqual(back.screenshots, []);
+    assert.deepEqual(back.aliases, [], 'a field stored as null is as fatal as a missing one');
+    assert.equal(back.title, "Locke's Gambit", 'stored values still win');
+
+    const res = await boss.get('/s/fieldday/g/lockes-gambit');
+    assert.equal(res.status, 200, 'the game page opens for an aged row');
+  });
 });
 
 describe('studios edit, Vault publishes', () => {

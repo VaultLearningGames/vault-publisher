@@ -167,12 +167,12 @@ const firstError = (...rs: (Result<unknown> | null)[]) => rs.find((r): r is { ok
 // titleOf: a game's title, the link to its Analytics tab (if the viewer may see it) and, on the site view, its
 // studio's Analytics page.
 export interface GameTitle { title: string; href: string | null; studio?: { name: string; href: string } }
-// topUrl: where Load more asks for the next top games (the view's scope and range); none, no button.
+// topUrl: where Load more asks for the next top games (the view's scope and range); none, no link.
 // blog: the site view's blog (Vault staff only): its stats (the top posts' table comes from them), each post's
-// title by slug and its share clicks.
+// title by slug and its share clicks; moreUrl: where Load more asks for the next top posts (none, no link).
 interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; topUrl?: string; assets: Assets; titleOf(slug: string): GameTitle
   readsError?: AnalyticsError | null;   // the site view's blog reads couldn't be read (the chart draws without them)
-  blog?: { stats: Result<BlogStats>; titles: Map<string, string>; shares?: Result<ShareStats> | null } | null }
+  blog?: { stats: Result<BlogStats>; titles: Map<string, string>; shares?: Result<ShareStats> | null; moreUrl?: string } | null }
 interface Assets { css: string; js: string; land: string }
 
 // The date range picker, laid out like Google Analytics': a button showing the range, which opens the presets (in GA's
@@ -280,6 +280,13 @@ export function topTotalRow(tot: { by: 'plays' | 'views'; plays?: number; avg?: 
     ? html`<tr class="analytics-total-row"><td class="proj"><b>Total</b></td><td class="r num">${num(tot.views ?? 0)}</td><td class="r num">${num(tot.clicks ?? 0)}</td></tr>`
     : html`<tr class="analytics-total-row"><td class="proj"><b>Total</b></td><td class="r num">${num(tot.plays ?? 0)}</td><td class="r num">${duration(tot.avg ?? null)}</td></tr>`;
 }
+// A top list's Load more, under its table when it has more rows than the first page: a text link (a real button, for
+// the keyboard and screen readers, styled as a link: .link-button), which asks url for the next ones (analytics.js);
+// noun: what the status line counts ("12 of 30 games").
+export function loadMore(url: string | undefined, total: number, noun: string): Html | '' {
+  return url && total > TOP_PAGE
+    ? html`<div class="ga-more"><button type="button" class="link-button load-more" data-more="${url}" data-limit="${TOP_PAGE}" data-noun="${noun}">Load more</button><span class="small muted" role="status" aria-live="polite"></span></div>` : '';
+}
 // ?offset=&limit= of a Load more: whole numbers (limit kept to 1 to 100); anything else, the defaults (0 and a page).
 export function pageParams(offset: string | undefined, limit: string | undefined): { offset: number; limit: number } {
   const int = (v: string | undefined) => (v !== undefined && /^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
@@ -288,18 +295,13 @@ export function pageParams(offset: string | undefined, limit: string | undefined
 }
 
 // ---------- the blog ----------
-// The posts shown in the top posts' table.
-export const BLOG_TOP = 20;
 // A post's name in the table: the blog's home, its title (from the posts in vault-site), else its path.
 export const blogTitle = (slug: string, path: string, titles: Map<string, string>) => (slug === '' ? 'Blog home' : titles.get(slug) || path);
 // A post's (or the blog's) share clicks by network, e.g. "LinkedIn 3 · WhatsApp 1": the networks with clicks only.
 export const networkBreakdown = (n: NetworkCounts): string => SHARE_NETWORKS.filter(([k]) => n[k] > 0).map(([k, name]) => `${name} ${num(n[k])}`).join(' · ');
-// The blog's top posts (the site view, Vault staff only), by opens, with each's share clicks: the card the view sets
-// next to the top games, under the full-width map. stats: the same range's blog figures (the table's posts come from
-// them); failed, no table. shares: null, not asked for (no Shares column); failed, dashes in it.
-export function blogCard(stats: Result<BlogStats>, titles: Map<string, string>, shares: Result<ShareStats> | null = null): Html | string {
-  if (!stats.ok) return '';
-  const { posts } = stats.value;
+// A top post's row: its name, opens, readers, time on screen per reader and, when shares were asked for (not null),
+// its share clicks (failed, a dash).
+export function blogRow(p: BlogStats['posts'][number], titles: Map<string, string>, shares: Result<ShareStats> | null): Html {
   const sh = shares?.ok ? shares.value : null;
   const shareCell = (slug: string) => {
     if (!sh) return html`<td class="r num">—</td>`;
@@ -307,13 +309,23 @@ export function blogCard(stats: Result<BlogStats>, titles: Map<string, string>, 
     const by = s ? networkBreakdown(s.networks) : '';
     return html`<td class="r num ga-shares">${num(s?.total ?? 0)}${by ? html`<span class="small muted">${by}</span>` : ''}</td>`;
   };
+  return html`<tr data-slug="${p.slug}"><td class="proj"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num">${num(p.opens)}</td><td class="r num">${num(p.readers)}</td><td class="r num">${minSec(perReader(p.seconds, p.readers))}</td>${shares ? shareCell(p.slug) : ''}</tr>`;
+}
+// The blog's top posts (the site view, Vault staff only), by opens, with each's share clicks: the card the view sets
+// next to the top games, under the full-width map. stats: the same range's blog figures (the table's posts come from
+// them); failed, no table. shares: null, not asked for (no Shares column); failed, dashes in it. The first page of
+// posts (as many as the top games'), then a Load more link, which asks moreUrl for the next ones.
+export function blogCard(stats: Result<BlogStats>, titles: Map<string, string>, shares: Result<ShareStats> | null = null, moreUrl?: string): Html | string {
+  if (!stats.ok) return '';
+  const { posts } = stats.value;
+  const sh = shares?.ok ? shares.value : null;
   // The pinned Total row: the whole range's figures (every post, not just the page shown) — opens and time on screen
   // summed over the posts; readers a deduplicated total (the totals' query: readers can't be added up across posts);
   // the average on screen, the whole's seconds per reader; the shares' total (dashes when the query failed).
   const totalRow = html`<tr class="analytics-total-row"><td class="proj"><b>Total</b></td><td class="r num">${num(posts.reduce((s, p) => s + p.opens, 0))}</td><td class="r num">${num(stats.value.totals.readers.current)}</td><td class="r num">${minSec(perReader(posts.reduce((s, p) => s + p.seconds, 0), stats.value.totals.readers.current))}</td>${shares ? (sh ? html`<td class="r num">${num(sh.total.current)}</td>` : html`<td class="r num">—</td>`) : ''}</tr>`;
-  const rows = posts.slice(0, BLOG_TOP).map((p) => html`<tr data-slug="${p.slug}"><td class="proj"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num">${num(p.opens)}</td><td class="r num">${num(p.readers)}</td><td class="r num">${minSec(perReader(p.seconds, p.readers))}</td>${shares ? shareCell(p.slug) : ''}</tr>`);
+  const rows = posts.slice(0, TOP_PAGE).map((p) => blogRow(p, titles, shares));
   return html`<div class="card ga-blog"><h2>Top Blog Articles</h2>${rows.length
-    ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${totalRow}${rows}</tbody></table></div>${posts.length > BLOG_TOP ? html`<p class="small muted">The ${BLOG_TOP} most opened of ${num(posts.length)}.</p>` : ''}`
+    ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${totalRow}${rows}</tbody></table></div>${loadMore(moreUrl, posts.length, 'posts')}`
     : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`;
 }
 
@@ -390,7 +402,7 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   }
 
   // The blog's top posts (the site view, Vault staff only), in the top lists below.
-  const blog = kind === 'site' && o.blog && o.staff ? blogCard(o.blog.stats, o.blog.titles, o.blog.shares ?? null) : '';
+  const blog = kind === 'site' && o.blog && o.staff ? blogCard(o.blog.stats, o.blog.titles, o.blog.shares ?? null, o.blog.moreUrl) : '';
 
   const realtime = html`<div class="card ga-rt"><h2><span class="live-dot">${kind === 'site' ? 'On the site now' : 'Playing now'}</span><small>last 30 minutes · updates every minute</small></h2>
     <div data-realtime="${o.realtimeUrl}">${realtimeBody(rt, { staff: o.staff, land: o.assets.land, game: !!o.scope.game })}</div></div>`;
@@ -400,9 +412,8 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   // The pinned Total row: the whole ranked list's figures (a Load more page, never), above the rows.
   const totalRow = tg ? topTotalRow(topGamesTotals(tg)) : '';
   const rows = tg ? tg.items.slice(0, TOP_PAGE).map((g) => topRow(g, o.titleOf)) : [];
-  // More games than the first page: a Load more button, which asks topUrl for the next ones (analytics.js).
-  const more = tg && o.topUrl && tg.items.length > TOP_PAGE
-    ? html`<div class="ga-more"><button type="button" class="btn sm" data-more="${o.topUrl}" data-limit="${TOP_PAGE}">Load more</button><span class="small muted" role="status" aria-live="polite"></span></div>` : '';
+  // More games than the first page: a Load more link, which asks topUrl for the next ones (analytics.js).
+  const more = tg ? loadMore(o.topUrl, tg.items.length, 'games') : '';
   const tp = ov.topPages;
   if (tg?.by === 'views' && tp) {
     // No game has plays (yet): the games whose pages were viewed most.
@@ -491,8 +502,10 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     const charted = ov.reads?.ok && ov.series.ok ? { ...ov, series: { ok: true as const, value: { ...ov.series.value, reads: ov.reads.value } } } : ov;
     // Load more: the same scope and range as the page.
     const tq = new URLSearchParams(Object.entries({ studio: scope.studio, ...q }).filter((e): e is [string, string] => e[1] !== undefined));
+    const bq = new URLSearchParams(Object.entries(q).filter((e): e is [string, string] => e[1] !== undefined));
     return view(charted, rt, { timeZone: analytics.timeZone, scope, staff: h.isStaff(u), base, realtimeUrl: `/portal/analytics/realtime${rtq}`,
-      topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio), blog,
+      topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio),
+      blog: blog && { ...blog, moreUrl: `/portal/analytics/top-posts${bq.size ? `?${bq}` : ''}` },
       readsError: ov.reads && !ov.reads.ok ? ov.reads.error : null });
   }
 
@@ -553,6 +566,20 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     // ignore it.
     return c.json({ items: page.map((g) => ({ slug: g.slug, html: topRow(g, ttl).toString() })), offset, total: items.length, hasMore: offset + page.length < items.length,
       totals: tg ? topGamesTotals(tg) : null }, 200, { 'Cache-Control': 'no-store' });
+  });
+
+  // The blog's top posts' next page, for Load more (analytics.js), Vault staff only: the page's range and
+  // ?offset=&limit=. The same shape as the top games': rows, ranked as on the page; total: all the posts; hasMore.
+  app.get('/portal/analytics/top-posts', async (c) => {
+    const u = h.signedIn(c); if (u instanceof Response) return u;
+    if (!h.isStaff(u)) return c.text('Only Vault staff can see this.', 403);
+    const { offset, limit } = pageParams(c.req.query('offset'), c.req.query('limit'));
+    const sel = analytics.selection(queryOf(c));
+    const [stats, titles, shares] = await Promise.all([analytics.blog(sel), blogTitles(), analytics.blogShares(sel)]);
+    const posts = stats.ok ? stats.value.posts : [];
+    const page = posts.slice(offset, offset + limit);
+    return c.json({ items: page.map((p) => ({ slug: p.slug, html: blogRow(p, titles, shares).toString() })), offset, total: posts.length,
+      hasMore: offset + page.length < posts.length }, 200, { 'Cache-Control': 'no-store' });
   });
 
   return {

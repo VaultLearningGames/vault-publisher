@@ -94,6 +94,11 @@
 .ga-off .fix { margin: 0; }
 .ga-foot { margin-top: 18px; }
 .ga-more { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+/* A button that reads as a text link (the top lists' Load more): no box, the links' colour, underlined on hover and
+   keyboard focus (which keeps the portal's focus ring). */
+.link-button { background: none; border: 0; padding: 0; box-shadow: none; color: var(--slate); font: inherit; cursor: pointer; }
+.link-button:hover, .link-button:focus-visible { text-decoration: underline; }
+.link-button:disabled { color: var(--ink-3); cursor: default; text-decoration: none; }
 .ga .fix { margin: 10px 0 0; }
 h3.sec small { font: 400 12.5px var(--body); }
 

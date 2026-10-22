@@ -101,18 +101,19 @@
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') refresh(); });
 })();
 
-// Top games: Load more asks for the next page (offset: the rows shown) and appends its rows, skipping any already
-// shown; the button goes once every game is listed. A failed request says so and leaves the button to try again.
+// The top lists (top games, the blog's top posts): Load more asks for the next page (offset: the rows shown) and
+// appends its rows, skipping any already shown; the link goes once every row is listed. A failed request says so and
+// leaves the link to try again.
 (function () {
   if (!window.fetch) return;
   var buttons = document.querySelectorAll('[data-more]');
   Array.prototype.forEach.call(buttons, function (btn) {
-    var card = btn.closest('.ga-games'), body = card.querySelector('tbody'), status = btn.parentNode.querySelector('[role=status]');
+    var card = btn.closest('.card'), noun = btn.getAttribute('data-noun') || 'games', body = card.querySelector('tbody'), status = btn.parentNode.querySelector('[role=status]');
     var busy = false;
     btn.addEventListener('click', function () {
       if (busy) return;
       busy = true; btn.disabled = true; btn.textContent = 'Loading…'; status.textContent = '';
-      // The offset counts the games' rows only: the pinned Total row has no data-slug.
+      // The offset counts the list's rows only: the pinned Total row has no data-slug.
       var url = btn.getAttribute('data-more'), shown = body.querySelectorAll('tr[data-slug]').length;
       url += (url.indexOf('?') < 0 ? '?' : '&') + 'offset=' + shown + '&limit=' + btn.getAttribute('data-limit');
       fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'vault-portal', Accept: 'application/json' } })
@@ -128,9 +129,9 @@
             if (t.firstElementChild) body.appendChild(t.firstElementChild);
           });
           if (!d.hasMore || !d.items.length) btn.parentNode.removeChild(btn);
-          status.textContent = body.querySelectorAll('tr[data-slug]').length + ' of ' + d.total + ' games';
+          status.textContent = body.querySelectorAll('tr[data-slug]').length + ' of ' + d.total + ' ' + noun;
         })
-        .catch(function () { status.textContent = 'Couldn’t load more games. Try again.'; })
+        .catch(function () { status.textContent = 'Couldn’t load more ' + noun + '. Try again.'; })
         .then(function () { busy = false; btn.disabled = false; btn.textContent = 'Load more'; });
     });
   });

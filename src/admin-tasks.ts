@@ -22,7 +22,7 @@ import type { GitHubIdentity } from './auth.ts';
 import { MAX_FEATURED, normalizeFeatured, readFeatured, saveFeatured, sortFeatured } from './featured.ts';
 import { isSlug } from './paths.ts';
 import { StudioNotEmptyError, studioWebsite } from './db.ts';
-import { changedFields, EMPTY_LISTING, normalize, type ListingFields } from './listings.ts';
+import { changedFields, EMPTY_LISTING, inheritedListing, normalize, type ListingFields } from './listings.ts';
 import { IMAGE_CACHE } from './assets.ts';
 import { isOriginalKey, keyOfUrl, listingImageUrls, MAX_VARIANT_BYTES, readVariants, recordVariants, variantKey, variantWidths, webpWidth } from './image-variants.ts';
 import { registerLegacyGamesApi } from './migrations/legacy-games/routes.ts';
@@ -207,8 +207,10 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
         link = { id: g?.id ?? null, slug: g?.slug ?? null };
         if (link.id === l.game_id) link = undefined;
       }
-      const draft = normalize(fields as Record<string, unknown>, l.draft);
-      const problems = fieldProblems(fields as Record<string, unknown>, draft);
+      const normalized = normalize(fields as Record<string, unknown>, l.draft);
+      const problems = fieldProblems(fields as Record<string, unknown>, normalized);
+      // As a portal save: the theme follows the layout, and inherited card text is stored empty (card G).
+      const draft = inheritedListing(normalized);
       if (link && !link.id && (publish ? draft : l.published)?.play_source === 'cdn')
         problems.push('It plays from the Vault CDN; switch it back to its web address (play_source "url") to disconnect it.');
       if (!problems.length) problems.push(...draftProblems(db, link ? { game_id: link.id, studio_slug: l.studio_slug, slug: l.slug } : l, draft, publish, deps.prodPublicUrl));

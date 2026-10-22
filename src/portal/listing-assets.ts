@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import type { Hono } from 'hono';
 import { fail } from '../app.ts';
 import { storeImage, type ImageCheck } from '../assets.ts';
-import { changedFields, EMPTY_LISTING, normalize } from '../listings.ts';
+import { changedFields, EMPTY_LISTING, inheritedListing, normalize } from '../listings.ts';
 import { html, type Html } from './html.ts';
 import { formatKB, IMAGE_FIELDS, imageFieldByKind, imageSpecJson, validateFieldImage, type ImageFieldKey, type ImageFieldSpec } from './image-fields.ts';
 import { listingPieces, type ListingHelpers } from './listings.ts';
@@ -52,7 +52,7 @@ export function registerListingAssetsApi(app: Hono, h: ListingHelpers) {
     const { url, bytes } = await storeImage(c.req.raw, h.deps, s.slug, l.slug, target.spec.kind, fieldCheck(target.spec));
     // Re-read the draft: the upload may have taken a while.
     const now = db.listing(l.slug)!.draft;
-    const draft = normalize({ [field]: target.spec.multiple ? [...(now[field] as string[]), url] : url }, now);
+    const draft = inheritedListing(normalize({ [field]: target.spec.multiple ? [...(now[field] as string[]), url] : url }, now));
     db.saveListingDraft(l.id, draft, h.actor(u));
     db.audit(h.actor(u), 'listing.image', `${s.slug}:${l.slug}`, { field, image: url, bytes, fields: changedFields(now, draft) });
     return c.json({ ok: true, url, field, value: draft[field] });

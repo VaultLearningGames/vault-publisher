@@ -4,6 +4,7 @@
 import { fail } from './app.ts';
 import type { Db, Listing, Studio } from './db.ts';
 import { markDeployPending } from './deploy-status.ts';
+import { requestSiteRebuild } from './portal/site-rebuild.ts';
 import { migrateListingImages, type MigrationResult } from './image-migration.ts';
 import { importListings, type ExportedPage, type ImportResult, type Override } from './listings-import.ts';
 import { changedFields, problems, type ListingFields } from './listings.ts';
@@ -51,9 +52,12 @@ export function saveListing(db: Db, l: ListingRow, draft: ListingFields, actor: 
   db.saveListingDraft(l.id, draft, actor);
   db.audit(actor, 'listing.save', target, { fields: changedFields(l.draft, draft) });
   if (then === 'publish') {
+    const wasPublished = !!l.published;
     db.publishListing(l.id, actor);
     db.audit(actor, 'listing.publish', target, { fields: changedFields(l.published, draft) });
     markDeployPending(db, 'listing.publish');
+    // Newly on the site only once the site is rebuilt: start that run (site-rebuild.ts) when the flag changes.
+    if (!wasPublished) requestSiteRebuild(`publish:${l.slug}`);
   }
   else if (then === 'submit') { db.setListingReview(l.id, 'submitted', actor, null); db.audit(actor, 'listing.submit', target); }
 }
@@ -62,9 +66,12 @@ export function saveListing(db: Db, l: ListingRow, draft: ListingFields, actor: 
 export function publishListing(db: Db, l: ListingRow, actor: string, publicUrl?: string) {
   const bad = draftProblems(db, l, l.draft, true, publicUrl);
   if (bad.length) fail(400, bad.join(' '));
+  const wasPublished = !!l.published;
   db.publishListing(l.id, actor);
   db.audit(actor, 'listing.publish', `${l.studio_slug}:${l.slug}`, { fields: changedFields(l.published, l.draft) });
   markDeployPending(db, 'listing.publish');
+  // Newly on the site only once the site is rebuilt: start that run (site-rebuild.ts) when the flag changes.
+  if (!wasPublished) requestSiteRebuild(`publish:${l.slug}`);
 }
 
 // ---------- move to another studio ----------

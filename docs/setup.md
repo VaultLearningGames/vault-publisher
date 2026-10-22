@@ -658,12 +658,28 @@ back in a rollback).
 
 ### Rebuilding the site when listings change
 
-Publishing a listing changes `/v1/catalog`, not the site: someone runs vault-site's *Deploy (site)* (README, [The website](../README.md#the-website)). Not built yet: the portal starting that run itself.
-Two ways it could: (a) the portal calls GitHub's `workflow_dispatch` for vault-site's `deploy.yml` a couple of
-minutes after the last publish, unpublish or featured change, which needs a GitHub credential with *Actions: write*
-on this repository in Secret Manager; or (b) a scheduled workflow that compares the catalog with the one the
-published site was built from (a hash published as a file of the site) and rebuilds only when they differ, which
-needs no new credential and is at most one schedule interval late.
+Publishing or unpublishing a listing changes `/v1/catalog`, not the site: the site shows it only once vault-site's
+*Deploy (site)* runs again. The portal starts that run itself (`src/portal/site-rebuild.ts`): a GitHub
+`workflow_dispatch` of vault-site's `deploy.yml` (the file behind *Deploy (site)*), on the branch the portal commits
+to there (`VAULT_SITE_BRANCH`, else `staging` or `production` — never `main`), with the run's `environment` input set
+to that same system (README, [The website](../README.md#the-website): "Run workflow, choose the system"). Changes
+are coalesced in-process: several within 30 s start ONE run, fired at the end of the window, so a burst of
+publishes and unpublishes deploys the site once. A run starts when the published flag changes — a listing newly on
+the site (`publish:<slug>`) or taken off it (`unpublish:<slug>`); re-publishing a listing that is already on the
+site starts no run (the deploy bar still says a deploy is scheduled, and *Deploy (site)* can be run by hand as
+before for that, for featured changes and for everything else).
+
+The dispatch uses `VAULT_SITE_GITHUB_TOKEN`, which therefore needs *Actions: write* on `vault-site` in addition to
+*Contents: read and write* (step 3 of [ops-checklist.md](ops-checklist.md)). A failed dispatch is logged and
+changes nothing: the listing action stands, and with several portal instances the run may start twice — the build
+is idempotent, so that is harmless. Settings:
+
+| Variable | Default | |
+|---|---|---|
+| `SITE_DEPLOY_WORKFLOW` | `deploy.yml` | the file name of vault-site's *Deploy (site)* workflow to dispatch |
+| `VAULT_SITE_BRANCH` | `staging` or `production` by system | the branch the dispatch runs on, as for the commits (site-repo/config.ts) |
+| `VAULT_SITE_GITHUB_TOKEN` | (none: required) | needs *Actions: write* on `vault-site` for the dispatch |
+| `SITE_PUBLISHING_ENABLED` | on | `false` (or `0`, `no`, `off`) also refuses the dispatch, as every other write to vault-site |
 
 ### The blog: posts as Markdown in vault-site
 
@@ -681,7 +697,7 @@ connected):
 
 | Variable | Default | |
 |---|---|---|
-| `VAULT_SITE_GITHUB_TOKEN` | (none: required) | `vault-portal-bot`'s fine-grained token for vault-site only: *Contents: Read and write*, *Metadata: Read*; one per system |
+| `VAULT_SITE_GITHUB_TOKEN` | (none: required) | `vault-portal-bot`'s fine-grained token for vault-site only: *Contents: Read and write*, *Metadata: Read*, *Actions: Write* (the portal starts the site's deploy runs with it); one per system |
 | `VAULT_SITE_REPO` | `VaultLearningGames/vault-site` | |
 | `VAULT_SITE_BRANCH` | `production` when `SITE_REBUILD_ENVIRONMENT` is `production`, else `staging` | the branch posts are read from and committed to; a commit there deploys that site |
 | `VAULT_SITE_BLOG_DIR` | `content/blog` | |

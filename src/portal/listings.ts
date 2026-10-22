@@ -21,6 +21,7 @@ import type { PortalDeps } from './routes.ts';
 import { imageField, imageToolScript } from './listing-assets.ts';
 import { iconPicker, layoutIcon, PAGE_LAYOUTS, themeIcon, THEMES } from './listing-layout.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
+import { requestSiteRebuild } from './site-rebuild.ts';
 import { cdnRedirectNote, unpublishedWarning } from './unpublished-warning.ts';
 import { addMaker, createProposedStudios, makersField, proposedLine, pruneMakerProposals } from './listing-makers.ts';
 
@@ -503,9 +504,13 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const u = h.apiUser(c);
     if (!P.canPublish(u)) fail(403, 'Only Vault staff who can edit game/studio content can take games off the site.');
     const { s, l } = apiListing(c, u);
+    const wasPublished = !!l.published;
     db.unpublishListing(l.id);
     db.audit(h.actor(u), 'listing.unpublish', `${s.slug}:${l.slug}`);
     markDeployPending(db, 'listing.unpublish');
+    // Only a listing the site shows is gone from it: start the site's deploy run (site-rebuild.ts) so the change
+    // reaches the built site; the bar above already says a deploy is scheduled.
+    if (wasPublished) requestSiteRebuild(`unpublish:${l.slug}`);
     return c.json({ ok: true });
   });
 

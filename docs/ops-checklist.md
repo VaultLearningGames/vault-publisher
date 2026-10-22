@@ -43,7 +43,8 @@ vault-site's *Promotion is code only* check fails a PR that changes `content/blo
 ## 3. Tokens (one per system)
 
 - [ ] As `vault-portal-bot`, create two **fine-grained personal access tokens**, resource owner VaultLearningGames,
-      repository access **only `vault-site`**, permissions **Contents: Read and write** and **Metadata: Read**:
+      repository access **only `vault-site`**, permissions **Contents: Read and write**, **Metadata: Read** and
+      **Actions: Write** (the portal starts the site's deploy runs with this token):
       `vault-portal-staging` and `vault-portal-production`. An expiry the team will track (e.g. 1 year).
 - [ ] Store each as the system's `VAULT_SITE_GITHUB_TOKEN` secret (`deploy.yml` reads
       `<SERVICE>-vault-site-github-token`):

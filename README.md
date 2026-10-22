@@ -496,7 +496,11 @@ changes) goes staging → production, by a reviewed pull request that CI fails i
   ([docs/setup.md](docs/setup.md#the-website-on-cloudflare-static-hosting)).
 * **Check a build locally:** in vault-site, `npm run build` then `npm run check`.
 * **When listings change** (published, edited, taken off the site, featured) the site must be rebuilt, though no
-  code changed: **vault-site → Actions → Deploy (site) → Run workflow**, choose the system, or
+  code changed. The portal starts that run itself when a listing is published or taken off the site: a
+  `workflow_dispatch` of vault-site's *Deploy (site)* (`deploy.yml`), coalesced (30 s) and on the system's branch
+  (`src/portal/site-rebuild.ts`; [docs/setup.md](docs/setup.md#rebuilding-the-site-when-listings-change)). Everything
+  else (draft edits, featured changes, a re-publish with new content) is still: **vault-site → Actions → Deploy (site)
+  → Run workflow**, choose the system, or
   `gh workflow run deploy.yml -R VaultLearningGames/vault-site -f environment=staging`.
 * **Addresses built in scripts** must be absolute (`absURL`): a preview is served from the portal, and only addresses
   in HTML attributes and CSS `url()` are rewritten to the site.

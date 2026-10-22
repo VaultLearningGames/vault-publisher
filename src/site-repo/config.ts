@@ -1,7 +1,8 @@
 // How the portal commits to vault-site, read from the environment when used (never at import, so the portal boots and
 // its tests run without any of it):
 //   VAULT_SITE_GITHUB_TOKEN   the bot user's (vault-portal-bot) fine-grained token: vault-site only, Contents
-//                             read/write, plus Actions write (portal/site-rebuild.ts starts the site's deploy runs)
+//                             read/write. portal/site-rebuild.ts starts the site's deploy runs with it, by
+//                             workflow_dispatch when it also has Actions write, else by a commit to the branch.
 //   VAULT_SITE_REPO           owner/name (default VaultLearningGames/vault-site)
 //   VAULT_SITE_BRANCH         the branch read from and committed to; default by system: the production portal
 //                             (SITE_REBUILD_ENVIRONMENT=production, set by deploy.yml) commits to "production", every

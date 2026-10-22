@@ -765,7 +765,7 @@ was saved on staging (test games, settings, listings) is discarded. The workflow
 gh workflow run reseed-staging.yml -R VaultLearningGames/vault-publisher
 ```
 
-How it works, with no new permission or secret:
+How it works (steps 1–4 need no new permission or secret; step 5's are in [docs/staging-reseed.md](staging-reseed.md)):
 
 1. The workflow, in the `staging` environment, refuses to run unless `SERVICE` is `vault-publisher-staging`,
    `LITESTREAM_BUCKET` and `PORTAL_URL` are staging's and `LITESTREAM_SEED_BUCKET` isn't. As the deploy account
@@ -782,6 +782,11 @@ How it works, with no new permission or secret:
    variable (it overwrites the service's variables), so nothing is re-seeded until the next run.
 4. If production's replica can't be read, the new revision fails to start and the running one keeps serving; the
    workflow fails. It then checks `PORTAL_URL/health`.
+5. Last, it copies the files of production's current releases (and listing images) from production's CDN bucket into
+   staging's (`scripts/reseed-cdn.ts`): the database says which release each game plays, but those files were only
+   ever written to production's bucket, so without this every CDN-hosted game 404s in staging's player. One way,
+   additive, read-only on production. This step does need a read-only R2 token and a variable: see
+   [docs/staging-reseed.md](staging-reseed.md).
 
 The entrypoint also refuses a re-seed when `LITESTREAM_BUCKET` isn't staging's, so the variable set on production by
 mistake stops the start instead of touching anything.

@@ -49,7 +49,7 @@ const strList = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => Strin
 
 // The old card strings of one kind onto the option list: each matched string becomes a { kind, value } tag (in the
 // card's own order); the unmatched ones are reported, per string, with the games that carried them.
-function tagsFrom(strings: string[], kinds: readonly CardTagKind[], opts: { studios?: EnumOption[] }, unmatched: Map<string, string[]>, slug: string): CardTag[] {
+export function tagsFrom(strings: string[], kinds: readonly CardTagKind[], opts: { studios?: EnumOption[] }, unmatched: Map<string, string[]>, slug: string): CardTag[] {
   const out: CardTag[] = [];
   for (const s of strings) {
     const { kind, value } = parseCardString(s);

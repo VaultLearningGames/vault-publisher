@@ -200,6 +200,11 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
 // Another game's reserved addresses: its slug, its page address and its aliases (what a new one may not take).
 export interface ListingAddress { slug: string; page_address: string; aliases: string[] }
 
+// An alias is an old page address ("crowds", served at /crowds/), or an old Squarespace Game Card address
+// ("game-cards/CARD-ID", served at /game-cards/CARD-ID): both 301 to the game's page.
+export const CARD_ALIAS_PREFIX = 'game-cards/';
+export const isAlias = (a: string): boolean => (a.startsWith(CARD_ALIAS_PREFIX) ? isListingSlug(a.slice(CARD_ALIAS_PREFIX.length)) : isListingSlug(a));
+
 // The page address and the aliases, checked against what this game itself may not take: the slug, and every
 // other game's page and aliases (301s must land on exactly one game).
 export function pageAddressProblems(f: ListingFields, self: string, others: ListingAddress[]): string[] {
@@ -212,7 +217,7 @@ export function pageAddressProblems(f: ListingFields, self: string, others: List
   if (addr && addr !== self && taken.has(addr)) out.push(`The page address “${addr}” is already used by ${taken.get(addr)}.`);
   const seen = new Set<string>();
   for (const a of f.aliases) {
-    if (!isListingSlug(a)) { out.push(`The alias “${a}” can use lowercase letters, numbers and dashes.`); continue; }
+    if (!isAlias(a)) { out.push(`The alias “${a}” can use lowercase letters, numbers and dashes (or be a game-cards/ address).`); continue; }
     if (a === own || a === self) { out.push(`“${a}” is the game’s own address, so it can’t be an alias of itself.`); continue; }
     if (seen.has(a)) { out.push(`“${a}” is listed as an alias twice.`); continue; }
     seen.add(a);

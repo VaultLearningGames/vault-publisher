@@ -13,3 +13,6 @@ node_modules
 
 # vault-site checkout the image build copies (deploy workflow).
 vault-site-src/
+
+# The games.json import's report folder (scripts/import-legacy-games.ts --out).
+/legacy-import/

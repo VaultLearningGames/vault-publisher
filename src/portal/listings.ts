@@ -179,7 +179,7 @@ export function listingPieces(h: ListingHelpers) {
           <span class="hint">Empty: the slug (${l.slug}). The old address becomes an alias, if you want it to keep working.</span></label>
         <label class="field full"><span class="lab">Aliases</span>
           <textarea name="aliases" rows="3" ${dis} spellcheck="false">${f.aliases.join('\n')}</textarea>
-          <span class="hint">One old address per line (lowercase letters, numbers and dashes); each sends its visitors to the page address.</span></label>
+          <span class="hint">One old address per line (lowercase letters, numbers and dashes, or an old game-cards/ address); each sends its visitors to the page address.</span></label>
       </div>` : html`<p class="small">Page address: <b class="mono">${f.page_address || l.slug}</b>${f.aliases.length ? html` — old addresses (301): ${f.aliases.map((a) => html`<span class="mono">${a}</span> `)}` : ''}. Only Vault staff can change the address.</p>`}
       <label class="field"><span class="lab">Listing date</span>
         <input type="date" name="created_at" value="${l.created_at.slice(0, 10)}" ${vault ? dis : 'disabled'} style="width:11em">

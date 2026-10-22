@@ -6,7 +6,7 @@
 import { isSlug } from './paths.ts';
 import { DEFAULT_PAGE_LAYOUT, DEFAULT_THEME, effectivePageLayout, effectiveTheme, layoutAssetError, normalizeLayoutFields, validateLayoutFields } from './portal/listing-layout.ts';
 import { deriveTheme } from './portal/listing-theme.ts';
-import { CARD_CATEGORY_KINDS, CARD_TAG_KINDS, cardTagProblems, normalizeEnumValue, parseCardString, type CardTag, type CardTagKind } from './portal/listing-enums.ts';
+import type { CardTag } from './portal/listing-enums.ts';
 
 // "Grades 13+" is undergraduate and beyond (David, 2026-10-03; ThermoLab is the first).
 export const GRADES = ['Grades K-3', 'Grades 3-5', 'Grades 5-8', 'Grades 9-12', 'Grades 13+'] as const;
@@ -124,50 +124,6 @@ function minSize(v: unknown): number | null {
 const isMinSize = (n: number | null | undefined) => n == null || (Number.isInteger(n) && n >= MIN_SIZE_RANGE.min && n <= MIN_SIZE_RANGE.max);
 const isFit = (s: string) => s === '' || (/^\d+(,\d+){5}$/.test(s) && s.split(',').map(Number).every((n) => n >= 0));
 
-// One card category/tag as sent: a checkbox named "card_categories:grade:3-5", or an array item — { kind, value }
-// (the API, the migration), or a string with the kind in it ("Subject: Science"). The kind is kept as sent, so
-// problems() can name what is wrong (a kind the field doesn't carry, a value not in the enum).
-function cardTagItem(field: 'card_categories' | 'card_tags', item: unknown): CardTag | null {
-  if (typeof item === 'string') {
-    const { kind, value } = parseCardString(item);
-    if (!value) return null;
-    if (kind) return { kind, value };
-    const kinds = (field === 'card_categories' ? CARD_CATEGORY_KINDS : CARD_TAG_KINDS) as readonly CardTagKind[];
-    const hit = kinds.map((k) => normalizeEnumValue(k, value)).find((v) => v !== null);
-    return hit ? { kind: (kinds as readonly CardTagKind[]).find((k) => normalizeEnumValue(k, value) === hit)!, value: hit } : { kind: 'subject', value: item };
-  }
-  if (item && typeof item === 'object' && !Array.isArray(item)) {
-    const o = item as Record<string, unknown>;
-    return { kind: String(o.kind ?? '') as CardTagKind, value: String(o.value ?? '').trim() };
-  }
-  return null;
-}
-
-// The card categories/tags of a form or API body: the checkboxes named "field:kind:value" (the editor's chip
-// pickers), or an array. Like the grades/makers checkboxes, any checkbox of the field present means the field is
-// whatever is checked; an array replaces it (an empty one clears it).
-function cardTagsOf(field: 'card_categories' | 'card_tags', input: Record<string, unknown>): CardTag[] | null {
-  const boxes = Object.keys(input).filter((k) => k.startsWith(field + ':'));
-  if (boxes.length) {
-    const out: CardTag[] = [];
-    for (const k of boxes) {
-      if (input[k] !== true && input[k] !== 'on') continue;
-      const t = cardTagItem(field, k.slice(field.length + 1));
-      if (t && !out.some((x) => x.kind === t.kind && x.value === t.value)) out.push(t);
-    }
-    return out;
-  }
-  const v = input[field];
-  if (v === undefined || v === null) return null;   // not sent: keep the base value
-  if (!Array.isArray(v)) return [];
-  const out: CardTag[] = [];
-  for (const item of v) {
-    const t = cardTagItem(field, item);
-    if (t && !out.some((x) => x.kind === t.kind && x.value === t.value)) out.push(t);
-  }
-  return out.slice(0, MAX_LIST);
-}
-
 // Clean up whatever a form or an import sends into a ListingFields. Never throws; see problems() for what's wrong.
 export function normalize(input: Record<string, unknown>, base: ListingFields = EMPTY_LISTING): ListingFields {
   const has = (k: string) => Object.prototype.hasOwnProperty.call(input, k);
@@ -198,9 +154,11 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
     screenshots: pick('screenshots', list(input.screenshots, false)),
     card_title: pick('card_title', str(input.card_title, 200)),
     card_excerpt: pick('card_excerpt', str(input.card_excerpt, 600)),
-    // Like grades: the box checkboxes (checked or not) replace the value; no boxes and no key keeps the base.
-    card_categories: cardTagsOf('card_categories', input) ?? pick('card_categories', []),
-    card_tags: cardTagsOf('card_tags', input) ?? pick('card_tags', []),
+    // The card's categories and tags are no longer form fields (their chip pickers are gone): a save never writes
+    // them, whatever a stale form sends, and it keeps the stored value (a migration may have filled them), so a
+    // save can never clear or rewrite them.
+    card_categories: base.card_categories ?? EMPTY_LISTING.card_categories,
+    card_tags: base.card_tags ?? EMPTY_LISTING.card_tags,
     seo_title: pick('seo_title', str(input.seo_title, 300)),
     seo_description: pick('seo_description', str(input.seo_description, 600)),
     page_address: pick('page_address', str(input.page_address, 200).toLowerCase()),
@@ -263,7 +221,7 @@ export function pageAddressProblems(f: ListingFields, self: string, others: List
   return out;
 }
 
-export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady: boolean; publicUrl?: string; studio?: string; slug?: string; studios?: { slug: string }[]; address?: { self: string; others: ListingAddress[] } }): string[] {
+export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady: boolean; publicUrl?: string; studio?: string; slug?: string; address?: { self: string; others: ListingAddress[] } }): string[] {
   const out: string[] = [];
   if (f.play_url && !isHttpUrl(f.play_url)) out.push('The play URL must start with https:// (or http://).');
   if (f.gameplay_video && !isHttpUrl(f.gameplay_video)) out.push('The gameplay video must be a link.');
@@ -275,9 +233,6 @@ export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady
     if (!isMinSize(v)) out.push(`The minimum play ${name} must be a whole number of pixels from ${MIN_SIZE_RANGE.min} to ${MIN_SIZE_RANGE.max}, or empty for the site’s default.`);
   }
   for (const g of f.grades) if (!(GRADES as readonly string[]).includes(g)) out.push(`Unknown grade band “${g}”.`);
-  // The card's categories and tags (card C): choices from the option lists; a studio value must be a studio.
-  for (const errs of cardTagProblems('card_categories', f.card_categories, { studios: opts.studios })) out.push(errs);
-  for (const errs of cardTagProblems('card_tags', f.card_tags, { studios: opts.studios })) out.push(errs);
   if (opts.address) for (const e of pageAddressProblems(f, opts.address.self, opts.address.others)) out.push(e);
   // The page's layout and theme (card B): always checked; the art links only when this listing's own address is
   // known (the save, the publish and the preview all pass it).

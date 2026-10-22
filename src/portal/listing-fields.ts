@@ -122,10 +122,6 @@ export const FIELD_SPECS: readonly FieldSpec[] = [
     hint: 'Shown on the game card.', fallback: 'Empty: the title.' },
   { name: 'card_excerpt', section: 'discovery', audience: 'studio', siteReads: [SITE.content, SITE.cardExcerpt], crop: null, group: 'card_text',
     hint: 'One or two sentences under the card title.', fallback: 'Empty: the short description.' },
-  { name: 'card_categories', section: 'discovery', audience: 'studio', siteReads: [SITE.content, SITE.blogGrid], crop: null,
-    hint: 'The grades and developer the game cards are filed under.', fallback: 'None ticked: the game’s grades and makers.' },
-  { name: 'card_tags', section: 'discovery', audience: 'studio', siteReads: [SITE.content, SITE.blogGrid], crop: null,
-    hint: 'The subjects and topics the game cards are tagged with.', fallback: 'None ticked: the game’s subjects and topics.' },
   { name: 'seo_title', section: 'discovery', audience: 'studio', siteReads: [SITE.content, SITE.head], crop: null,
     hint: 'What search engines show for the game.', fallback: 'Empty: the title.' },
   { name: 'seo_description', section: 'discovery', audience: 'studio', siteReads: [SITE.content, SITE.head], crop: null,
@@ -163,7 +159,7 @@ export function fieldSpec(name: FormField): FieldSpec {
 export const fieldsIn = (section: Section): FieldSpec[] => FIELD_SPECS.filter((s) => s.section === section);
 
 // The question a form input belongs to: its own name, the part before the first ":" of a checkbox
-// ("grades:Grades 3-5", "card_tags:subject:math", "makers:Field Day Lab"), the min-size pair, or "Made by"'s
+// ("grades:Grades 3-5", "makers:Field Day Lab"), the min-size pair, or "Made by"'s
 // add-a-studio fields. null: not a question (the save controls).
 export function specForInput(inputName: string): FieldSpec | null {
   const base = inputName.split(':')[0];

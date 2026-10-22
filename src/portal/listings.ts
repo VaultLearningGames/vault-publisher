@@ -10,7 +10,6 @@ import type { StudioPermission, VaultPermission } from '../permissions.ts';
 import { markDeployPending } from '../deploy-status.ts';
 import { draftProblems, importFromExport, moveListingToStudio, publishListing, saveListing } from '../listing-ops.ts';
 import { changedFields, FIELD_LABEL, GRADES, inheritedListing, isListingSlug, MIN_SIZE_RANGE, normalize, VAULT_ONLY, type ListingFields } from '../listings.ts';
-import { GRADES as GRADE_OPTIONS, SUBJECTS, TOPICS, studioOptions, type CardTag, type CardTagKind, type EnumOption } from './listing-enums.ts';
 import { getHosting, hostingCell } from './hosting.ts';
 import { html, type Html } from './html.ts';
 import { ago, head, pill, who } from './routes.ts';
@@ -149,14 +148,12 @@ export function listingPieces(h: ListingHelpers) {
     const H = (name: FormField) => hintText(fieldSpec(name));
     const image = (name: ImageFieldKey, label: string, value: string | string[]) =>
       imageField({ api, edit, canUpload: !!h.deps.production, name, label, value, hint: H(name), crop: fieldSpec(name).crop });
-    // The game card (card C): its title and excerpt, and its categories and tags as chip pickers over the portal's
-    // option lists (listing-enums.ts) — the site's filters read those. The title and excerpt are inherited (card G):
-    // empty, in a closed disclosure, with the title / short description as the placeholder — a copy of the inherited
-    // value shows as empty too, so a save never stores it (inheritedListing) and renaming the game renames its card.
+    // The game card (card C): its title and excerpt, inherited (card G): empty, in a closed disclosure, with the
+    // title / short description as the placeholder — a copy of the inherited value shows as empty too, so a save
+    // never stores it (inheritedListing) and renaming the game renames its card. Its categories and tags are no
+    // longer form fields (the chip pickers are gone): a save keeps whatever is stored for them (see normalize).
     const own = (v: string, inherited: string) => (v && v !== inherited ? v : '');
     const custom = !!(own(f.card_title, f.title) || own(f.card_excerpt, f.short_description));
-    const tagChips = (field: 'card_categories' | 'card_tags', kind: CardTagKind, label: string, opts: EnumOption[], hint = '') => html`<div class="field full"><span class="lab">${label}</span>
-      <div class="chips">${opts.map((o) => html`<label><input type="checkbox" name="${field}:${kind}:${o.value}" ${f[field].some((t) => t.kind === kind && t.value === o.value) ? 'checked' : ''} ${dis}> ${o.label}</label>`)}</div>${hint ? html`<span class="hint">${hint}</span>` : ''}</div>`;
     // Search (card C): the title and description search engines show, with a character counter.
     const seo = (name: 'seo_title' | 'seo_description', id: string, label: string, max: number) => html`<label class="field"><span class="lab">${label}</span>
       <input type="text" id="${id}" name="${name}" value="${f[name]}" data-count="${max}" ${dis} autocomplete="off">
@@ -190,8 +187,6 @@ export function listingPieces(h: ListingHelpers) {
       card_excerpt: () => html`<label class="field full"><span class="lab">Card excerpt</span>
           <textarea name="card_excerpt" rows="2" placeholder="${f.short_description}" ${dis}>${own(f.card_excerpt, f.short_description)}</textarea>
           <span class="hint">${H('card_excerpt')}</span></label>`,
-      card_categories: () => html`${tagChips('card_categories', 'grade', 'Card grades', GRADE_OPTIONS)}${tagChips('card_categories', 'studio', 'Card developer (studio)', studioOptions(db), H('card_categories'))}`,
-      card_tags: () => html`${tagChips('card_tags', 'subject', 'Card subjects', SUBJECTS)}${tagChips('card_tags', 'topic', 'Card topics', TOPICS, H('card_tags'))}`,
       seo_title: () => seo('seo_title', 'f-seo-title', 'SEO title', 60),
       seo_description: () => seo('seo_description', 'f-seo-description', 'SEO description', 160),
       play_source: () => html`<div class="field full"><span class="lab">Hosted by</span>

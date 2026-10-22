@@ -35,11 +35,10 @@ export const cdnReady = (db: Db, l: { game_id: number | null }) => !!(l.game_id 
 
 // What stops this draft from being saved (or, with forPublish, from going on the site). With the listing's
 // address and the CDN's base (publicUrl), the page layout's art links are checked to be the listing's own uploads;
-// with the database, the card's enum choices and the page address/aliases are checked against the other listings.
+// the page address/aliases are checked against the other listings.
 export function draftProblems(db: Db, l: { game_id: number | null; studio_slug?: string; slug?: string }, draft: ListingFields, forPublish: boolean, publicUrl?: string): string[] {
   return problems(draft, {
     forPublish, cdnReady: cdnReady(db, l), publicUrl, studio: l.studio_slug, slug: l.slug,
-    studios: db.studios(),
     address: l.slug ? { self: l.slug, others: db.listings().filter((x) => x.slug !== l.slug).map((x) => ({
       slug: x.slug, page_address: x.draft.page_address ?? '', aliases: x.draft.aliases ?? [],
     })) } : undefined,

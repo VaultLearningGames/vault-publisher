@@ -22,8 +22,6 @@ export const CARD_CATEGORY_KINDS: readonly CardTagKind[] = ['grade', 'studio'] a
 export const CARD_TAG_KINDS: readonly CardTagKind[] = ['subject', 'topic'] as const;
 export const CARD_KINDS: readonly CardTagKind[] = [...CARD_CATEGORY_KINDS, ...CARD_TAG_KINDS] as readonly CardTagKind[];
 
-export const CARD_KIND_LABEL: Record<CardTagKind, string> = { grade: 'Grade', subject: 'Subject', topic: 'Topic', studio: 'Studio' };
-
 // Seeded from the portal's existing Grades bands (listings.ts GRADES).
 export const GRADES: EnumOption[] = [
   { value: 'k-3', label: 'Grades K-3' },
@@ -139,24 +137,4 @@ export function reconcile(strings: string[], opts: { studios?: EnumOption[] } = 
     else unmatched.push(s);
   }
   return { matched, unmatched };
-}
-
-// What the server rejects in a saved card field: a kind the field doesn't carry ("card_categories" is grades and
-// studios, "card_tags" is subjects and topics), or a value not in the enum (a studio value must be a studio's slug).
-export function cardTagProblems(field: 'card_categories' | 'card_tags', tags: CardTag[], opts: { studios?: { slug: string }[] } = {}): string[] {
-  const out: string[] = [];
-  const allowed = field === 'card_categories' ? CARD_CATEGORY_KINDS : CARD_TAG_KINDS;
-  const what = field === 'card_categories' ? 'card category' : 'card tag';
-  for (const t of tags) {
-    const kind = t?.kind, value = String(t?.value ?? '').trim();
-    if (!kind || !CARD_KINDS.includes(kind as CardTagKind)) { out.push(`The ${what} “${value}” needs a kind (${allowed.join(', ')}).`); continue; }
-    if (!value) { out.push(`The ${what} of kind “${kind}” is empty.`); continue; }
-    if (kind === 'studio') {
-      // No studio list (an import or preview without the database): the value is kept and checked at the save.
-      if (opts.studios && !opts.studios.some((s) => s.slug === value)) out.push(`The ${what} “${value}” isn’t a studio (choose one of the studios the portal knows).`);
-      continue;
-    }
-    if (!normalizeEnumValue(kind as 'grade' | 'subject' | 'topic', value)) out.push(`The ${what} “${value}” isn’t in the ${CARD_KIND_LABEL[kind].toLowerCase()} options.`);
-  }
-  return out;
 }

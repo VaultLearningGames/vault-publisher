@@ -41,6 +41,11 @@
 .ga-plot { position: relative; height: 220px; border-bottom: 1px solid var(--axis); }
 .ga-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; display: block; }
 .ga-yl { position: absolute; left: -40px; width: 34px; text-align: right; transform: translateY(50%); font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+/* Blog reads' own scale: a right-hand axis in their colour, titled above it. */
+.ga-chart.ga-dual { padding-right: 40px; }
+.ga-yl.ga-yr { left: auto; right: -40px; text-align: left; }
+.ga-yl.s4, .ga-yt.s4 { color: var(--s4); }
+.ga-yt { text-align: right; margin: 0 -40px 4px 0; font-size: 11px; font-weight: 600; }
 .ga-chart .gridl { stroke: var(--grid); stroke-width: 1; }
 .ga-cur { fill: none; stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
 .ga-prev { fill: none; stroke-width: 1.5; stroke-dasharray: 5 4; stroke-linejoin: round; stroke-linecap: round; opacity: .55; }

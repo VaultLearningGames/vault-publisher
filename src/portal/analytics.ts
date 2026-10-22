@@ -26,6 +26,7 @@ import type { Studio, User } from '../db.ts';
 import { html, raw, type Html } from './html.ts';
 import type { ListingHelpers, ListingRow } from './listings.ts';
 import { head } from './routes.ts';
+import { computeAxisScale } from './chart-scale.ts';
 
 // ---------- formatting ----------
 const nf = new Intl.NumberFormat('en-US');
@@ -75,16 +76,22 @@ export const chartTitle = (s: { reads?: unknown }) => (s.reads ? 'Plays, users a
 export function chart(s: Series, sel: Selection): Html {
   const n = s.labels.length;
   const lines = LINES.map((l) => ({ ...l, line: s[l.key] })).filter((l) => l.line);
-  const all = lines.flatMap((l) => [...l.line!.current, ...(l.line!.previous ?? [])]).map((v) => v ?? 0);
-  const top = niceMax(Math.max(1, ...all));
-  const y = (v: number) => +(100 - (v / top) * 100).toFixed(2);
+  // Blog reads have their own scale, on a right-hand axis: they can be far fewer (or more) than the plays and users,
+  // which share the left one, scaled without them.
+  const left = lines.filter((l) => l.key !== 'reads'), readsLine = lines.find((l) => l.key === 'reads');
+  const values = (ls: typeof lines) => ls.flatMap((l) => [...l.line!.current, ...(l.line!.previous ?? [])]);
+  const top = niceMax(Math.max(1, ...values(left).map((v) => v ?? 0)));
+  const right = readsLine ? computeAxisScale(values([readsLine])) : null;
+  const at = (v: number, max: number) => +(100 - (v / max) * 100).toFixed(2);
+  const y = (v: number) => at(v, top);
   const x = (i: number) => i + 0.5;
-  const path = (vals: (number | null)[]) => {
+  const path = (vals: (number | null)[], max = top) => {
     let d = '', pen = false;
-    vals.forEach((v, i) => { if (v === null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${x(i)} ${y(v)}`; pen = true; });
+    vals.forEach((v, i) => { if (v === null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${x(i)} ${at(v, max)}`; pen = true; });
     // A point on its own (one day of plays, say) is a dot rather than nothing.
     return d.replace(/M([\d.]+) ([\d.]+)(?=M|$)/g, 'M$1 $2l0 0');
   };
+  const scaleOf = (l: (typeof lines)[number]) => (l.key === 'reads' && right ? right.max : top);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * top);
   // About six labels; on a phone every other one (.alt) is hidden.
   const every = Math.max(1, Math.ceil(n / 6));
@@ -100,13 +107,15 @@ export function chart(s: Series, sel: Selection): Html {
     return `${s.tips[i]}: ${figures(i, 'current')}${sel.compare && s.prevTips[i] ? `\n${s.prevTips[i]}: ${figures(i, 'previous')}` : ''}`;
   };
   const totalsLabel = lines.map((l) => `${l.label}: ${l.line!.current.reduce<number>((t, v) => t + (v ?? 0), 0)}`).join(', ');
-  return html`<div class="ga-chart" role="img" aria-label="${chartTitle(s)} per ${s.unit}, ${spanLabel(sel.current)}. ${totalsLabel}.">
+  return html`<div class="ga-chart${right ? ' ga-dual' : ''}" role="img" aria-label="${chartTitle(s)} per ${s.unit}, ${spanLabel(sel.current)}. ${totalsLabel}.">
+    ${right ? html`<div class="ga-yt ${readsLine!.cls}" aria-hidden="true">Blog reads</div>` : ''}
     <div class="ga-plot">
       ${ticks.filter((t) => Number.isInteger(t)).map((t) => html`<span class="ga-yl" style="bottom:${(t / top) * 100}%">${num(t)}</span>`)}
+      ${right ? right.ticks.filter((t) => Number.isInteger(t)).map((t) => html`<span class="ga-yl ga-yr ${readsLine!.cls}" style="bottom:${(t / right.max) * 100}%">${num(t)}</span>`) : ''}
       <svg viewBox="0 0 ${n} 100" preserveAspectRatio="none" aria-hidden="true">
         ${ticks.map((t) => html`<line class="gridl" x1="0" x2="${n}" y1="${y(t)}" y2="${y(t)}" vector-effect="non-scaling-stroke"/>`)}
-        ${lines.map((l) => (l.line!.previous ? html`<path class="ga-prev ${l.cls}" d="${path(l.line!.previous)}" vector-effect="non-scaling-stroke"/>` : ''))}
-        ${lines.map((l) => html`<path class="ga-cur ${l.cls}" d="${path(l.line!.current)}" vector-effect="non-scaling-stroke"/>`)}
+        ${lines.map((l) => (l.line!.previous ? html`<path class="ga-prev ${l.cls}" d="${path(l.line!.previous, scaleOf(l))}" vector-effect="non-scaling-stroke"/>` : ''))}
+        ${lines.map((l) => html`<path class="ga-cur ${l.cls}" d="${path(l.line!.current, scaleOf(l))}" vector-effect="non-scaling-stroke"/>`)}
         ${s.labels.map((_, i) => html`<rect class="ga-hit" x="${i}" y="0" width="1" height="100"><title>${tip(i)}</title></rect>`)}
       </svg>
     </div>
@@ -355,7 +364,7 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   };
   const legend = html`<div class="ga-legend">${LINES.filter((l) => l.key !== 'reads' || reads).map((l) => {
     const t = totals[l.key];
-    return html`<div class="ga-lk" title="${about[l.key]}"><span class="k ${l.cls}"></span><span class="ga-ln">${l.label}</span> <b class="ga-tot">${t ? num(t.cur) : '—'}</b>${t ? delta(t.cur, t.prev, sel, l.key === 'plays') : ''}</div>`;
+    return html`<div class="ga-lk" title="${about[l.key]}"><span class="k ${l.cls}"></span><span class="ga-ln">${l.key === 'reads' ? `${l.label} (right axis)` : l.label}</span> <b class="ga-tot">${t ? num(t.cur) : '—'}</b>${t ? delta(t.cur, t.prev, sel, l.key === 'plays') : ''}</div>`;
   })}${sel.compare ? html`<div class="ga-lk ga-lprev small"><span class="k prev"></span>${sel.vs[0].toUpperCase()}${sel.vs.slice(1)}</div>` : ''}</div>`;
   const s = ov.series;
   const chartCard = html`<div class="card ga-top">

@@ -313,12 +313,12 @@ export const networkBreakdown = (n: NetworkCounts): string => SHARE_NETWORKS.fil
 export function blogRow(p: BlogStats['posts'][number], titles: Map<string, string>, shares: Result<ShareStats> | null): Html {
   const sh = shares?.ok ? shares.value : null;
   const shareCell = (slug: string) => {
-    if (!sh) return html`<td class="r num">—</td>`;
+    if (!sh) return html`<td class="r num col-num">—</td>`;
     const s = slug ? sh.posts.get(slug) : undefined;
     const by = s ? networkBreakdown(s.networks) : '';
-    return html`<td class="r num ga-shares">${num(s?.total ?? 0)}${by ? html`<span class="small muted">${by}</span>` : ''}</td>`;
+    return html`<td class="r num col-num ga-shares">${num(s?.total ?? 0)}${by ? html`<span class="small muted">${by}</span>` : ''}</td>`;
   };
-  return html`<tr data-slug="${p.slug}"><td class="proj"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num">${num(p.opens)}</td><td class="r num">${num(p.readers)}</td><td class="r num">${minSec(perReader(p.seconds, p.readers))}</td>${shares ? shareCell(p.slug) : ''}</tr>`;
+  return html`<tr data-slug="${p.slug}"><td class="proj col-post"><b>${blogTitle(p.slug, p.path, titles)}</b><span>${p.path}</span></td><td class="r num col-num">${num(p.opens)}</td><td class="r num col-num">${num(p.readers)}</td><td class="r num col-num">${minSec(perReader(p.seconds, p.readers))}</td>${shares ? shareCell(p.slug) : ''}</tr>`;
 }
 // The blog's top posts (the site view, Vault staff only), by opens, with each's share clicks: the card the view sets
 // next to the top games, under the full-width map. stats: the same range's blog figures (the table's posts come from
@@ -331,10 +331,10 @@ export function blogCard(stats: Result<BlogStats>, titles: Map<string, string>, 
   // The pinned Total row: the whole range's figures (every post, not just the page shown) — opens and time on screen
   // summed over the posts; readers a deduplicated total (the totals' query: readers can't be added up across posts);
   // the average on screen, the whole's seconds per reader; the shares' total (dashes when the query failed).
-  const totalRow = html`<tr class="analytics-total-row"><td class="proj"><b>Total</b></td><td class="r num">${num(posts.reduce((s, p) => s + p.opens, 0))}</td><td class="r num">${num(stats.value.totals.readers.current)}</td><td class="r num">${minSec(perReader(posts.reduce((s, p) => s + p.seconds, 0), stats.value.totals.readers.current))}</td>${shares ? (sh ? html`<td class="r num">${num(sh.total.current)}</td>` : html`<td class="r num">—</td>`) : ''}</tr>`;
+  const totalRow = html`<tr class="analytics-total-row"><td class="proj col-post"><b>Total</b></td><td class="r num col-num">${num(posts.reduce((s, p) => s + p.opens, 0))}</td><td class="r num col-num">${num(stats.value.totals.readers.current)}</td><td class="r num col-num">${minSec(perReader(posts.reduce((s, p) => s + p.seconds, 0), stats.value.totals.readers.current))}</td>${shares ? (sh ? html`<td class="r num col-num">${num(sh.total.current)}</td>` : html`<td class="r num col-num">—</td>`) : ''}</tr>`;
   const rows = posts.slice(0, TOP_PAGE).map((p) => blogRow(p, titles, shares));
   return html`<div class="card ga-blog"><h2>Top Blog Articles</h2>${rows.length
-    ? html`<div class="tbl-wrap"><table><thead><tr><th>Post</th><th class="r">Opens</th><th class="r">Readers</th><th class="r" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${totalRow}${rows}</tbody></table></div>${loadMore(moreUrl, posts.length, 'posts')}`
+    ? html`<div class="tbl-wrap"><table class="analytics-blog-table"><thead><tr><th class="col-post">Post</th><th class="r col-num">Opens</th><th class="r col-num">Readers</th><th class="r col-num" title="Time on screen per reader">Avg time on screen</th>${shares ? html`<th class="r col-num" title="Clicks on the post’s share buttons, by network">Shares</th>` : ''}</tr></thead><tbody>${totalRow}${rows}</tbody></table></div>${loadMore(moreUrl, posts.length, 'posts')}`
     : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`;
 }
 

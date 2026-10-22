@@ -21,7 +21,7 @@ import type { PortalDeps } from './routes.ts';
 import { imageField, imageToolScript } from './listing-assets.ts';
 import { iconPicker, layoutIcon, PAGE_LAYOUTS } from './listing-layout.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
-import { requestSiteRebuild } from './site-rebuild.ts';
+import { siteContentChanged } from './site-rebuild.ts';
 import { cdnRedirectNote, unpublishedWarning } from './unpublished-warning.ts';
 import { addMaker, createProposedStudios, makersField, proposedLine, pruneMakerProposals } from './listing-makers.ts';
 
@@ -525,10 +525,9 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const wasPublished = !!l.published;
     db.unpublishListing(l.id);
     db.audit(h.actor(u), 'listing.unpublish', `${s.slug}:${l.slug}`);
-    markDeployPending(db, 'listing.unpublish');
-    // Only a listing the site shows is gone from it: start the site's deploy run (site-rebuild.ts) so the change
-    // reaches the built site; the bar above already says a deploy is scheduled.
-    if (wasPublished) requestSiteRebuild(`unpublish:${l.slug}`);
+    // Only a listing the site shows is gone from it: build the site so the change reaches it.
+    if (wasPublished) siteContentChanged(db, `unpublish:${l.slug}`);
+    else markDeployPending(db, 'listing.unpublish');
     return c.json({ ok: true });
   });
 

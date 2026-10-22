@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { RefType } from './paths.ts';
-import type { ListingFields } from './listings.ts';
+import { listingFieldsOf, type ListingFields } from './listings.ts';
 import type { GameCheck, GameCheckRun } from './game-checks.ts';
 import type { CheckName, SiteCheckRun } from './site-checks.ts';
 import {
@@ -1264,7 +1264,9 @@ export class Db {
   private listingRow(r: Record<string, unknown> | undefined): (Listing & { studio_slug: string; studio_name: string; studio_website: string | null }) | undefined {
     if (!r) return undefined;
     const { draft_json, published_json, ...rest } = r as Record<string, unknown> & { draft_json: string; published_json: string | null };
-    return { ...(rest as unknown as Listing & { studio_slug: string; studio_name: string; studio_website: string | null }), draft: JSON.parse(draft_json), published: published_json ? JSON.parse(published_json) : null };
+    // Rows written before a field existed lack it, so every reader would have to guard for itself (a missing
+    // card_categories crashed the game page). Fill the gaps from EMPTY_LISTING here, at the one parse boundary.
+    return { ...(rest as unknown as Listing & { studio_slug: string; studio_name: string; studio_website: string | null }), draft: listingFieldsOf(draft_json), published: published_json ? listingFieldsOf(published_json) : null };
   }
   private readonly LISTING_SELECT = `SELECT l.*, s.slug AS studio_slug, s.name AS studio_name, s.website AS studio_website FROM listings l JOIN studios s ON s.id = l.studio_id`;
 

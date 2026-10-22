@@ -5,6 +5,7 @@
 // Vault CDN: the current release of one of the studio's games at https://cdn.vaultlearninggames.org/STUDIO/GAME/.
 import { isSlug } from './paths.ts';
 import { DEFAULT_PAGE_LAYOUT, DEFAULT_THEME, effectivePageLayout, effectiveTheme, layoutAssetError, normalizeLayoutFields, validateLayoutFields } from './portal/listing-layout.ts';
+import { deriveTheme } from './portal/listing-theme.ts';
 import { CARD_CATEGORY_KINDS, CARD_TAG_KINDS, cardTagProblems, normalizeEnumValue, parseCardString, type CardTag, type CardTagKind } from './portal/listing-enums.ts';
 
 // "Grades 13+" is undergraduate and beyond (David, 2026-10-03; ThermoLab is the first).
@@ -38,10 +39,10 @@ export interface ListingFields {
   // that send visitors there (301). Vault staff only — they can collide with other games' pages and aliases.
   page_address: string;
   aliases: string[];
-  // Page design (card B): one of the two layouts and one of the two themes the site offers (portal/listing-layout.ts);
-  // problems() rejects anything else.
+  // Page design (card B): one of the two layouts the site offers (portal/listing-layout.ts); problems() rejects
+  // anything else. The theme isn't asked (card G): a save sets it from the layout (inheritedListing).
   page_layout: string;   // 'standard' | 'hero'
-  theme: string;         // 'light' | 'dark'
+  theme: string;         // 'light' | 'dark': Standard is light, Hero is dark
   // The hero layout's art, each a link to one of the listing's own uploaded images (card A's tool), or null for
   // none — the site then falls back (hero_background to hero_image, the cover to thumb_image).
   hero_background: string | null;
@@ -213,6 +214,19 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
     fit: pick('fit', str(input.fit, 60).replace(/\s+/g, '')),
     min_width: pick('min_width', minSize(input.min_width)),
     min_height: pick('min_height', minSize(input.min_height)),
+  };
+}
+
+// What a save stores for the fields the listing inherits (card G): the theme always follows the layout
+// (listing-theme.ts), whatever was sent; and the card's title and excerpt are empty — inherited from the title and
+// short description — unless they say something else, so renaming a game can never leave its old name on its card.
+// (normalize() already trims, so whitespace-only is empty.) Every write path that persists a listing applies it.
+export function inheritedListing(f: ListingFields): ListingFields {
+  return {
+    ...f,
+    theme: deriveTheme(f.page_layout),
+    card_title: f.card_title === f.title ? '' : f.card_title,
+    card_excerpt: f.card_excerpt === f.short_description ? '' : f.card_excerpt,
   };
 }
 

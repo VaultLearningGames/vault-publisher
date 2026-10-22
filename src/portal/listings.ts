@@ -9,7 +9,7 @@ import type { Db, Game, Listing, Studio, User } from '../db.ts';
 import type { StudioPermission, VaultPermission } from '../permissions.ts';
 import { markDeployPending } from '../deploy-status.ts';
 import { draftProblems, importFromExport, moveListingToStudio, publishListing, saveListing } from '../listing-ops.ts';
-import { changedFields, FIELD_LABEL, GRADES, isListingSlug, MIN_SIZE_RANGE, normalize, VAULT_ONLY, type ListingFields } from '../listings.ts';
+import { changedFields, FIELD_LABEL, GRADES, inheritedListing, isListingSlug, MIN_SIZE_RANGE, normalize, VAULT_ONLY, type ListingFields } from '../listings.ts';
 import { GRADES as GRADE_OPTIONS, SUBJECTS, TOPICS, studioOptions, type CardTag, type CardTagKind, type EnumOption } from './listing-enums.ts';
 import { getHosting, hostingCell } from './hosting.ts';
 import { html, type Html } from './html.ts';
@@ -19,7 +19,7 @@ import { compareByTestingStatus, deriveTestingStatus } from './testingStatus.ts'
 import { MAX_FEATURED, readFeatured, sortFeatured, type FeaturedEntry } from '../featured.ts';
 import type { PortalDeps } from './routes.ts';
 import { imageField, imageToolScript } from './listing-assets.ts';
-import { iconPicker, layoutIcon, PAGE_LAYOUTS, themeIcon, THEMES } from './listing-layout.ts';
+import { iconPicker, layoutIcon, PAGE_LAYOUTS } from './listing-layout.ts';
 import { previewButtons, saveControls } from './listing-preview.ts';
 import { requestSiteRebuild } from './site-rebuild.ts';
 import { cdnRedirectNote, unpublishedWarning } from './unpublished-warning.ts';
@@ -144,15 +144,28 @@ export function listingPieces(h: ListingHelpers) {
       <input type="text" name="${name}" value="${Array.isArray(f[name]) ? (f[name] as string[]).join(', ') : String(f[name] ?? '')}" ${dis} ${attrs}>${hint ? html`<span class="hint">${hint}</span>` : ''}</label>`;
     const area = (name: keyof ListingFields, label: string, hint = '', rows = 3) => html`<label class="field full"><span class="lab">${label}</span>
       <textarea name="${name}" rows="${rows}" ${dis}>${Array.isArray(f[name]) ? (f[name] as string[]).join('\n') : String(f[name] ?? '')}</textarea>${hint ? html`<span class="hint">${hint}</span>` : ''}</label>`;
-    // The game card (card C): its title and excerpt (empty: the title / short description), and its categories and
-    // tags as chip pickers over the portal's option lists (listing-enums.ts) — the site's filters read those.
+    // The game card (card C): its title and excerpt, and its categories and tags as chip pickers over the portal's
+    // option lists (listing-enums.ts) — the site's filters read those. The title and excerpt are inherited (card G):
+    // empty, in a closed disclosure, with the title / short description as the placeholder — a copy of the inherited
+    // value shows as empty too, so a save never stores it (inheritedListing) and renaming the game renames its card.
+    const own = (v: string, inherited: string) => (v && v !== inherited ? v : '');
+    const custom = !!(own(f.card_title, f.title) || own(f.card_excerpt, f.short_description));
+    const cardText = html`<details class="full disclose">
+        <summary>Card text (optional)${custom ? ' — has its own text' : ''}</summary>
+        <div class="fields">
+          <label class="field"><span class="lab">Card title</span>
+            <input type="text" name="card_title" value="${own(f.card_title, f.title)}" placeholder="${f.title}" ${dis}>
+            <span class="hint">Shown on the game card. Empty: the title.</span></label>
+          <label class="field full"><span class="lab">Card excerpt</span>
+            <textarea name="card_excerpt" rows="2" placeholder="${f.short_description}" ${dis}>${own(f.card_excerpt, f.short_description)}</textarea>
+            <span class="hint">One or two sentences under the card title. Empty: the short description.</span></label>
+        </div></details>`;
     const tagChips = (field: 'card_categories' | 'card_tags', kind: CardTagKind, label: string, opts: EnumOption[]) => html`<div class="field full"><span class="lab">${label}</span>
       <div class="chips">${opts.map((o) => html`<label><input type="checkbox" name="${field}:${kind}:${o.value}" ${f[field].some((t) => t.kind === kind && t.value === o.value) ? 'checked' : ''} ${dis}> ${o.label}</label>`)}</div></div>`;
     const cardSection = html`<h2 style="margin-top:18px">Site card</h2>
       <p class="small muted">The game’s card on the Games page: the title and the excerpt under it, and the categories and tags the site’s filters read. The card’s image is the thumbnail. A field left empty falls back to the title or the short description.</p>
       <div class="fields">
-        ${txt('card_title', 'Card title', 'Shown on the game card. Empty: the title.')}
-        ${area('card_excerpt', 'Card excerpt', 'One or two sentences under the card title. Empty: the short description.', 2)}
+        ${cardText}
         ${tagChips('card_categories', 'grade', 'Grades', GRADE_OPTIONS)}
         ${tagChips('card_categories', 'studio', 'Developer (studio)', studioOptions(db))}
         ${tagChips('card_tags', 'subject', 'Subjects', SUBJECTS)}
@@ -185,6 +198,15 @@ export function listingPieces(h: ListingHelpers) {
       <label class="field"><span class="lab">Listing date</span>
         <input type="date" name="created_at" value="${l.created_at.slice(0, 10)}" ${vault ? dis : 'disabled'} style="width:11em">
         <span class="hint">The date the site sorts the cards newest-first (the record’s created date).${vault ? '' : ' Only Vault staff can change it.'}</span></label>`;
+    // The player's plumbing (card G), not design choices: the CDN folder (folded into the play address before the
+    // site sees it), the player fit and the smallest play area, in a closed disclosure.
+    const geometry = html`<details class="full disclose">
+        <summary>Player geometry (Vault staff)</summary>
+        <div class="fields">
+          ${g ? txt('cdn_path', 'CDN folder', `Optional folder inside ${s.slug}/${g.slug}/, e.g. earthquake/ for one game of a collection.`) : ''}
+          ${vault ? txt('fit', 'Player fit (Vault)', 'For fixed-size games: page width, page height, x, y, width, height of the game on that page.') : ''}
+          ${minSizeField(f, vault && edit)}
+        </div></details>`;
     const form = html`<form data-api="${api}" data-then="reload" class="card form-card">
       <h2>Site listing <small>vaultlearninggames.org/games/${l.slug}/</small></h2>
       ${l.published ? '' : html`<p>${unpublishedWarning(l, 'site')}</p>`}
@@ -199,7 +221,6 @@ export function listingPieces(h: ListingHelpers) {
         ${area('standards', 'Standards', 'Codes, one per line or comma-separated (Common Core, NGSS), e.g. 4.OA.A.2', 2)}
         ${txt('related_curriculum', 'Related curriculum', 'A link to teacher materials. When it is empty the game’s page says there is no curriculum yet and invites teachers to share one with the Vault (no email address is shown).')}
         ${txt('gameplay_video', 'Gameplay video', 'A YouTube or other video link')}
-        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'hero_image', label: 'Hero image', value: f.hero_image, hint: 'A path on the site (games/x/img/hero.png) or an https link.' })}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'thumb_image', label: 'Thumbnail', value: f.thumb_image, hint: 'The game card’s image (16:9). A path on the site or an https link.' })}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'screenshots', label: 'Screenshots', value: f.screenshots, hint: 'One path or link per line, in the order the site shows them; delete a line to remove it.' })}
         ${edit && h.deps.production ? imageToolScript() : ''}
@@ -209,12 +230,10 @@ export function listingPieces(h: ListingHelpers) {
       <h2 style="margin-top:18px">Page design</h2>
       <div class="fields">
         ${iconPicker({ name: 'page_layout', label: 'Page layout', value: f.page_layout, disabled: !edit,
-          hint: 'The site offers two: Standard (a cover image above the text) or Hero (a full-width background with the logo over it).',
+          hint: 'Hero pages are dark; Standard pages are light.',
           options: PAGE_LAYOUTS.map((v) => ({ value: v, caption: v === 'hero' ? 'Hero' : 'Standard', icon: layoutIcon(v) })) })}
-        ${iconPicker({ name: 'theme', label: 'Colour theme', value: f.theme, disabled: !edit,
-          hint: 'The site offers two: Light or Dark.',
-          options: THEMES.map((v) => ({ value: v, caption: v === 'dark' ? 'Dark' : 'Light', icon: themeIcon(v) })) })}
-        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'hero_background', label: 'Hero background', value: f.hero_background ?? '', hint: 'For the Hero layout: a full-width background (21:9). When it is empty the site uses the hero image instead.' })}
+        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'hero_image', label: 'Hero image', value: f.hero_image, hint: 'A path on the site (games/x/img/hero.png) or an https link.' })}
+        ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'hero_background', label: 'Hero background', value: f.hero_background ?? '', hint: 'For the Hero layout: a full-width background (21:9). The Hero layout uses the hero background if set, otherwise the hero image.' })}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'logo_image', label: 'Logo art', value: f.logo_image ?? '', hint: 'For the Hero layout: the game’s logo, with transparency (any shape).' })}
       </div>
       <h2 style="margin-top:18px">Playing</h2>
@@ -223,12 +242,10 @@ export function listingPieces(h: ListingHelpers) {
           <label class="check"><input type="radio" name="play_source" value="url" ${f.play_source === 'url' ? 'checked' : ''} ${dis}> Its web address, shown in Vault’s player</label>
           <label class="check"><input type="radio" name="play_source" value="cdn" ${f.play_source === 'cdn' ? 'checked' : ''} ${cur ? dis : 'disabled'}> The Vault CDN: ${g ? html`<span class="mono">${s.slug}/${g.slug}</span>, ${cur ? html`currently <b class="mono">${cur.version}</b>` : 'nothing released yet'}` : 'no CDN game yet'}</label></div>
         ${txt('play_url', 'Web address', 'The page that shows only the game (what Vault’s player wraps). Also the fallback if the CDN game has no release.')}
-        ${g ? txt('cdn_path', 'CDN folder', `Optional folder inside ${s.slug}/${g.slug}/, e.g. earthquake/ for one game of a collection.`) : ''}
         <label class="field"><span class="lab">Opens in</span><select name="embed" ${dis}>
           <option value="true" ${f.embed ? 'selected' : ''}>Vault’s player (the game’s page allows framing)</option>
           <option value="false" ${f.embed ? '' : 'selected'}>A new tab (the game’s page refuses to be framed)</option></select></label>
-        ${vault ? txt('fit', 'Player fit (Vault)', 'For fixed-size games: page width, page height, x, y, width, height of the game on that page.') : ''}
-        ${minSizeField(f, vault && edit)}
+        ${geometry}
       </div>
       ${addressSection}
       ${edit ? html`<div class="form-foot">${saveControls(vault, l, canSubmit(u, s))}${previewButtons(api, h.deps.previewSites)}${err}</div>` : ''}
@@ -393,7 +410,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     // The new game's page must not land on another game's page address or one of its aliases (card C).
     const clash = db.listings().find((x) => (x.draft.page_address || '') === slug || (x.draft.aliases ?? []).includes(slug));
     if (clash) fail(409, `That address is already used by ${clash.slug} (its page address or an alias).`);
-    const draft = normalize({ title: b.title, makers: [s.name] });
+    const draft = inheritedListing(normalize({ title: b.title, makers: [s.name] }));
     if (!draft.title) fail(400, 'Add a title.');
     let game: Game | undefined;
     if (b.game) {
@@ -437,7 +454,8 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
       if (!/^\d{4}-\d{2}-\d{2}([T ].*)?$/.test(d) || Number.isNaN(Date.parse(d))) fail(400, 'The listing date must be a date like 2026-10-21.');
       listingDate = new Date(Date.parse(d)).toISOString();
     } else delete b.created_at;
-    const draft = normalize(b, l.draft);
+    // The theme follows the layout and inherited card text is stored empty, whatever was sent (card G).
+    const draft = inheritedListing(normalize(b, l.draft));
     const flag = (v: unknown) => v === true || v === '1' || v === 'on';
     const wantsPublish = flag(b.publish) && P.canPublish(u);
     // Studio saves go to Vault for review when the member can request publish (else they stay a draft); Vault staff

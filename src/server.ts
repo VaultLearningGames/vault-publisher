@@ -4,6 +4,7 @@ import { createApp } from './app.ts';
 import { createVerifier } from './auth.ts';
 import { loadConfig } from './config.ts';
 import { Db } from './db.ts';
+import { clearInheritedCardText } from './clear-inherited-card-text.ts';
 import { relayoutReleases } from './releases.ts';
 import { createR2Storage } from './storage.ts';
 import { googleSheets } from './forms.ts';
@@ -15,6 +16,9 @@ import { resolveSiteDir } from './site-dir.ts';
 
 const config = loadConfig();
 const db = new Db(config.dbPath);
+// Card text that only copies the title / short description is cleared (it is inherited); every boot, as staging's
+// daily re-seed brings production's back. A no-op once clean (clear-inherited-card-text.ts).
+clearInheritedCardText(db);
 // studios.json is authoritative for the studios it lists and the repositories it assigns to them; studios created
 // and repositories assigned in the portal are left alone. Conflicts are logged and skipped.
 syncStudiosFile(db, JSON.parse(readFileSync(config.studiosFile, 'utf8')));

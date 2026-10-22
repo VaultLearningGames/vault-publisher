@@ -519,3 +519,19 @@
   };
   tick(); setInterval(tick, 30000);
 })();
+
+// Character counters (the SEO fields of the listing editor): an input or textarea with data-count shows its live
+// length in the span whose id is its own id plus "-count" ("123 / 160"); over the recommended length it goes red.
+(function () {
+  for (const input of document.querySelectorAll('input[data-count], textarea[data-count]')) {
+    const out = document.getElementById(`${input.id}-count`);
+    if (!out) continue;
+    const max = Number(input.getAttribute('data-count')) || 0;
+    const update = () => {
+      out.textContent = `${input.value.length}` + (max ? ` / ${max}` : '');
+      out.classList.toggle('over', max > 0 && input.value.length > max);
+    };
+    input.addEventListener('input', update);
+    update();
+  }
+})();

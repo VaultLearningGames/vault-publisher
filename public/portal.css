@@ -629,3 +629,7 @@ th.r .th-sort { text-align: right; }
 .opt-icon .swatch-dark { fill: #161C23; }
 .opt-icon .bars-light rect { fill: #E6EAEE; }
 .opt-icon .bars-dark rect { fill: #17212B; }
+
+/* Character counter in a field's hint (the SEO title/description of the listing editor). */
+.char-count { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.char-count.over { color: var(--bad, #b3261e); }

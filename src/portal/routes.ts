@@ -28,6 +28,7 @@ import { registerBlogAdmin } from './blog-admin.ts';
 import type { MonitorEnv } from '../url-monitor.ts';
 import { DeployStatusCache, deployBranch, siteDeployBranch, getScheduledDeploy, githubRunsFetcher, settleScheduled, withDeployEta, type DeployStatus, type RunsFetcher, type SettingsStore } from '../deploy-status.ts';
 import { formatDeployEta } from '../deploy-eta.ts';
+import { getBuildInfo } from '../build-info.ts';
 import { randomToken, SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from './session.ts';
 
 export interface GitHubProfile { github_id: string; login: string; name: string | null; avatar_url: string | null }
@@ -173,6 +174,7 @@ function layout(title: string, nav: Nav | null, body: Html | string, active = ''
   const side = nav ? html`
     <aside class="side" aria-label="Portal navigation">
       <a class="brand" href="/">${logo()}</a>
+      <div id="portal-build" class="portal-build" aria-label="Build"></div>
       ${studios.length ? html`<label class="studio-sw"><span>Studio</span>
         <select onchange="location.href='/s/'+this.value" aria-label="Studio">
           ${cur ? '' : html`<option value="">Choose…</option>`}
@@ -241,6 +243,10 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
     const body: DeployStatus = { deploys, scheduled: withDeployEta(settleScheduled(db, deploys, now), now) };
     return c.json(body, 200, { 'Cache-Control': 'no-store' });
   });
+
+  // Public, like the deploy bar (it answers on the sign-in page too): the build under the logo (build-info.ts).
+  // Only the build's own identity — never any other environment value, secret or hostname.
+  app.get('/api/build-info', (c) => c.json(getBuildInfo(), 200, { 'Cache-Control': 'no-store' }));
 
   // Browsers that reach the portal on the service's default *.run.app address are sent to the portal's
   // real address (GitHub sign-in only returns there). The API and health check keep answering on both.
@@ -346,6 +352,7 @@ export function registerPortal(app: Hono, deps: PortalDeps) {
       <div class="login-art" aria-hidden="true"><div class="login-games-track">${games}${games}</div></div>
       <div class="login login-card vault-login-card">
       <div class="brand big">${logo()}</div>
+      <div class="portal-build" aria-label="Build"></div>
       <h1>Studio Portal</h1>
       ${configured
         ? html`<a class="btn pri big" href="/auth/github?next=${encodeURIComponent(next)}">Sign in with GitHub</a>`

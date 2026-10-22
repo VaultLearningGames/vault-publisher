@@ -535,3 +535,25 @@
     update();
   }
 })();
+
+// Build number under the logo (build-info.ts, via /api/build-info): which deploy built this portal, for
+// debugging. Every .portal-build (the sidebar's and the sign-in page's) gets the text "build <build>" and a
+// title with the full SHA and build time (the time omitted when unknown). A failed fetch or bad answer just
+// leaves the line empty: it never throws and never blocks the rest of the portal.
+(function () {
+  const els = document.querySelectorAll('.portal-build');
+  if (!els.length) return;
+  (async () => {
+    try {
+      const res = await fetch('/api/build-info', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const info = await res.json();
+      if (!info || typeof info.build !== 'string') return;
+      const title = [typeof info.sha === 'string' ? info.sha : '', typeof info.builtAt === 'string' ? info.builtAt : ''].filter(Boolean).join(' · ');
+      for (const el of els) {
+        el.textContent = `build ${info.build}`;
+        if (title) el.setAttribute('title', title);
+      }
+    } catch { /* no build info: leave the line empty */ }
+  })();
+})();

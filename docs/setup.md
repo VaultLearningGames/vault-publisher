@@ -206,6 +206,13 @@ check and publishes nothing. `PREVIEW_SITES` lists where the editor's Preview bu
 (`ADDRESS/_preview/TOKEN/`): the portal itself, which renders previews with its vault-site checkout (`SITE_DIR`; [README](../README.md#previews-and-vault-site)), and on staging also the new
 design's own site.
 
+The build number under the portal's top-left logo (and the sign-in page's logo) needs no setup: *Deploy (portal)*
+sets three variables on the Cloud Run service from the run's own context — `VAULT_BUILD_NUMBER` (the run number),
+`VAULT_BUILD_SHA` (the full SHA) and `VAULT_BUILD_TIME` (the run's start, ISO-8601 UTC) — in `deploy.yml`'s
+`env_vars`. The portal shows `build <run number>-<short sha>` (the full SHA and time on hover; `GET
+/api/build-info` answers the same, unsigned); locally, without the variables, it shows `build dev`. The variables
+are per-revision, so rolling back to an older revision shows that revision's own build.
+
 Point the test game at staging: `gh variable set VAULT_PUBLISHER_URL --body https://portal.vaultlearninggames-staging.org -R VaultLearningGames/vault-publisher-test`.
 
 ## 5. Move production's test builds, then deploy

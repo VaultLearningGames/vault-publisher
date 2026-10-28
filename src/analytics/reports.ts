@@ -115,27 +115,53 @@ export const DIM_GAME = 'customEvent:game_slug';
 export const DIM_MODE = 'customEvent:play_mode';
 export const MET_SECONDS = 'customEvent:play_seconds';
 export const DIM_RT_GAME = 'customUser:vault_game';
-// Where a play came from: the play events carry source_channel (a coarse label — vault | pbswi | pbskids | pbslm |
-// sciencegamecenter | other) and source_referrer (the exact origin), both registered in GA as event-scoped custom
-// dimensions. 'vault' is a play that came through the Vault site itself, so Vault's own contribution is countable
-// next to a partner's rather than disappearing into '(not set)'.
+// Where a play came from: the play events carry source_channel (the partner's hostname — vault |
+// pbswisconsineducation.org | pbskids.org | pbslearningmedia.org | sciencegamecenter.org | other) and
+// source_referrer (the exact origin), both registered in GA as event-scoped custom dimensions. 'vault' is a play
+// that came through the Vault site itself, so Vault's own contribution is countable next to a partner's rather than
+// disappearing into '(not set)'; it keeps its short name because it has no referral-era rows to be consistent with,
+// and vaultlearninggames.org would collide with ordinary on-site navigation.
 export const DIM_SOURCE = 'customEvent:source_channel';
 export const DIM_SOURCE_REFERRER = 'customEvent:source_referrer';
 // The channels we name, in the order shown, with their labels. Anything else is 'other'; a play recorded before the
-// channel shipped carries no parameter at all and GA reports it as '(not set)'.
+// channel shipped carries no parameter at all and GA reports it as '(not set)'. This is the only ordered display
+// list: the aliases below add labels, never rows.
 export const SOURCE_CHANNELS = [
   ['vault', 'Vault'],
-  ['pbswi', 'PBS Wisconsin Education'],
-  ['pbskids', 'PBS KIDS'],
-  ['pbslm', 'PBS LearningMedia'],
-  ['sciencegamecenter', 'Science Game Center'],
+  ['pbswisconsineducation.org', 'PBS Wisconsin Education'],
+  ['pbskids.org', 'PBS KIDS'],
+  ['pbslearningmedia.org', 'PBS LearningMedia'],
+  ['sciencegamecenter.org', 'Science Game Center'],
   ['other', 'Other sites'],
 ] as const;
-export const SOURCE_LABELS: Record<string, string> = Object.fromEntries(SOURCE_CHANNELS);
+// The short keys the channel shipped with (and that partner links still carry: PBS Wisconsin's "Play the game"
+// button hardcodes ?vault_ch=pbswi). GA holds rows under both strings — the short ones recorded up to the
+// 2026-10-28 cutover, the hostnames after it — so every incoming value is normalised through this map before it is
+// labelled or grouped, and the two eras read as one series. Inbound links keep working for good: nothing is dropped
+// from here. 'vault' is deliberately absent; it stays 'vault'.
+export const SOURCE_CHANNEL_ALIASES: Record<string, string> = {
+  'pbswi': 'pbswisconsineducation.org',
+  'pbskids': 'pbskids.org',
+  'pbslm': 'pbslearningmedia.org',
+  'sciencegamecenter': 'sciencegamecenter.org',
+};
+/** A channel value as the report keys it: a historical short key becomes its hostname, anything else is itself. */
+export function canonicalSourceChannel(raw: string | null | undefined): string {
+  if (!raw) return raw ?? '';
+  return SOURCE_CHANNEL_ALIASES[raw] ?? raw;
+}
+// Labels for the hostname keys, and the same label again for each short key, so a pre-cutover GA row renders as
+// "PBS Wisconsin Education" rather than a bare 'pbswi'.
+const CHANNEL_LABELS: Record<string, string> = Object.fromEntries(SOURCE_CHANNELS);
+export const SOURCE_LABELS: Record<string, string> = {
+  ...CHANNEL_LABELS,
+  ...Object.fromEntries(Object.entries(SOURCE_CHANNEL_ALIASES)
+    .flatMap(([alias, canonical]) => (CHANNEL_LABELS[canonical] ? [[alias, CHANNEL_LABELS[canonical]]] : []))),
+};
 /** A channel's name for the report; '(not set)' is a play from before the channel shipped. */
 export function sourceLabel(channel: string): string {
   if (!channel || channel === '(not set)') return 'Unattributed';
-  return SOURCE_LABELS[channel] ?? channel;
+  return SOURCE_LABELS[canonicalSourceChannel(channel)] ?? channel;
 }
 
 // ---------- requests ----------
@@ -577,9 +603,12 @@ export function readShares(res: GaResponse): ShareStats {
   return { total, networks, posts };
 }
 
-// Acquisition: plays by channel in each period, most plays first, with the origins seen for each channel. A play
-// recorded before source_channel shipped carries no parameter, so GA reports it as '(not set)' and it is kept as
-// its own row (named "Unattributed") rather than being folded into a channel it was never measured as.
+// Acquisition: plays by channel in each period, most plays first, with the origins seen for each channel. Each
+// row's channel value is normalised first (canonicalSourceChannel), so a window spanning the 2026-10-28 cutover —
+// where GA holds the same partner under both 'pbswi' and 'pbswisconsineducation.org' — adds up to ONE row per
+// partner, with the origins of both eras collected on it. A play recorded before source_channel shipped carries no
+// parameter, so GA reports it as '(not set)' and it is kept as its own row (named "Unattributed") rather than being
+// folded into a channel it was never measured as.
 export interface SourceStats { channel: string; label: string; origins: string[]; plays: Pair }
 export interface AcquisitionStats { total: Pair; sources: SourceStats[] }
 export function readAcquisition(res: GaResponse): AcquisitionStats {
@@ -589,7 +618,7 @@ export function readAcquisition(res: GaResponse): AcquisitionStats {
     const p = periodOf(r);
     if (!p) continue;
     const n = r.mets.eventCount ?? 0;
-    const channel = (r.dims[DIM_SOURCE] ?? '').trim() || '(not set)';
+    const channel = canonicalSourceChannel((r.dims[DIM_SOURCE] ?? '').trim()) || '(not set)';
     total[p] += n;
     const s = by.get(channel) ?? { plays: { current: 0, previous: 0 }, origins: new Set<string>() };
     s.plays[p] += n;

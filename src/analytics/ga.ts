@@ -4,12 +4,12 @@
 // AnalyticsError whose kind the pages explain: not connected, no access, a definition not registered yet, or other.
 import { googleTokenSource, NoCredentialsError, type TokenSource } from './google-auth.ts';
 import {
-  averageSeconds, basicPlaysRequest, blogReadsSeriesRequest, blogRequest, blogTotalsRequest, localNow, pagesRequest, playersRequest, playSeriesRequest, playsRequest, readBasicPlays, readBlog, readPages, readPairs, readPlaces,
+  acquisitionRequest, averageSeconds, basicPlaysRequest, blogReadsSeriesRequest, blogRequest, blogTotalsRequest, localNow, pagesRequest, playersRequest, playSeriesRequest, playsRequest, readAcquisition, readBasicPlays, readBlog, readPages, readPairs, readPlaces,
   readPlays, readReads, readRealtimeGames, readRealtimePosts, readSeries, readShares, readTopPages, realtimeGamePlaysRequest, realtimeGamesRequest, realtimePlayersRequest, realtimeScreensRequest, realtimeStudioRequest, realtimeVisitorPlacesRequest, realtimeVisitorsRequest,
-  selectionOf, sharesRequest, topPagesRequest, trafficRequest, trafficSeriesRequest, type BlogStats, type GamePages, type GaRequest, type LiveItem, type GaResponse, type Line, type PageStats, type Pair,
+  selectionOf, sharesRequest, topPagesRequest, trafficRequest, trafficSeriesRequest, type AcquisitionStats, type BlogStats, type GamePages, type GaRequest, type LiveItem, type GaResponse, type Line, type PageStats, type Pair,
   type Place, type PlayStats, type Scope, type Selection, type Series, type ShareStats,
 } from './reports.ts';
-export { blogRequest, blogTotalsRequest, readBlog, readShares, sharesRequest, type BlogStats, type ShareStats } from './reports.ts';
+export { acquisitionRequest, blogRequest, blogTotalsRequest, readAcquisition, readBlog, readShares, sharesRequest, type AcquisitionStats, type BlogStats, type ShareStats } from './reports.ts';
 
 export type GaMethod = 'runReport' | 'runRealtimeReport';
 // Sends one request to the property and answers its JSON. Injected in tests and for local screenshots.
@@ -203,6 +203,11 @@ export class Analytics {
   // network and post_slug are registered it fails ('setup') while the blog's other figures still show.
   async blogShares(sel: Selection): Promise<Result<ShareStats>> {
     return settle(this.call('runReport', sharesRequest(sel)).then(readShares));
+  }
+  // Plays by where the visitor came from. Its own result for the same reason as the shares: before source_channel is
+  // registered in GA this fails ('setup') and the rest of the view still shows.
+  async acquisition(sel: Selection, scope: Scope): Promise<Result<AcquisitionStats>> {
+    return settle(this.call('runReport', acquisitionRequest(sel, scope)).then(readAcquisition));
   }
 
   // The site: everyone on it (playing or browsing) by place, and how many of them are playing. A game: its players. A

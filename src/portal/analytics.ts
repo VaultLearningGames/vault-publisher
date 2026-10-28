@@ -15,12 +15,12 @@ import type { Hono } from 'hono';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { Analytics, AnalyticsError, type BlogStats, type Overview, type Realtime, type Result, type ShareStats } from '../analytics/ga.ts';
+import { Analytics, AnalyticsError, type AcquisitionStats, type BlogStats, type Overview, type Realtime, type Result, type ShareStats } from '../analytics/ga.ts';
 import { cityPoint } from '../analytics/cities.ts';
 import { COUNTRY_POINTS } from '../analytics/countries.ts';
 import { MAP_HEIGHT, MAP_WIDTH } from '../analytics/projection.ts';
 import { loadLegacy, pagePaths } from '../analytics/pages.ts';
-import { averageSeconds, blogPostUrl, longDate, minSec, perReader, PLAYS_SINCE, PRESETS, presetPeriods, SHARE_NETWORKS, spanLabel, topPagesTotals, type GamePages, type GamePlays, type NetworkCounts, type Pair, type Place, type Scope, type Selection, type Series } from '../analytics/reports.ts';
+import { averageSeconds, blogPostUrl, longDate, minSec, perReader, PLAYS_SINCE, PRESETS, presetPeriods, SHARE_NETWORKS, spanLabel, topPagesTotals, type GamePages, type GamePlays, type NetworkCounts, type Pair, type Place, type Scope, type Selection, type Series, type SourceStats } from '../analytics/reports.ts';
 import { SiteBlogRepo } from '../blog/siteRepo.ts';
 import type { Studio, User } from '../db.ts';
 import { html, raw, type Html } from './html.ts';
@@ -183,6 +183,7 @@ export interface GameTitle { title: string; href: string | null; studio?: { name
 interface ViewOpts { timeZone: string; scope: Scope; staff: boolean; base: string; realtimeUrl: string; topUrl?: string; assets: Assets; titleOf(slug: string): GameTitle
   readsError?: AnalyticsError | null;   // the site view's blog reads couldn't be read (the chart draws without them)
   blog?: { stats: Result<BlogStats>; titles: Map<string, string>; shares?: Result<ShareStats> | null; moreUrl?: string; siteUrl?: string | null } | null
+  acquisition?: Result<AcquisitionStats> | null   // plays by where the visitor came from (its own card, under the top lists)
   live?: Html | null }   // the live panel (analytics-realtime.ts), right under the map: the site's and a studio's views
 interface Assets { css: string; js: string; land: string }
 
@@ -343,6 +344,41 @@ export function blogCard(stats: Result<BlogStats>, titles: Map<string, string>, 
     : html`<p class="small muted">No blog pages opened in this range.</p>`}</div>`;
 }
 
+// ---------- acquisition ----------
+// Plays by where the visitor came from: a named channel per row ("Vault" for plays that came through the Vault site,
+// "PBS Wisconsin Education" for the partner's "Play the game" link, and so on), its plays and share of the total, the
+// change against the period before, and the exact origins seen. A share is of the plays that HAVE a channel, so an
+// "Unattributed" row (plays recorded before the channel shipped) can't inflate or deflate anyone's percentage.
+export function acquisitionRows(stats: AcquisitionStats): { attributed: number; rows: SourceStats[] } {
+  const attributed = stats.sources.filter((s) => s.channel !== '(not set)').reduce((t, s) => t + s.plays.current, 0);
+  return { attributed, rows: stats.sources };
+}
+const pct1 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const shareStr = (plays: number, of: number) => (of > 0 ? `${pct1.format((plays / of) * 100)}%` : '—');
+// The card: null when the report wasn't asked for; the setup note when GA doesn't know source_channel yet (the rest of
+// the page still shows), and otherwise the table, most plays first.
+export function acquisitionCard(res: Result<AcquisitionStats> | null | undefined, sel: Selection, staff: boolean): Html | string {
+  if (!res) return '';
+  const title = html`<h2>Where plays come from <small>${spanLabel(sel.current)}</small></h2>`;
+  if (!res.ok) return html`<div class="card ga-acq">${title}${problem(res.error, staff, 'where plays come from', 'the play events’ source_channel custom definition')}</div>`;
+  const { attributed, rows } = acquisitionRows(res.value);
+  if (!rows.length) return html`<div class="card ga-acq">${title}<p class="small muted">No plays in this range yet.</p></div>`;
+  const body = rows.map((s) => {
+    const unattributed = s.channel === '(not set)';
+    return html`<tr class="${unattributed ? 'ga-acq-unattributed' : ''}">
+      <td class="proj"><b>${s.label}</b>${s.origins.length ? html`<span>${s.origins.join(' · ')}</span>` : ''}</td>
+      <td class="r num">${num(s.plays.current)}</td>
+      <td class="r num">${unattributed ? '—' : shareStr(s.plays.current, attributed)}</td>
+      <td class="r num">${delta(s.plays.current, s.plays.previous, sel, true)}</td>
+    </tr>`;
+  });
+  const totalRow = html`<tr class="analytics-total-row"><td class="proj"><b>Total</b></td><td class="r num">${num(res.value.total.current)}</td><td class="r num">100.0%</td><td class="r num">${delta(res.value.total.current, res.value.total.previous, sel, true)}</td></tr>`;
+  const anyUnattributed = rows.some((s) => s.channel === '(not set)');
+  return html`<div class="card ga-acq">${title}
+    <div class="tbl-wrap"><table class="analytics-acq-table"><thead><tr><th>Source</th><th class="r" title="Games opened from their page on the site, by visitors who arrived from this source">Plays</th><th class="r" title="Share of the plays whose source is known">Share</th><th class="r">Change</th></tr></thead><tbody>${totalRow}${body}</tbody></table></div>
+    <p class="small muted">A play counts against the site that sent the visitor to the game’s page. <b>Vault</b> is a play that came through vaultlearninggames.org itself.${anyUnattributed ? ' Unattributed plays were recorded before the source was measured, so they are left out of the shares.' : ''}</p></div>`;
+}
+
 export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   const sel = ov.sel;
   const kind = o.scope.game ? 'game' : o.scope.studio ? 'studio' : 'site';
@@ -446,9 +482,11 @@ export function view(ov: Overview, rt: Realtime, o: ViewOpts): Html {
   // The map's card takes the full width on its own row; then the top lists: the top games and the blog's top posts,
   // side by side (one of them only, the other spans the row).
   const lists = top || blog ? html`<div class="grid analytics-top-lists">${top}${blog}</div>` : '';
+  // Where plays come from, under the top lists: the whole site's, a studio's or one game's, same as the view.
+  const acquisition = acquisitionCard(o.acquisition, sel, o.staff);
 
   return html`${assets}<div class="ga">${picker}${headline}${chartCard}${page}
-    ${realtime}${o.live ?? ''}${lists}
+    ${realtime}${o.live ?? ''}${lists}${acquisition}
     <p class="small muted ga-foot">From Google Analytics (the site’s visits and ${p && !p.timed ? 'play counts' : 'play events'}, which began on ${longDate(PLAYS_SINCE)}; days are ${o.timeZone.replace(/_/g, ' ')} days, weeks start on Sunday). Figures are cached for up to 10 minutes; the realtime map for a minute.</p></div>`;
 }
 
@@ -510,10 +548,12 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
     // The site view (Vault staff): the blog too.
     const site = !scope.game && !scope.studio && h.isStaff(u);
     const titles = site ? blogTitles() : null;
-    const [ov, rt, blog, live] = await Promise.all([analytics.overview(sel, full, cat), analytics.realtime(scope),
+    const [ov, rt, blog, live, acquisition] = await Promise.all([analytics.overview(sel, full, cat), analytics.realtime(scope),
       site ? Promise.all([analytics.blog(sel), titles!, analytics.blogShares(sel)]).then(([stats, titles, shares]) => ({ stats, titles, shares })) : null,
       // The live panel: the site's (Vault staff) and a studio's views, not a game's (its map is the one game already).
-      scope.game ? null : getRealtimeActivity(analytics, { now: new Date(), games: scope.studio ? scope.games ?? [] : null, titles, gameTitle: titleOf(u, false) })]);
+      scope.game ? null : getRealtimeActivity(analytics, { now: new Date(), games: scope.studio ? scope.games ?? [] : null, titles, gameTitle: titleOf(u, false) }),
+      // Where plays come from: every view has it (the site's, a studio's, a game's), scoped the same way the plays are.
+      analytics.acquisition(sel, full)]);
     // The chart's blog reads: the site view's summary carries them (site-wide, so a studio's or a game's never does,
     // nor anyone but Vault staff).
     const charted = ov.reads?.ok && ov.series.ok ? { ...ov, series: { ok: true as const, value: { ...ov.series.value, reads: ov.reads.value } } } : ov;
@@ -524,6 +564,7 @@ export function registerAnalytics(app: Hono, h: ListingHelpers, analytics: Analy
       topUrl: scope.game ? undefined : `/portal/analytics/top-games${tq.size ? `?${tq}` : ''}`, assets, titleOf: titleOf(u, !scope.game && !scope.studio),
       blog: blog && { ...blog, moreUrl: `/portal/analytics/top-posts${bq.size ? `?${bq}` : ''}`, siteUrl: h.deps.siteUrl ?? null },
       readsError: ov.reads && !ov.reads.ok ? ov.reads.error : null,
+      acquisition,
       live: live && liveCard(live, { url: `/api/analytics/realtime${rtq}`, blog: site, timeZone: analytics.timeZone }) });
   }
 

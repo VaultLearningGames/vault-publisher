@@ -115,6 +115,28 @@ export const DIM_GAME = 'customEvent:game_slug';
 export const DIM_MODE = 'customEvent:play_mode';
 export const MET_SECONDS = 'customEvent:play_seconds';
 export const DIM_RT_GAME = 'customUser:vault_game';
+// Where a play came from: the play events carry source_channel (a coarse label — vault | pbswi | pbskids | pbslm |
+// sciencegamecenter | other) and source_referrer (the exact origin), both registered in GA as event-scoped custom
+// dimensions. 'vault' is a play that came through the Vault site itself, so Vault's own contribution is countable
+// next to a partner's rather than disappearing into '(not set)'.
+export const DIM_SOURCE = 'customEvent:source_channel';
+export const DIM_SOURCE_REFERRER = 'customEvent:source_referrer';
+// The channels we name, in the order shown, with their labels. Anything else is 'other'; a play recorded before the
+// channel shipped carries no parameter at all and GA reports it as '(not set)'.
+export const SOURCE_CHANNELS = [
+  ['vault', 'Vault'],
+  ['pbswi', 'PBS Wisconsin Education'],
+  ['pbskids', 'PBS KIDS'],
+  ['pbslm', 'PBS LearningMedia'],
+  ['sciencegamecenter', 'Science Game Center'],
+  ['other', 'Other sites'],
+] as const;
+export const SOURCE_LABELS: Record<string, string> = Object.fromEntries(SOURCE_CHANNELS);
+/** A channel's name for the report; '(not set)' is a play from before the channel shipped. */
+export function sourceLabel(channel: string): string {
+  if (!channel || channel === '(not set)') return 'Unattributed';
+  return SOURCE_LABELS[channel] ?? channel;
+}
 
 // ---------- requests ----------
 type Expr = Record<string, unknown>;
@@ -176,6 +198,20 @@ export function playsRequest(sel: Selection, scope: Scope): GaRequest {
 // Plays without the custom definitions: play_start counts only (a game: on its page).
 export function basicPlaysRequest(sel: Selection, scope: Scope = {}): GaRequest {
   return { dateRanges: ranges(sel), dimensions: [{ name: 'eventName' }], metrics: [{ name: 'eventCount' }], dimensionFilter: byGame(scope, eventIn(['play_start']), ...hoursTo(sel)) };
+}
+
+// Acquisition: plays by where the visitor came from, in each period. Grouped by the coarse channel with the exact
+// origin alongside it, most plays first. A play from before the channel shipped carries no parameter and GA reports
+// it under '(not set)' (shown as "Unattributed"), so the rows are the measured split, not an assumption.
+export function acquisitionRequest(sel: Selection, scope: Scope): GaRequest {
+  return {
+    dateRanges: ranges(sel),
+    dimensions: [{ name: DIM_SOURCE }, { name: DIM_SOURCE_REFERRER }],
+    metrics: [{ name: 'eventCount' }],
+    dimensionFilter: withGame(scope, DIM_GAME, eventIn(['play_start']), ...hoursTo(sel)),
+    orderBys: [{ metric: { metricName: 'eventCount' }, desc: true }],
+    limit: 1000,
+  };
 }
 
 // People who started a play, in each period (users can't be added up across rows, so this is its own report).
@@ -539,6 +575,32 @@ export function readShares(res: GaResponse): ShareStats {
     posts.set(slug, s);
   }
   return { total, networks, posts };
+}
+
+// Acquisition: plays by channel in each period, most plays first, with the origins seen for each channel. A play
+// recorded before source_channel shipped carries no parameter, so GA reports it as '(not set)' and it is kept as
+// its own row (named "Unattributed") rather than being folded into a channel it was never measured as.
+export interface SourceStats { channel: string; label: string; origins: string[]; plays: Pair }
+export interface AcquisitionStats { total: Pair; sources: SourceStats[] }
+export function readAcquisition(res: GaResponse): AcquisitionStats {
+  const total: Pair = { current: 0, previous: 0 };
+  const by = new Map<string, { plays: Pair; origins: Set<string> }>();
+  for (const r of rowsOf(res)) {
+    const p = periodOf(r);
+    if (!p) continue;
+    const n = r.mets.eventCount ?? 0;
+    const channel = (r.dims[DIM_SOURCE] ?? '').trim() || '(not set)';
+    total[p] += n;
+    const s = by.get(channel) ?? { plays: { current: 0, previous: 0 }, origins: new Set<string>() };
+    s.plays[p] += n;
+    const origin = (r.dims[DIM_SOURCE_REFERRER] ?? '').trim();
+    if (p === 'current' && origin && origin !== '(not set)') s.origins.add(origin);
+    by.set(channel, s);
+  }
+  const sources = [...by.entries()]
+    .map(([channel, s]) => ({ channel, label: sourceLabel(channel), origins: [...s.origins].sort(), plays: s.plays }))
+    .sort((a, b) => b.plays.current - a.plays.current || a.label.localeCompare(b.label));
+  return { total, sources };
 }
 
 // Average time on screen per reader, or null with no readers (shown as a dash, never NaN).

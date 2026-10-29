@@ -7,6 +7,9 @@ export type EditorBlock =
   | { key: string; type: 'paragraph'; html: string }
   | { key: string; type: 'image'; layout: ImageLayout; align: Align | ''; images: ImageItem[] }
   | { key: string; type: 'divider' };
+// A block the '+' added that has no type yet: editor state only, never saved (serializeBlocks leaves it out).
+export type PendingBlock = { key: string; type: null; pending: true };
+export type AnyEditorBlock = EditorBlock | PendingBlock;
 
 export const BLOCK_TYPES: Block['type'][];
 export const BLOCK_LABELS: Record<Block['type'], string>;
@@ -17,12 +20,14 @@ export function escapeHtml(s: string): string;
 export function spansToHtml(children: Span[]): string;
 export function htmlHasText(html: string): boolean;
 export function newBlock(type: Block['type']): EditorBlock;
+export function newPendingBlock(): PendingBlock;
+export function isPendingBlock(b: unknown): boolean;
 export function deserializeBlocks(blocks: unknown): EditorBlock[];
-export function serializeBlocks(items: EditorBlock[]): Block[];
+export function serializeBlocks(items: AnyEditorBlock[]): Block[];
 export function moveBlock<T>(items: T[], from: number, to: number): T[];
 export function insertBlock<T>(items: T[], index: number, item: T): T[];
 export function removeBlock<T extends { key: string }>(items: T[], key: string): T[];
-export function saveBody(title: string, items: EditorBlock[], updatedAt: string | null): { title: string; blocks: Block[]; updated_at: string | null };
+export function saveBody(title: string, items: AnyEditorBlock[], updatedAt: string | null): { title: string; blocks: Block[]; updated_at: string | null };
 export function isLinkHref(href: string): boolean;
 
 export interface EditorSettings {

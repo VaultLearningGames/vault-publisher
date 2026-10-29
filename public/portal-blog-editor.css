@@ -38,9 +38,9 @@
 
 .be-ins { display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 2px 0; }
 .be-ins-btn { width: 22px; height: 22px; border-radius: 50%; border: 1px dashed var(--line); background: var(--surface); color: var(--ink-3); cursor: pointer; font-size: 15px; line-height: 1; padding: 0; opacity: .55; }
-.be-ins:hover .be-ins-btn, .be-ins-btn:focus-visible, .be-ins-btn[aria-expanded="true"], .be-blocks:empty + .be-ins .be-ins-btn, .be-body > .be-ins:only-child .be-ins-btn { opacity: 1; border-style: solid; color: var(--ink); }
+.be-ins:hover .be-ins-btn, .be-ins-btn:focus-visible, .be-blocks:empty + .be-ins .be-ins-btn, .be-body > .be-ins:only-child .be-ins-btn { opacity: 1; border-style: solid; color: var(--ink); }
+/* The type choices of a block with no type chosen yet. */
 .be-ins-menu { display: flex; flex-wrap: wrap; gap: 4px; }
-.be-ins-menu[hidden] { display: none; }
 
 .be-alert { border-color: var(--bad); background: var(--bad-soft); }
 .be-alert p { margin: 0 0 8px; }
@@ -171,11 +171,18 @@
 .be-ins-before > .be-ins-btn { margin-top: -12px; }
 .be-ins-after > .be-ins-btn { margin-bottom: -12px; }
 .be-ins-before > .be-ins-btn, .be-ins-after > .be-ins-btn { background: var(--paper); opacity: 0; position: relative; z-index: 2; }
-.be-block:hover > .be-ins > .be-ins-btn, .be-block.be-selected > .be-ins > .be-ins-btn, .be-ins > .be-ins-btn:focus-visible, .be-ins > .be-ins-btn[aria-expanded="true"] { opacity: 1; border-style: solid; color: var(--ink); }
-.be-ins-before > .be-ins-menu, .be-ins-after > .be-ins-menu { justify-content: center; padding: 6px 0; }
+.be-block:hover > .be-ins > .be-ins-btn, .be-block.be-selected > .be-ins > .be-ins-btn, .be-ins > .be-ins-btn:focus-visible { opacity: 1; border-style: solid; color: var(--ink); }
 .be-body > .be-ins:has(+ .be-blocks:not(:empty)) { display: none; }
 .be-block .be-del { opacity: 0; color: var(--bad); display: inline-flex; align-items: center; }
 .be-block:hover .be-del, .be-block.be-selected .be-del, .be-block .be-del:focus-visible { opacity: 1; }
+/* A block the '+' just added, with no type chosen yet: the same card, dashed, with the type choices and Delete. */
+.be-block.be-block--pending, .be-block.be-block--pending:hover, .be-block.be-block--pending:focus-within { border-style: dashed; border-color: var(--line); background: var(--hover); }
+.be-block--pending .be-handle-off { cursor: default; }
+/* Its Delete always shows: it is the way out of a block added by mistake. */
+.be-block.be-block--pending .be-del { opacity: 1; }
+.be-pending-hint { margin: 0; font-size: 12.5px; color: var(--ink-3); }
+.be-block--pending .be-ins-menu { padding-bottom: 6px; }
+
 .be-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--bad); background: var(--bad-soft); font-size: 13px; }
 .be-confirm[hidden] { display: none; }
 .be-confirm span { margin-right: auto; font-weight: 600; }

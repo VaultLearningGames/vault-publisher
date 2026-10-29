@@ -17,9 +17,12 @@
 // Adjust (crop it again), Replace and Remove; it is cropped to FEATURED_IMAGE_ASPECT.
 //
 // Two panes: the body, settings on the right. Each block is a section with a thin outline and a '+' before and after
-// it to add a block there; clicking a section selects it and shows its trash button, which asks before deleting. Clicking into a text block shows its format
-// bar (style, bold, italic, underline, strikethrough, link, lists, quote, indent); the commands are in
-// portal-blog-editor-commands.js, and the server sanitizes the HTML they make.
+// it to add a block there; clicking a section selects it and shows its trash button, which asks before deleting.
+// The '+' adds a block of no type yet: a block of its own, with the type choices and a Delete button (or Escape) to
+// remove it if it isn't wanted after all. Such a block is editor state only (never saved, autosaved or previewed, and
+// adding or deleting one is not an edit) until a type is chosen, which makes it a real block in that same place.
+// Clicking into a text block shows its format bar (style, bold, italic, underline, strikethrough, link, lists, quote,
+// indent); the commands are in portal-blog-editor-commands.js, and the server sanitizes the HTML they make.
 //
 // This file is an ES module so its pure functions (serialize, deserialize, reorder, slugs, tags, autosave timing) can be tested with node:test;
 // the page itself is set up by the IIFE at the bottom, which only runs in a browser.
@@ -87,6 +90,15 @@ export function newBlock(type) {
   }
 }
 
+// A pending block: the one the '+' button adds, a block of the editor's list that has no type yet. It shows as its own
+// block with the type choices and a Delete button, so an author who changed their mind can remove it before choosing.
+// It is editor state only: it has no type, so it is never saved, autosaved or previewed (serializeBlocks skips it).
+export function newPendingBlock() {
+  return { key: `b${nextKey++}`, type: null, pending: true };
+}
+// Whether a block of the editor's list is one of those: no type chosen yet.
+export const isPendingBlock = (b) => !!b && typeof b === 'object' && (b.pending === true || b.type === null || b.type === undefined);
+
 // Saved blocks (src/blog/blocks.ts) -> the editor's blocks: each gets a key, paragraphs become HTML, optional fields
 // become ''. Unknown block types are dropped (the server never stores them).
 export function deserializeBlocks(blocks) {
@@ -111,12 +123,15 @@ export function deserializeBlocks(blocks) {
   return out;
 }
 
-// The editor's blocks -> the block JSON the server stores. Headings and paragraphs with no text are not content and
-// are left out; an image block is kept even with no images yet (a draft may hold one; publishing asks for an image).
+// The editor's blocks -> the block JSON the server stores. A pending block (no type chosen yet) is left out, and so
+// are headings and paragraphs with no text: neither is content. An image block is kept even with no images yet
+// (a draft may hold one; publishing asks for an image).
 // Anything else is sent as it is, so the server's validation can say what's wrong with it.
 export function serializeBlocks(items) {
   const out = [];
   for (const e of items || []) {
+    // A pending block (the '+' added it, no type chosen yet) is editor UI, not content: it is never sent.
+    if (isPendingBlock(e)) continue;
     if (e.type === 'heading') {
       const text = String(e.text || '').replace(/\s+/g, ' ').trim();
       if (text) out.push({ type: 'heading', level: [2, 3, 4].includes(Number(e.level)) ? Number(e.level) : 2, text });
@@ -576,17 +591,12 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
   });
 
-  // ----- the '+' inserter: a button that opens a row of block types -----
+  // ----- the '+' inserter: a button that adds a block of no type yet, which asks which type it is -----
   // `where`: 'before' or 'after' the block it is in (a number: the index, for the one above an empty post).
   function inserter(where) {
-    const menu = h('div', { class: 'be-ins-menu', hidden: true, role: 'group', 'aria-label': 'Add a block' },
-      ...BLOCK_TYPES.map((type) =>
-        h('button', { type: 'button', class: 'btn sm', onclick: () => { close(); add(type, indexAfter()); } }, BLOCK_LABELS[type])));
     const label = where === 'before' ? 'Add a block above' : where === 'after' ? 'Add a block below' : 'Add a block here';
-    const btn = h('button', { type: 'button', class: 'be-ins-btn', 'aria-expanded': 'false', title: label, 'aria-label': label, onclick: () => (menu.hidden ? open() : close()) }, '+');
-    const wrap = h('div', { class: `be-ins${typeof where === 'string' ? ` be-ins-${where}` : ''}`, onkeydown: (e) => { if (e.key === 'Escape' && !menu.hidden) { close(); btn.focus(); } } }, btn, menu);
-    function open() { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); menu.querySelector('button').focus(); }
-    function close() { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+    const btn = h('button', { type: 'button', class: 'be-ins-btn', title: label, 'aria-label': label, onclick: () => addPending(indexAfter(), btn) }, '+');
+    const wrap = h('div', { class: `be-ins${typeof where === 'string' ? ` be-ins-${where}` : ''}` }, btn);
     // The inserter at the top adds at 0; one inside a block adds right before or after that block, wherever it is now.
     const indexAfter = () => {
       const blk = wrap.closest('.be-block');
@@ -596,13 +606,59 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     return wrap;
   }
 
-  function add(type, index) {
-    const item = newBlock(type);
+  // The '+' adds a pending block there: its own block in the list, with the type choices and Delete, until a type is
+  // chosen. It holds nothing, so it is not an edit: no dirty state, no autosave, and Save and Preview leave it out.
+  const pendingFrom = new Map(); // pending block key -> the '+' button that added it, to put focus back on Delete
+  function addPending(index, fromBtn) {
+    const item = newPendingBlock();
     items = insertBlock(items, index, item);
+    pendingFrom.set(item.key, fromBtn || null);
     els.set(item.key, render(item));
     sync();
+    say('New block added. Choose its type, or delete it.');
+    // Focus goes to the first type choice, so the keyboard can pick one (or Escape to drop the block again).
+    const first = els.get(item.key).querySelector('.be-ins-menu button');
+    if (first) first.focus();
+  }
+
+  // Deletes a pending block: nothing has been entered, so it goes at once, with no confirmation.
+  function removePending(key) {
+    const i = items.findIndex((e) => e.key === key);
+    if (i < 0) return;
+    items = removeBlock(items, key);
+    const el = els.get(key);
+    if (el) el.remove();
+    els.delete(key);
+    const from = pendingFrom.get(key);
+    pendingFrom.delete(key);
+    sync();
+    say('Block removed.');
+    // Focus goes back to the '+' that added it, or to the last one on the page if that one is gone or hidden.
+    const usable = (b) => b && b.isConnected && b.getClientRects().length > 0;
+    if (usable(from)) from.focus();
+    else {
+      const all = [...root.querySelectorAll('.be-ins-btn')].filter(usable);
+      if (all.length) all[all.length - 1].focus();
+    }
+  }
+
+  // A type was chosen: the pending block becomes a real block of that type, in its place, and that is an edit.
+  function choosePending(key, type) {
+    const i = items.findIndex((e) => e.key === key);
+    if (i < 0 || !isPendingBlock(items[i])) return;
+    const item = newBlock(type);
+    item.key = key; // the same block, in the same place: its element and its position don't move
+    const list_ = items.slice();
+    list_[i] = item;
+    items = list_;
+    pendingFrom.delete(key);
+    const el = render(item);
+    const old = els.get(key);
+    els.set(key, el);
+    if (old) old.replaceWith(el); else list.append(el);
+    sync();
     changed();
-    const el = els.get(item.key);
+    say(`${BLOCK_LABELS[type]} block added.`);
     (el.querySelector('[contenteditable]') || el.querySelector('input, select') || el.querySelector('.be-del')).focus();
   }
 
@@ -635,9 +691,11 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     items.forEach((e, i) => {
       const el = els.get(e.key);
       if (list.children[i] !== el) list.insertBefore(el, list.children[i] || null);
-      el.querySelector('.be-up').disabled = i === 0;
-      el.querySelector('.be-down').disabled = i === items.length - 1;
-      el.setAttribute('aria-label', `${BLOCK_LABELS[e.type]}, block ${i + 1} of ${items.length}`);
+      // A pending block has no Move up/down (it holds nothing to move yet).
+      const up = el.querySelector('.be-up'), down = el.querySelector('.be-down');
+      if (up) up.disabled = i === 0;
+      if (down) down.disabled = i === items.length - 1;
+      el.setAttribute('aria-label', `${isPendingBlock(e) ? 'New block' : BLOCK_LABELS[e.type]}, block ${i + 1} of ${items.length}`);
     });
   }
   const say = (msg) => { announce.textContent = ''; setTimeout(() => { announce.textContent = msg; }, 30); };
@@ -674,8 +732,26 @@ export const autosaveDue = (state, now) => !state.stopped && !state.saving && st
     list.querySelectorAll('.be-drop-before, .be-drop-after').forEach((x) => x.classList.remove('be-drop-before', 'be-drop-after'));
   }
 
+  // ----- a pending block: the type choices and Delete, in a block of its own -----
+  function renderPending(item) {
+    const key = item.key;
+    const types = h('div', { class: 'be-ins-menu', role: 'group', 'aria-label': 'Block type' },
+      ...BLOCK_TYPES.map((type) => h('button', { type: 'button', class: 'btn sm', onclick: () => choosePending(key, type) }, BLOCK_LABELS[type])));
+    const tools = h('div', { class: 'be-tools' },
+      h('span', { class: 'be-type' }, 'New block'),
+      h('button', { type: 'button', class: 'btn sm be-del', 'aria-label': 'Delete block', title: 'Delete block', onclick: () => removePending(key) }, trashIcon()));
+    // Escape anywhere in it deletes it too: nothing has been entered, so there is nothing to lose.
+    return h('div', { class: 'be-block be-block--pending', role: 'listitem', 'data-key': key,
+      onkeydown: (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); removePending(key); } } },
+      inserter('before'),
+      h('span', { class: 'be-handle be-handle-off', 'aria-hidden': 'true' }),
+      h('div', { class: 'be-main' }, tools, h('p', { class: 'be-pending-hint' }, 'What kind of block is this?'), types),
+      inserter('after'));
+  }
+
   // ----- one block -----
   function render(item) {
+    if (isPendingBlock(item)) return renderPending(item); // no type yet: the type choices and Delete, not an editor
     const key = item.key;
     const idx = () => items.findIndex((e) => e.key === key);
     const handle = h('span', { class: 'be-handle', draggable: 'true', title: 'Drag to move', 'aria-hidden': 'true',

@@ -54,8 +54,8 @@ describe('reading the answer', () => {
     ]));
     assert.deepEqual(a.total, { current: 1046, previous: 1100 });
     assert.deepEqual(a.sources.map((s) => [s.channel, s.plays.current, s.plays.previous]), [
-      ['pbswi', 611, 700], ['vault', 434, 400], ['other', 1, 0],
-    ]);
+      ['pbswisconsineducation.org', 611, 700], ['vault', 434, 400], ['other', 1, 0],
+    ], 'a short key is keyed by the hostname it is an alias for');
     assert.deepEqual(a.sources[0].origins, ['https://pbswisconsineducation.org/']);
     assert.deepEqual(a.sources[0].label, 'PBS Wisconsin Education');
     assert.deepEqual(a.sources[1].label, 'Vault', 'Vault is a named source, not "(direct)"');
@@ -79,6 +79,23 @@ describe('reading the answer', () => {
     assert.equal(sourceLabel(''), 'Unattributed', 'an empty channel reads the same way');
   });
 
+  test('a window spanning the cutover reads as one row per partner, not two', () => {
+    // GA holds the same traffic under the short key up to 2026-10-28 and under the hostname after it.
+    const a = readAcquisition(answer([
+      ['pbswi', 'https://pbswisconsineducation.org/', 'current', 400],
+      ['pbswisconsineducation.org', 'https://www.pbswisconsineducation.org/', 'current', 211],
+      ['pbswi', 'https://pbswisconsineducation.org/', 'previous', 700],
+    ]));
+    assert.deepEqual(a.sources.map((s) => [s.channel, s.plays.current, s.plays.previous]), [
+      ['pbswisconsineducation.org', 611, 700],
+    ], 'the two eras are one series');
+    assert.deepEqual(a.sources[0].origins,
+      ['https://pbswisconsineducation.org/', 'https://www.pbswisconsineducation.org/'],
+      'the origins of both eras are collected on the one row');
+    assert.equal(a.sources[0].label, 'PBS Wisconsin Education');
+    assert.equal(sourceLabel('pbswi'), 'PBS Wisconsin Education', 'a pre-cutover row is never a bare short key');
+  });
+
   test('an unknown channel keeps its own name rather than being dropped', () => {
     const a = readAcquisition(answer([['someoneelse', 'https://example.org/', 'current', 4]]));
     assert.deepEqual([a.sources[0].channel, a.sources[0].label], ['someoneelse', 'someoneelse']);
@@ -91,7 +108,7 @@ describe('the share of plays', () => {
       ['pbswi', '', 'current', 60], ['vault', '', 'current', 40], ['(not set)', '', 'current', 900],
     ])));
     assert.equal(attributed, 100, 'the 900 unmeasured plays are excluded from the denominator');
-    assert.deepEqual(rows.map((s) => s.channel), ['(not set)', 'pbswi', 'vault'], 'ordered by plays');
+    assert.deepEqual(rows.map((s) => s.channel), ['(not set)', 'pbswisconsineducation.org', 'vault'], 'ordered by plays');
   });
 
   test('the card shows each source’s share and names Vault', () => {

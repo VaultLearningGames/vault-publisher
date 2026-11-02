@@ -5,7 +5,7 @@ staging, and the built site shows the result. Run it after a change to the blog 
 the site workflow, and before promoting the blog to production. Never run it against production: the script refuses
 addresses without "staging" in them.
 
-It writes real commits to vault-site's `main` (it deletes its posts again at the end, unless `--keep`).
+It writes real commits to vault-site's `staging` (it deletes its posts again at the end, unless `--keep`).
 
 ## What you need
 

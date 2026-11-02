@@ -541,7 +541,7 @@ While a deploy of this system runs (*Deploy (portal)* here, or *Deploy (site)* i
 page shows a slim bar under the staging banner: "Deploying: about N min left" and a progress bar, the expected time
 being the median of that workflow's last 5 successful runs (3 min portal, 2 min site when there are none). Past it,
 "taking longer than usual"; a run that fails says "Deploy failed" with a link to it for 10 minutes. A run counts when
-it is on the system's branch: `main` for staging, `production` for production. The portal reads GitHub Actions with
+it is on the system's branch: `staging` for staging, `production` for production. The portal reads GitHub Actions with
 `DEPLOY_STATUS_GITHUB_TOKEN` (*Actions: read* on both repositories), at most once every 15 s
 (`src/deploy-status.ts`, `GET /portal/deploy-status`); the page asks every 15 s only while the bar shows, and keeps
 its last answer while the portal restarts. No token, or GitHub not answering: no bar. Setup:

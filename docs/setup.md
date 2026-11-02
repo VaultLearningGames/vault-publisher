@@ -16,7 +16,7 @@ history.
 | Studios' test builds | `builds.vaultlearninggames.org` → R2 `builds-vaultlearninggames` | `builds.vaultlearninggames-staging.org` → `builds-vaultlearninggames-staging` |
 | Releases | `cdn.vaultlearninggames.org` → R2 `cdn-vaultlearninggames` | `cdn.vaultlearninggames-staging.org` → `cdn-vaultlearninggames-staging` |
 | Database (Litestream) | GCS `PROJECT-vault-publisher-db` | GCS `PROJECT-vault-publisher-staging-db`, a disposable copy of production's, replaced from it daily and on demand ([Re-seeding staging's database](#re-seeding-stagings-database)) |
-| Deployed from | the `production` branch | `main` |
+| Deployed from | the `production` branch | `staging` |
 
 Studios only ever use production. Staging is throwaway: it is for testing the portal's code, the site's layouts and the
 process (never content), and everything on it can be discarded. Content is made on production and flows to staging, not
@@ -240,7 +240,7 @@ rclone copy r2:cdn-vaultlearninggames-staging r2:builds-vaultlearninggames --pro
 5. Add `https://builds.vaultlearninggames.org` to the CORS allowlists of game servers that test builds call (Aqualab's
    save server, OpenGameData logging if it checks origins).
 
-Then deploy staging: push to `main`. On its first start it seeds its database from production's, and from then on
+Then deploy staging: push to `staging`. On its first start it seeds its database from production's, and from then on
 [Re-seed staging's database](#re-seeding-stagings-database) replaces it with production's every day.
 
 ## 6. Custom domains
@@ -516,9 +516,9 @@ another copy. A listing published between the deploy and the check shows as page
 ### Cutover: `vaultlearninggames-staging.org` from R2 to the Worker
 
 Before: the deploy's token, `SITE_WORKER` and `CLOUDFLARE_ACCOUNT_ID` are set for staging (above) **before this
-branch reaches `main`**: from that commit on the workflow no longer writes to the bucket, so the bucket's copy (and
+branch reaches `staging`**: from that commit on the workflow no longer writes to the bucket, so the bucket's copy (and
 with it the live staging site, and the stylesheet previews load) stays as it was until the cutover. Then: the push to
-`main` has published (the run's summary says *Site published to the Worker `vault-site-staging`*), and the check
+`staging` has published (the run's summary says *Site published to the Worker `vault-site-staging`*), and the check
 above passes at `static.vaultlearninggames-staging.org`.
 
 ```bash
@@ -737,7 +737,7 @@ else. Settings:
 | Variable | Default | |
 |---|---|---|
 | `DEPLOY_STATUS_GITHUB_TOKEN` | (none: no bar) | the token above; empty or unset turns the bar off |
-| `DEPLOY_STATUS_STAGING_BRANCH` | `main` | the branch whose runs are the staging portal's deploys |
+| `DEPLOY_STATUS_STAGING_BRANCH` | `staging` | the branch whose runs are the staging portal's deploys |
 | `DEPLOY_STATUS_PRODUCTION_BRANCH` | `production` | the branch whose runs are the production portal's deploys |
 | `DEPLOY_ESTIMATE_MINUTES` | `10` | how long after a deploy is scheduled the bar says it should be done (a positive whole number) |
 

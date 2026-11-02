@@ -1,7 +1,7 @@
 // The blog's posts in the vault-site repository, as the portal's editor works with them: the S4 client
 // (site-content/github-client.ts) plus the post-list cache, the post file mapping (front matter + Markdown body <->
 // the editor's fields and blocks) and the rules the editor needs. A post is <blogDir>/<slug>/index.md on the
-// configured branch (main); its blob SHA is the conflict check.
+// configured branch (staging); its blob SHA is the conflict check.
 //   listPosts()                                   every post's slug, title, date, draft, private, tags, author, image, sha
 //   getPost(slug)                                 { slug, sha, input, aliases } or null
 //   savePost(slug, input, expectedSha, message)   creates (expectedSha null: the file must not exist) or updates

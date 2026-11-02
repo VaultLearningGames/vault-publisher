@@ -3,7 +3,7 @@ name: Deploy (portal)
 # The PORTAL only. The website is built and published by VaultLearningGames/vault-site (its "Deploy (site)" workflow),
 # which is the sole publisher of the site Workers. This workflow must never publish to them: when it did, a portal
 # push replaced the site with a build that had no blog posts.
-#   main        → staging     vault-publisher-staging  https://portal.vaultlearninggames-staging.org
+#   staging     → staging     vault-publisher-staging  https://portal.vaultlearninggames-staging.org
 #   production  → production  vault-publisher          https://portal.vaultlearninggames.org
 # Flow: portal (edit) → commit to vault-site's staging/production branch → vault-site builds → Cloudflare Worker.
 # The portal image carries vault-site at vault-site.ref (for previews) and Hugo.
@@ -17,7 +17,7 @@ on:
         options: [staging, production]
         default: staging
   push:
-    branches: [ main, production ]
+    branches: [ staging, production ]
 
 # Never run two deploys of one system at once: only one instance may write its SQLite database. (For the whole run,
 # not one job: its jobs share the group, and a job-level group would have them cancel each other.)

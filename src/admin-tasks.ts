@@ -64,6 +64,9 @@ function fieldProblems(fields: Record<string, unknown>, draft: ListingFields): s
     }
     if (LIST_FIELDS.includes(f)) {
       if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) { out.push(`${k} must be a list of strings.`); continue; }
+      // Standards are one per item, each the studio's own line: an item that holds a line break is two standards,
+      // and a save would split it (standards.ts), so say so rather than blame its length.
+      if (f === 'standards' && v.some((x) => /[\r\n]/.test(x as string))) { out.push('standards items are one standard each: send one item per standard, not a block of lines.'); continue; }
       if (JSON.stringify(draft[f]) !== JSON.stringify(v.map((x) => x.trim()))) out.push(`${k} has empty, repeated or over-long items, or too many of them.`);
       continue;
     }

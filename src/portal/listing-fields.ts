@@ -112,7 +112,7 @@ export const FIELD_SPECS: readonly FieldSpec[] = [
   { name: 'topics', section: 'teaching', audience: 'studio', siteReads: [SITE.content, SITE.blogGrid], crop: null,
     hint: 'Comma-separated, e.g. Algebra, Physics.', fallback: null },
   { name: 'standards', section: 'teaching', audience: 'studio', siteReads: [SITE.content, SITE.standards], crop: null,
-    hint: 'Codes, one per line or comma-separated (Common Core, NGSS), e.g. 4.OA.A.2.', fallback: 'Empty: no Standards section.' },
+    hint: 'One standard per line (Common Core, NGSS), e.g. 4.OA.A.2 — or a code and its whole description. Only a line break starts another one: commas stay in the text.', fallback: 'Empty: no Standards section.' },
   { name: 'related_curriculum', section: 'teaching', audience: 'studio', siteReads: [SITE.content, SITE.accordion], crop: null,
     hint: 'A link to teacher materials.', fallback: 'Empty: the game’s page says there is no curriculum yet and invites teachers to share one with the Vault (no email address is shown).' },
   // ---- Discovery: the game card, then search

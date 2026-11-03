@@ -86,6 +86,13 @@ export function listingFieldsOf(json: string): ListingFields {
   for (const [k, v] of Object.entries(EMPTY_LISTING as unknown as Record<string, unknown>)) {
     if (Array.isArray(v) && !Array.isArray(out[k])) out[k] = [...v];
   }
+  // Standards are tokenized here too, on hard returns only (standards.ts), so a stored row and a save read the
+  // field the same way and every reader — the editor's textarea, the catalog, the admin API, changedFields —
+  // sees the same standards. The STORED value is what is tokenized (not `out`'s, which the shape check above
+  // already emptied for a string): a row written before standards.ts can hold the studio's whole paste in one
+  // item, or its raw text as a string, and both are cut into lines here, on reading — never on a comma, so a
+  // pasted description keeps its commas and stays one standard. Nothing in the database is rewritten by this.
+  out.standards = parseStandards(stored?.standards);
   return out as unknown as ListingFields;
 }
 

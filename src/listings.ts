@@ -4,6 +4,7 @@
 // A listing is hosted either at an HTML URL in Vault's in-page player (the first version of the site), or on the
 // Vault CDN: the current release of one of the studio's games at https://cdn.vaultlearninggames.org/STUDIO/GAME/.
 import { isSlug } from './paths.ts';
+import { parseStandards } from './standards.ts';
 import { DEFAULT_PAGE_LAYOUT, DEFAULT_THEME, effectivePageLayout, effectiveTheme, layoutAssetError, normalizeLayoutFields, validateLayoutFields } from './portal/listing-layout.ts';
 import { deriveTheme } from './portal/listing-theme.ts';
 import { CARD_CATEGORY_KINDS, CARD_TAG_KINDS, cardTagProblems, normalizeEnumValue, parseCardString, type CardTag, type CardTagKind } from './portal/listing-enums.ts';
@@ -98,8 +99,8 @@ export const MIN_SIZE_RANGE = { min: 200, max: 3840 } as const;
 const MAX_TEXT = 5000, MAX_LIST = 40;
 const str = (v: unknown, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 // Lists arrive as arrays, or as text with one item per line (or comma-separated for short tags). `itemMax` is each
-// item's length cap: the default suits tags; a list whose items are prose (standards, each a code and its whole
-// description) needs room for a sentence, and splitting those on commas would cut them mid-sentence.
+// item's length cap, which suits tags. Standards are not one of these lists: they are prose (each a code and its
+// whole description), so they are tokenized by standards.ts, on hard returns only.
 function list(v: unknown, splitCommas: boolean, itemMax = 200): string[] {
   const raw = Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(splitCommas ? /[\n,]/ : /\n/) : [];
   const out: string[] = [];
@@ -190,7 +191,9 @@ export function normalize(input: Record<string, unknown>, base: ListingFields = 
     grades: grades ?? pick('grades', list(input.grades, true)),
     subjects: pick('subjects', list(input.subjects, true)),
     topics: pick('topics', list(input.topics, true)),
-    standards: pick('standards', list(input.standards, false, 500)),
+    // Standards are the one list that is never a tag list: each item is a code and its whole description, as the
+    // studio pasted it, so only a hard return starts another one (standards.ts). Commas stay in the text.
+    standards: pick('standards', parseStandards(input.standards)),
     related_curriculum: pick('related_curriculum', str(input.related_curriculum, 2000)),
     gameplay_video: pick('gameplay_video', str(input.gameplay_video, 500)),
     hero_image: pick('hero_image', str(input.hero_image, 500)),
@@ -336,7 +339,11 @@ export function catalogEntry(
     makers: f.makers.length ? f.makers : [l.studio_name],
     short_description: f.short_description,
     about: f.about,
-    grades: f.grades, subjects: f.subjects, topics: f.topics, standards: f.standards,
+    grades: f.grades, subjects: f.subjects, topics: f.topics,
+    // The standards the site shows, one per item, each the studio's own line (commas and all): tokenized here too,
+    // so a listing stored before standards.ts (whose value may still hold a studio's whole paste in one item, or
+    // the fragments an older save cut on commas) publishes as lines, not as fragments.
+    standards: parseStandards(f.standards),
     related_curriculum: f.related_curriculum,
     gameplay_video: f.gameplay_video,
     hero_image: f.hero_image, thumb_image: f.thumb_image, screenshots: f.screenshots,

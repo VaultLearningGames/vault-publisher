@@ -218,7 +218,7 @@ export function listingPieces(h: ListingHelpers) {
         <div class="field full"><span class="lab">Grades</span><div class="chips">${GRADES.map((gr) => html`<label><input type="checkbox" name="grades:${gr}" ${f.grades.includes(gr) ? 'checked' : ''} ${dis}> ${gr.replace('Grades ', '')}</label>`)}</div></div>
         ${txt('subjects', 'Subjects', 'Comma-separated, e.g. Math, Science')}
         ${txt('topics', 'Topics', 'Comma-separated, e.g. Algebra, Physics')}
-        ${area('standards', 'Standards', 'Codes, one per line or comma-separated (Common Core, NGSS), e.g. 4.OA.A.2', 2)}
+        ${area('standards', 'Standards', 'One standard per line (Common Core, NGSS). A line may contain commas — it stays one standard. e.g. 4.OA.A.2', 4)}
         ${txt('related_curriculum', 'Related curriculum', 'A link to teacher materials. When it is empty the game’s page says there is no curriculum yet and invites teachers to share one with the Vault (no email address is shown).')}
         ${txt('gameplay_video', 'Gameplay video', 'A YouTube or other video link')}
         ${imageField({ api, edit, canUpload: !!h.deps.production, name: 'thumb_image', label: 'Thumbnail', value: f.thumb_image, hint: 'The game card’s image (16:9). A path on the site or an https link.' })}

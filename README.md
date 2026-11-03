@@ -274,7 +274,11 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
   never read as Markdown or HTML (`src/standards.ts`). Under the field the editor lists the standards as they come
   out, one plain `<li>` each, so a paste that didn't come out as expected is obvious before it is saved; the catalog
   carries both the list (`standards`) and that HTML (`standards_html`), so nothing downstream has to split the text
-  again.
+  again. A stored row is tokenized the same way as it is read (`listingFieldsOf`), so a listing saved before this —
+  whose value may hold the studio's whole paste in one item, or its raw text as a string — opens, publishes and
+  compares as those lines. Nothing in the database is rewritten: the split happens on reading and on saving. A
+  listing whose standards an older save already cut on commas cannot be un-cut (the intent is gone); re-save the
+  field to fix it.
 * Studio maintainers submit them for review.
 * **Made by** is a chooser over the portal's studios: tick one or more (the listing's own studio by default), in the
   order the site shows them. The listing still stores names (`makers` in the catalog), so a maker typed earlier that

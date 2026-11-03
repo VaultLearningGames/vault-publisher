@@ -281,6 +281,13 @@ details.disclose[open] > summary { margin-bottom: 10px; }
 .field input[type=text], .field input[type=email], .field input[type=url], .field input[type=number], .field select, .field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); width: 100%; }
 .field textarea { min-height: 76px; resize: vertical; }
 .field .ok { color: var(--ok); font-size: 12px; }
+/* The Standards field's list (src/standards.ts renderStandardsHtml): the standards as the portal cut them, one
+   plain list item each — commas stay inside an item, so a pasted description reads as the one standard it is. */
+.std-list { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--paper); }
+.std-list .lab { display: block; color: var(--ink-3); font-size: 12px; margin-bottom: 4px; }
+ul.vault-standards { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
+ul.vault-standards li { overflow-wrap: anywhere; }
+ul.vault-standards li + li { margin-top: 4px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips label { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; font-size: 12.5px; cursor: pointer; background: var(--paper); }
 .chips input { accent-color: var(--slate); margin: 0; }

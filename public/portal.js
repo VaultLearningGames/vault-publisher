@@ -591,6 +591,52 @@
   }
 })();
 
+// The Standards field's live list (src/standards.ts, src/portal/listings.ts): the textarea's text cut into
+// standards on HARD RETURNS ONLY — commas, semicolons and pipes are part of a standard's text — and shown as plain
+// list items, so a studio sees as it types that a pasted description with commas in it is one standard, not a dozen
+// fragments. Nothing is split before the form is submitted: the textarea's raw value is what the server reads (it
+// tokenizes the same way, and its answer is what the page shows after a save). An empty field shows no list.
+(function () {
+  const MAX_STANDARDS = 40, MAX_STANDARD_LENGTH = 500;
+  const standardsOf = (text) => {
+    const out = [];
+    for (const line of String(text).split(/\r\n|\r|\n/)) {
+      const item = line.trim();
+      if (!item || out.includes(item)) continue;
+      out.push(item.slice(0, MAX_STANDARD_LENGTH));
+      if (out.length >= MAX_STANDARDS) break;
+    }
+    return out;
+  };
+  for (const area of document.querySelectorAll('textarea[data-standards]')) {
+    const field = area.closest('.field');
+    if (!field) continue;
+    const update = () => {
+      const items = standardsOf(area.value);
+      let box = field.querySelector('[data-standards-preview]');
+      if (!items.length) { if (box) box.remove(); return; }
+      if (!box) {
+        box = document.createElement('div');
+        box.className = 'std-list';
+        box.setAttribute('data-standards-preview', '');
+        field.append(box);
+      }
+      const label = document.createElement('span');
+      label.className = 'lab';
+      label.textContent = `${items.length} ${items.length === 1 ? 'standard' : 'standards'} on the page`;
+      const list = document.createElement('ul');
+      list.className = 'vault-standards';
+      for (const item of items) {
+        const li = document.createElement('li');
+        li.textContent = item;                       // textContent, never innerHTML: a paste can't become markup
+        list.append(li);
+      }
+      box.replaceChildren(label, list);
+    };
+    area.addEventListener('input', update);
+  }
+})();
+
 // Build number under the logo (build-info.ts, via /api/build-info): which deploy built this portal, for
 // debugging. Every .portal-build (the sidebar's and the sign-in page's) gets the text "build <build>" and a
 // title with the full SHA and build time (the time omitted when unknown). A failed fetch or bad answer just

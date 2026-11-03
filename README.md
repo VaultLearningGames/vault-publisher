@@ -66,7 +66,7 @@ this version reaches the `production` branch) shows its badges as not found.
 | `src/url-monitor.ts`, `src/net-guard.ts` | URL monitors: find a hosted game's files, copy what changed; fetch only public addresses |
 | `public/setup.js` | Upload builds page: workflow snippets, and reading and uploading a zip in the browser |
 | `src/{releases,storage,paths,config,forms,catalog,game-checks}.ts` | Domain logic |
-| `src/standards.ts` | A listing's Standards field: the one place its text is tokenized (one standard per hard return; commas are never separators) and rendered as plain, escaped HTML |
+| `src/standards.ts` | A listing's Standards field: the one place its text is tokenized (one standard per hard return; commas are never separators) and rendered as plain, escaped HTML list items (`<ul class="vault-standards">`) |
 | `src/studios-file.ts` | `studios.json` at startup: studios and the repositories assigned to them |
 | `src/portal/site-preview.ts`, `src/site-dir.ts` | Listing and blog previews: runs Hugo on a temporary copy of vault-site (found by `resolveSiteDir()`) with the previewed game or post in place, and returns its page |
 | `src/site-hosting.ts`, `scripts/site-hosting.ts` | The static hosting's `_headers`, `_redirects` and `robots.txt` for a site build (vault-site has its own copy, which its deploy uses) |
@@ -271,7 +271,10 @@ vaultlearninggames.org shows), its **CDN game** (builds and releases), or both, 
 **Site listing edits** (title, descriptions, grades, subjects, topics, standards, images, play settings) are drafts:
 * **Standards** are one per line: only a hard return starts another standard, so a pasted code and its whole
   description (commas, semicolons and all) stays one standard, and the portal writes it as plain text — the field is
-  never read as Markdown or HTML (`src/standards.ts`).
+  never read as Markdown or HTML (`src/standards.ts`). Under the field the editor lists the standards as they come
+  out, one plain `<li>` each, so a paste that didn't come out as expected is obvious before it is saved; the catalog
+  carries both the list (`standards`) and that HTML (`standards_html`), so nothing downstream has to split the text
+  again.
 * Studio maintainers submit them for review.
 * **Made by** is a chooser over the portal's studios: tick one or more (the listing's own studio by default), in the
   order the site shows them. The listing still stores names (`makers` in the catalog), so a maker typed earlier that

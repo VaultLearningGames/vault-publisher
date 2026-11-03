@@ -4,7 +4,7 @@
 // A listing is hosted either at an HTML URL in Vault's in-page player (the first version of the site), or on the
 // Vault CDN: the current release of one of the studio's games at https://cdn.vaultlearninggames.org/STUDIO/GAME/.
 import { isSlug } from './paths.ts';
-import { parseStandards } from './standards.ts';
+import { parseStandards, renderStandardsHtml } from './standards.ts';
 import { DEFAULT_PAGE_LAYOUT, DEFAULT_THEME, effectivePageLayout, effectiveTheme, layoutAssetError, normalizeLayoutFields, validateLayoutFields } from './portal/listing-layout.ts';
 import { deriveTheme } from './portal/listing-theme.ts';
 import type { CardTag } from './portal/listing-enums.ts';
@@ -287,6 +287,7 @@ export function catalogEntry(
   cdn: { url: string; release: string } | null,
 ) {
   const fromCdn = f.play_source === 'cdn' && cdn;
+  const standardsList = parseStandards(f.standards);
   return {
     slug: l.slug,
     title: f.title,
@@ -298,7 +299,11 @@ export function catalogEntry(
     // The standards the site shows, one per item, each the studio's own line (commas and all): tokenized here too,
     // so a listing stored before standards.ts (whose value may still hold a studio's whole paste in one item, or
     // the fragments an older save cut on commas) publishes as lines, not as fragments.
-    standards: parseStandards(f.standards),
+    standards: standardsList,
+    // The same standards as plain HTML list items (standards.ts: <ul class="vault-standards"> with one escaped <li>
+    // per line, '' for none), so a page can print the Standards section as the portal cut it and never has to
+    // split the text itself. The `standards` list above stays the field of record.
+    standards_html: renderStandardsHtml(standardsList),
     related_curriculum: f.related_curriculum,
     gameplay_video: f.gameplay_video,
     hero_image: f.hero_image, thumb_image: f.thumb_image, screenshots: f.screenshots,

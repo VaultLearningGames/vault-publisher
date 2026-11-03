@@ -10,8 +10,9 @@ import type { StudioPermission, VaultPermission } from '../permissions.ts';
 import { markDeployPending } from '../deploy-status.ts';
 import { draftProblems, importFromExport, moveListingToStudio, publishListing, saveListing } from '../listing-ops.ts';
 import { changedFields, FIELD_LABEL, GRADES, inheritedListing, isListingSlug, MIN_SIZE_RANGE, normalize, VAULT_ONLY, type ListingFields } from '../listings.ts';
+import { parseStandards, standardsToHtml, standardsToText } from '../standards.ts';
 import { getHosting, hostingCell } from './hosting.ts';
-import { html, type Html } from './html.ts';
+import { html, raw, type Html } from './html.ts';
 import { ago, head, pill, who } from './routes.ts';
 import { availabilityCells, availabilityLine, AVAILABILITY_HEADS } from './availability.ts';
 import { compareByTestingStatus, deriveTestingStatus } from './testingStatus.ts';
@@ -33,6 +34,26 @@ function minSizeField(f: ListingFields, editable: boolean): Html {
   return html`<div class="field"><span class="lab">Smallest play area${editable ? ' (Vault)' : ''}</span>
     <span class="inline-form">${num('min_width', 'Minimum play width in pixels')} × ${num('min_height', 'Minimum play height in pixels')} px</span>
     <span class="hint">${hintText(fieldSpec('min_width'))}${editable ? '' : ' Set by Vault; ask Vault to change it.'}</span></div>`;
+}
+
+// The Standards field: the studio's lines in a textarea (one standard per line — only a hard return starts another
+// one, standards.ts), and under it the standards as they are cut, as the plain HTML list the portal emits
+// (standardsToHtml: <ul class="vault-standards"> with one escaped <li> each). The list is the proof the field has
+// been read as lines: a description with commas in it stays one item, so a studio sees at once whether its paste
+// came out as the 8 standards it typed or as 29 fragments. The raw text is what is submitted — nothing splits it in
+// the browser — and an empty field shows no list at all (an empty <ul> is never emitted).
+//
+// The field is a <div>, not a <label> wrapping everything (the shape the other questions use): the list under the
+// textarea is text to read and to select, and a click inside a label is a click on its control, which would put the
+// caret back in the textarea and lose the selection. The label names the textarea by id instead.
+function standardsField(f: ListingFields, dis: string, hint: string): Html {
+  const items = parseStandards(f.standards);
+  const list = standardsToHtml(f.standards);
+  const count = `${items.length} ${items.length === 1 ? 'standard' : 'standards'} on the page`;
+  return html`<div class="field full"><label class="lab" for="standards">Standards</label>
+    <textarea id="standards" name="standards" rows="4" ${dis} data-standards>${standardsToText(f.standards)}</textarea>
+    <span class="hint">${hint}</span>
+    ${list ? html`<div class="std-list" data-standards-preview><span class="lab">${count}</span>${raw(list)}</div>` : ''}</div>`;
 }
 
 // A hero image's address for the Game Catalog's thumbnail: an http(s) URL or a root-relative path, trimmed;
@@ -178,7 +199,7 @@ export function listingPieces(h: ListingHelpers) {
       grades: () => html`<div class="field full"><span class="lab">Grades</span><div class="chips">${GRADES.map((gr) => html`<label><input type="checkbox" name="grades:${gr}" ${f.grades.includes(gr) ? 'checked' : ''} ${dis}> ${gr.replace('Grades ', '')}</label>`)}</div><span class="hint">${H('grades')}</span></div>`,
       subjects: () => txt('subjects', 'Subjects', H('subjects')),
       topics: () => txt('topics', 'Topics', H('topics')),
-      standards: () => area('standards', 'Standards', H('standards'), 2),
+      standards: () => standardsField(f, dis, H('standards')),
       related_curriculum: () => txt('related_curriculum', 'Related curriculum', H('related_curriculum')),
       thumb_image: () => image('thumb_image', 'Thumbnail', f.thumb_image),
       card_title: () => html`<label class="field"><span class="lab">Card title</span>

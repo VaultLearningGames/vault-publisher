@@ -58,7 +58,7 @@ export class PreviewStore {
 // problems a save would. Shared with the save endpoint's rules: only Vault sets the player fit, and the art links
 // must be the listing's own uploads (with its address, as the save passes it).
 export function formToDraft(b: Record<string, unknown>, base: ListingFields, canPublish: boolean, cdnReady: boolean,
-  listing?: { publicUrl: string; studio: string; slug: string }): ListingFields {
+  listing?: { publicUrl: string; seedPublicUrl?: string; studio: string; slug: string }): ListingFields {
   if (typeof b.embed === 'string') b.embed = b.embed === 'true';
   if (!canPublish) for (const k of VAULT_ONLY) delete b[k];
   const draft = inheritedListing(normalize(b, base));
@@ -80,7 +80,7 @@ export function registerListingPreview(app: Hono, h: ListingHelpers, store = new
     if (!P.canEdit(u, s)) fail(403, 'Only studio members who can edit, and Vault staff who can edit game/studio content, can preview site listings.');
     if (!sites.length) fail(503, 'No preview sites are configured here.');
     const cdnReady = !!(l.game_id && db.currentRelease(l.game_id));
-    const draft = formToDraft(await jsonBody(c), l.draft, P.canPublish(u), cdnReady, { publicUrl: h.deps.prodPublicUrl, studio: s.slug, slug: l.slug });
+    const draft = formToDraft(await jsonBody(c), l.draft, P.canPublish(u), cdnReady, { publicUrl: h.deps.prodPublicUrl, seedPublicUrl: h.deps.seedPublicUrl, studio: s.slug, slug: l.slug });
     const game = catalogGame(db, h.deps.prodPublicUrl, l, draft);
     // The catalog's studios, plus this game's studio when it has nothing on the site yet, and its makers' studios.
     const published = db.listings({ published: true });

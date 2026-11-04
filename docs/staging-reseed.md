@@ -86,3 +86,19 @@ The script refuses to run unless `CDN_BUCKET` is staging's and `SEED_CDN_BUCKET`
 If staging's games 404 after a re-seed: run *Re-seed staging's database* again (`gh workflow run reseed-staging.yml -R
 VaultLearningGames/vault-publisher`; the copy only adds what is missing), then *Deploy (site)* on vault-site's
 `staging` branch so the staging site's catalog is current.
+
+## Re-seeded listings and the art fields
+
+The copy above brings production's `_vault-assets/` objects into staging's bucket, but the re-seed copies
+production's database *as it is*: a re-seeded listing's `hero_background` and `logo_image` keep their absolute
+**production** CDN URLs. `layoutAssetError` (`src/portal/listing-layout.ts`) checks art against the listing's own
+asset prefix, so with staging's own `CDN_PUBLIC_URL` alone every re-seeded listing's first save is refused with
+"The logo art must be an image uploaded for this game" — on art the editor never touched. A standards repair on
+staging hit exactly this.
+
+So staging also trusts the CDN it was seeded from, for the same `STUDIO/GAME/_vault-assets/KIND-HASH16.EXT` shape:
+
+- In the `staging` GitHub environment, set `SEED_CDN_PUBLIC_URL=https://cdn.vaultlearninggames.org` (alongside
+  `SEED_CDN_BUCKET`). Production leaves it unset — it has nothing to seed from, and so keeps the stricter check.
+- The exemption is only the base: another listing's asset, the wrong field's kind, and external links stay refused
+  on both bases (`test/listing-layout-assets.test.ts`).

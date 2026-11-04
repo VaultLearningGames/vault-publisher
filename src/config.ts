@@ -19,6 +19,7 @@ export interface Config {
   prodSecretAccessKey?: string;
   prodBucket: string;
   prodPublicUrl: string;
+  seedPublicUrl?: string;
   // Release actions are accepted only from this repository's workflow, in this GitHub environment.
   adminRepository: string;
   adminEnvironment: string;
@@ -131,6 +132,10 @@ export function loadConfig(): Config {
     prodSecretAccessKey: process.env.R2_CDN_SECRET_ACCESS_KEY?.trim() || undefined,
     prodBucket: required('CDN_BUCKET'),
     prodPublicUrl: required('CDN_PUBLIC_URL').replace(/\/+$/, ''),
+    // Only staging sets this (docs/staging-reseed.md): the CDN the re-seed copies from, whose absolute
+    // _vault-assets URLs every re-seeded listing still carries, so a save of such a listing is not refused over
+    // art the editor never touched. Unset on production, where there is nothing to seed from.
+    seedPublicUrl: process.env.SEED_CDN_PUBLIC_URL?.trim().replace(/\/+$/, '') || undefined,
     adminRepository: process.env.ADMIN_REPOSITORY ?? 'VaultLearningGames/vault-publisher',
     adminEnvironment: process.env.ADMIN_ENVIRONMENT?.trim() || 'production',
     githubClientId: process.env.GITHUB_CLIENT_ID?.trim() || undefined,

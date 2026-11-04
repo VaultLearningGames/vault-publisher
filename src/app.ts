@@ -38,6 +38,8 @@ export interface AppDeps {
   verifier: Verifier;
   stagingPublicUrl: string;
   prodPublicUrl: string;
+  // staging only: the CDN its database was re-seeded from (config.seedPublicUrl).
+  seedPublicUrl?: string;
   adminRepository: string;
   adminEnvironment: string;
   portal: PortalConfig;

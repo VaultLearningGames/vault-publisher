@@ -231,7 +231,7 @@ export function pageAddressProblems(f: ListingFields, self: string, others: List
   return out;
 }
 
-export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady: boolean; publicUrl?: string; studio?: string; slug?: string; address?: { self: string; others: ListingAddress[] } }): string[] {
+export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady: boolean; publicUrl?: string; seedPublicUrl?: string; studio?: string; slug?: string; address?: { self: string; others: ListingAddress[] } }): string[] {
   const out: string[] = [];
   if (f.play_url && !isHttpUrl(f.play_url)) out.push('The play URL must start with https:// (or http://).');
   if (f.gameplay_video && !isHttpUrl(f.gameplay_video)) out.push('The gameplay video must be a link.');
@@ -246,9 +246,9 @@ export function problems(f: ListingFields, opts: { forPublish: boolean; cdnReady
   if (opts.address) for (const e of pageAddressProblems(f, opts.address.self, opts.address.others)) out.push(e);
   // The page's layout and theme (card B): always checked; the art links only when this listing's own address is
   // known (the save, the publish and the preview all pass it).
-  const { publicUrl, studio, slug } = opts;
+  const { publicUrl, seedPublicUrl, studio, slug } = opts;
   const asset = publicUrl && studio && slug
-    ? (field: 'hero_background' | 'logo_image', value: string) => layoutAssetError(field, value, { publicUrl, studio, game: slug })
+    ? (field: 'hero_background' | 'logo_image', value: string) => layoutAssetError(field, value, { publicUrl, seedPublicUrl, studio, game: slug })
     : null;
   for (const errs of Object.values(validateLayoutFields(f, asset))) for (const e of errs) out.push(e);
   if (f.play_source === 'cdn' && !opts.cdnReady) out.push('To be hosted on the Vault CDN, the game needs a CDN game with a current release.');

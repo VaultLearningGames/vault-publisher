@@ -53,14 +53,21 @@ export const effectiveTheme = (v: unknown): string => (typeof v === 'string' && 
 // image this listing uploaded through card A's tool (publicUrl/STUDIO/GAME/_vault-assets/KIND-HASH16.EXT, in the
 // field's own kind and its own types — the upload already enforced the size cap). An external link, another
 // listing's asset or a site path is refused. The error, or null when the value is kept.
-export function layoutAssetError(field: 'hero_background' | 'logo_image', value: string, o: { publicUrl: string; studio: string; game: string }): string | null {
+//
+// `seedPublicUrl` (staging's re-seed; docs/staging-reseed.md) is accepted for the same STUDIO/GAME/_vault-assets
+// prefix. The re-seed copies production's database as it is, so every re-seeded listing's art stays an absolute
+// production CDN URL — those are public and load on staging — and the copy brings the same objects into staging's
+// own bucket. Without this, the first portal save of any re-seeded listing fails on art the editor never touched,
+// which is how a standards repair on staging came to be refused over a logo.
+export function layoutAssetError(field: 'hero_background' | 'logo_image', value: string, o: { publicUrl: string; studio: string; game: string; seedPublicUrl?: string }): string | null {
   const spec = IMAGE_FIELDS[field];
   const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const base = `${o.publicUrl.replace(/\/+$/, '')}/${o.studio}/${o.game}/${ASSETS_DIR}`;
   // The stored extension is "jpg" for JPEG (storeImage rewrites it), the other types keep their name.
   const exts = ACCEPTED_TYPES[spec.format].map((t) => (t === 'jpeg' ? 'jpg' : t));
-  const re = new RegExp(`^${esc(base)}${esc(spec.kind)}-[0-9a-f]{16}\\.(?:${exts.join('|')})$`);
-  if (!re.test(value)) return `The ${spec.label.toLowerCase()} must be an image uploaded for this game; external links and other addresses are not kept.`;
+  const bases = [o.publicUrl, o.seedPublicUrl].filter((u): u is string => !!u && !!u.trim())
+    .map((u) => `${u.replace(/\/+$/, '')}/${o.studio}/${o.game}/${ASSETS_DIR}`);
+  const ok = bases.some((base) => new RegExp(`^${esc(base)}${esc(spec.kind)}-[0-9a-f]{16}\\.(?:${exts.join('|')})$`).test(value));
+  if (!ok) return `The ${spec.label.toLowerCase()} must be an image uploaded for this game; external links and other addresses are not kept.`;
   return null;
 }
 

@@ -484,7 +484,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     // Studio saves go to Vault for review when the member can request publish (else they stay a draft); Vault staff
     // save and publish in one step.
     const wantsSubmit = !wantsPublish && P.canSubmit(u, s);
-    const bad = draftProblems(db, l, draft, wantsPublish || wantsSubmit, h.deps.prodPublicUrl);
+    const bad = draftProblems(db, l, draft, wantsPublish || wantsSubmit, h.deps.prodPublicUrl, h.deps.seedPublicUrl);
     if (bad.length) fail(400, bad.join(' '));
     // A name left in "Made by"’s "Add a new studio…" fields is added with the save (listing-makers.ts).
     if (typeof b.maker_new_name === 'string' && b.maker_new_name.trim()) {
@@ -523,7 +523,7 @@ export function registerListingPages(app: Hono, h: ListingHelpers) {
     const u = h.apiUser(c);
     if (!P.canPublish(u)) fail(403, 'Only Vault staff who can edit game/studio content can publish to the site.');
     const { l } = apiListing(c, u);
-    const bad = draftProblems(db, l, l.draft, true, h.deps.prodPublicUrl);
+    const bad = draftProblems(db, l, l.draft, true, h.deps.prodPublicUrl, h.deps.seedPublicUrl);
     if (bad.length) fail(400, bad.join(' '));
     createProposedStudios(db, h.actor(u), l.slug, l.draft.makers);
     publishListing(db, l, h.actor(u), h.deps.prodPublicUrl);

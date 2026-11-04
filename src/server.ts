@@ -66,6 +66,7 @@ const app = createApp({
   verifier: createVerifier({ githubAudience: config.oidcAudience, googleAudience: config.taskAudience }),
   stagingPublicUrl: config.stagingPublicUrl,
   prodPublicUrl: config.prodPublicUrl,
+  seedPublicUrl: config.seedPublicUrl,
   adminRepository: config.adminRepository,
   adminEnvironment: config.adminEnvironment,
   portal: {

@@ -124,6 +124,10 @@ jobs:
           BUILDS_PUBLIC_URL=${{ vars.BUILDS_PUBLIC_URL }}
           CDN_BUCKET=${{ vars.CDN_BUCKET }}
           CDN_PUBLIC_URL=${{ vars.CDN_PUBLIC_URL }}
+          # Staging only, and deliberately production's: the CDN its database was re-seeded from, so a re-seeded
+          # listing's art doesn't block its save (docs/staging-reseed.md). Left out of the check above for that
+          # reason; it is empty on production.
+          SEED_CDN_PUBLIC_URL=${{ vars.SEED_CDN_PUBLIC_URL }}
           PORTAL_URL=${{ vars.PORTAL_URL }}
           ADMIN_ENVIRONMENT=${{ vars.ADMIN_ENVIRONMENT }}
           LITESTREAM_BUCKET=${{ vars.LITESTREAM_BUCKET }}

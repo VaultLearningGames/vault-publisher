@@ -216,7 +216,7 @@ export function registerAdminTasks(app: Hono, deps: AppDeps, admin: (c: Context)
       const draft = inheritedListing(normalized);
       if (link && !link.id && (publish ? draft : l.published)?.play_source === 'cdn')
         problems.push('It plays from the Vault CDN; switch it back to its web address (play_source "url") to disconnect it.');
-      if (!problems.length) problems.push(...draftProblems(db, link ? { game_id: link.id, studio_slug: l.studio_slug, slug: l.slug } : l, draft, publish, deps.prodPublicUrl));
+      if (!problems.length) problems.push(...draftProblems(db, link ? { game_id: link.id, studio_slug: l.studio_slug, slug: l.slug } : l, draft, publish, deps.prodPublicUrl, deps.seedPublicUrl));
       const pending = changedFields(l.published, l.draft).filter((k) => !(k in (fields as object)));
       if (publish && body.publish_pending !== true && (!l.published || pending.length || l.review === 'submitted')) {
         problems.push(l.published

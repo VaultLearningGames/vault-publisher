@@ -22,6 +22,9 @@ export const MAX_DAYS = 3 * 366;
 // The first day the site sent play events: plays, players and play time before it are 0 because they weren't
 // counted, not because no one played.
 export const PLAYS_SINCE = '2026-10-04';
+// The first day GA's AI Assistant channel existed (arrivals from ChatGPT, Gemini, Deepseek, Copilot, Grok, …): it
+// shipped May 13, 2026 and is not retroactive — before it those visits sat in Referral, by their host.
+export const AI_CHANNEL_SINCE = '2026-05-13';
 
 export interface Period { start: string; end: string }   // YYYY-MM-DD, inclusive
 export interface Selection {
@@ -679,4 +682,114 @@ export function readRealtimePosts(res: GaResponse, titles: Map<string, string>):
     by.set(slug, it);
   }
   return [...by.values()].filter((it) => it.active > 0 || it.events > 0).sort(liveOrder);
+}
+
+// ---------- where the site's sessions came from (traffic drivers) ----------
+// How a visitor reached the site at all: the session's default channel group with its source, over both periods.
+// This is session acquisition (standard GA dimensions, years of history) — a different scope from the plays'
+// acquisition above (the play's own source_channel, since it shipped), and the two are never added together.
+// "Browsing the Vault" is not an acquisition channel here: a vaultlearninggames.org self-referral is discarded by
+// GA, so the Vault's own share of plays is answered by the plays' card alone.
+// Google's AI Assistant channel (arrivals from ChatGPT, Gemini, Deepseek, Copilot, Grok, …) began on
+// AI_CHANNEL_SINCE and is not retroactive; before it, and for assistants Google's list misses, those sessions sit in
+// Referral — so the driver also takes every session whose SOURCE HOST is an assistant's, in whatever channel.
+// Google Classroom has no channel of its own: its sessions are Referrals with source classroom.google.com, carved out
+// by host. The grouping is done here, in the portal's code — GA's custom channel groups would need a GA Editor to
+// create them, which this card must not require.
+// Assistant source hosts (matched host-wise, never as substrings — 'you.com' must not swallow other hosts).
+export const AI_ASSISTANT_HOSTS: readonly string[] = [
+  'chatgpt.com', 'chat.openai.com', 'perplexity.ai', 'gemini.google.com', 'copilot.microsoft.com', 'claude.ai',
+  'grok.com', 'chat.deepseek.com', 'chat.mistral.ai', 'meta.ai', 'you.com', 'duck.ai',
+];
+// Where Google Classroom sessions land (Referral, by this source host).
+export const CLASSROOM_HOST = 'classroom.google.com';
+// Does a session source come from this host: the host itself or any subdomain of it ('www.' aside); never a bare
+// substring, so a host that merely contains the name ('notyou.com') is not one.
+export function hostMatches(source: string, host: string): boolean {
+  let s = (source ?? '').trim().toLowerCase();
+  if (s.startsWith('www.')) s = s.slice(4);
+  const h = host.toLowerCase();
+  return s === h || s.endsWith(`.${h}`);
+}
+export const isAiAssistantHost = (source: string): boolean => AI_ASSISTANT_HOSTS.some((h) => hostMatches(source, h));
+// The page's fixed rows, in their order: a driver with no sessions still has its row (the table is stable).
+export type TrafficDriverKey = 'referral' | 'ai' | 'social' | 'classroom' | 'email' | 'search' | 'direct' | 'other';
+export const TRAFFIC_DRIVERS: ReadonlyArray<{ key: TrafficDriverKey; label: string }> = [
+  { key: 'referral', label: 'Referrals & backlinks' },
+  { key: 'ai', label: 'AI assistants' },
+  { key: 'social', label: 'Social platforms' },
+  { key: 'classroom', label: 'Google Classroom' },
+  { key: 'email', label: 'Email' },
+  { key: 'search', label: 'Search' },
+  { key: 'direct', label: 'Direct' },
+  { key: 'other', label: 'Other' },
+];
+// Which driver a session's (channel group, source) is. Order matters: the Classroom and AI carve-outs are pulled out
+// BEFORE the Referral bucket, so no session is counted twice. GA's channel-group values are its enumerated strings,
+// compared exactly (trimmed).
+export function classifyDriver(channelGroup: string, source: string): TrafficDriverKey {
+  const g = (channelGroup ?? '').trim();
+  const s = (source ?? '').trim();
+  if (hostMatches(s, CLASSROOM_HOST)) return 'classroom';
+  if (isAiAssistantHost(s)) return 'ai';
+  if (g === 'AI Assistant') return 'ai';
+  if (g === 'Organic Social' || g === 'Paid Social') return 'social';
+  if (g === 'Email') return 'email';
+  if (g === 'Organic Search' || g === 'Paid Search') return 'search';
+  if (g === 'Direct') return 'direct';
+  if (g === 'Referral') return 'referral';
+  return 'other';   // Display, Video, Affiliates, Unassigned, '(not set)', …
+}
+// Sessions and users by the session's channel group and source, in each period, most sessions first. Site-wide
+// (the card is the site view's only): standard session dimensions, so it goes back through the Squarespace years.
+// Like the other two-period reports, Today is compared with yesterday up to the current hour.
+export function trafficDriversRequest(sel: Selection): GaRequest {
+  const hf = hoursTo(sel);
+  return {
+    dateRanges: ranges(sel),
+    dimensions: [{ name: 'sessionDefaultChannelGroup' }, { name: 'sessionSource' }],
+    metrics: [{ name: 'sessions' }, { name: 'totalUsers' }],
+    ...(hf.length ? { dimensionFilter: all(...hf) } : {}),
+    orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
+    limit: 1000,
+  };
+}
+export interface DriverStats { key: TrafficDriverKey; label: string; sessions: Pair; users: Pair; origins: string[] }
+export interface TrafficDrivers {
+  total: Pair;
+  drivers: DriverStats[];   // always all eight, in TRAFFIC_DRIVERS' order
+  // The AI Assistant channel only exists from AI_CHANNEL_SINCE on: whether each period's AI figure is complete (the
+  // whole period on or after it) — before it, the figure carries only the assistant hosts' sessions, and a change
+  // against it is a comparison with a structural zero (the PLAYS_SINCE pattern).
+  ai: { current: boolean; previous: boolean };
+}
+// Folds the rows into the fixed drivers: every session lands in exactly one (the carve-outs above), so the drivers'
+// sessions sum to the total. origins: each driver's top source hosts by this period's sessions (at most five);
+// '(direct)', '(not set)' and the empty source are not sources.
+export function readTrafficDrivers(res: GaResponse, sel: Selection): TrafficDrivers {
+  const total: Pair = { current: 0, previous: 0 };
+  const acc = new Map<TrafficDriverKey, { sessions: Pair; users: Pair; origins: Map<string, number> }>();
+  for (const r of rowsOf(res)) {
+    const p = periodOf(r);
+    if (!p) continue;
+    const key = classifyDriver(r.dims.sessionDefaultChannelGroup ?? '', r.dims.sessionSource ?? '');
+    const n = r.mets.sessions ?? 0, u = r.mets.totalUsers ?? 0;
+    total[p] += n;
+    const a = acc.get(key) ?? { sessions: { current: 0, previous: 0 }, users: { current: 0, previous: 0 }, origins: new Map<string, number>() };
+    a.sessions[p] += n;
+    a.users[p] += u;
+    const origin = (r.dims.sessionSource ?? '').trim();
+    if (p === 'current' && origin && origin !== '(not set)' && origin !== '(direct)') a.origins.set(origin, (a.origins.get(origin) ?? 0) + n);
+    acc.set(key, a);
+  }
+  const drivers = TRAFFIC_DRIVERS.map((d) => {
+    const a = acc.get(d.key);
+    return {
+      key: d.key, label: d.label,
+      sessions: a?.sessions ?? { current: 0, previous: 0 },
+      users: a?.users ?? { current: 0, previous: 0 },
+      origins: a ? [...a.origins.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 5).map(([o]) => o) : [],
+    };
+  });
+  return { total, drivers, ai: { current: sel.current.start >= AI_CHANNEL_SINCE, previous: sel.compare ? sel.previous.start >= AI_CHANNEL_SINCE : true } };
 }

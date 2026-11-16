@@ -133,3 +133,26 @@ application default credentials, which need the Analytics scope:
 ## The realtime map
 
 A dot per city, sized by people, pulsing; zoom with the buttons, a double-click (shift: out), pinch or ctrl/⌘-scroll, and drag to pan. City points come from GeoNames cities15000 (CC BY 4.0, geonames.org), made into `src/analytics/cities.json` by `scripts/world-cities.ts`; a city not in it is drawn at its country's point (`src/analytics/countries.ts`, Natural Earth, public domain).
+
+## Where a play's channel comes from (the CDN wrappers)
+
+A play's acquisition channel is resolved by the shared snippet, `src/cdn/vault-channel.js`: `?vault_ch` (a partner's
+short key, `pbswi` → `pbswisconsineducation.org`) or `?vault_src` (the origin the visitor came from), `vault` for a
+play inside the Vault's own player, and `other` for an https source that is no known partner. Every CDN wrapper
+includes it, between `VAULT_CHANNEL_LOGIC_START` / `VAULT_CHANNEL_LOGIC_END` markers, so one play is reported from
+one layer.
+
+Two games' wrappers were hand-written before that snippet existed and each keeps a per-game check:
+
+* **Jo Wilder** (`fieldday/jowilder/`) carries the whole logic inline — the snippet was copied out of it — so its own
+  copy stands down once the shared one has run: `node scripts/verify-jowilder-channel.ts`.
+* **The Legend of the Lost Emerald** (`fieldday/lostemerald/`) carries only half of it: it reads `?vault_src` and
+  reports it as GA's `page_referrer`, which is **kept** (the game team relies on it), while the channel —
+  `dimension1`, `utm_source`/`utm_medium` and the `vault` default — comes from the shared snippet alone. Any
+  game-specific channel setting is removed, or guarded so it stands down after the shared block.
+  `node scripts/verify-lostemerald-channel.ts` says what its layer needs and runs the wrapper with recording
+  gtag/ga stubs: `?vault_ch=pbswi` must report `pbswisconsineducation.org`, framed with no parameters `vault`, and
+  `?vault_src=<url>` must still set `page_referrer` to that value — each exactly once per load. `--html <path>` runs
+  it against a built `iframe.html`, `--write` applies the change to the game's own file, `--out doc` records the
+  outcome in `docs/verification/analytics-3b-lost-emerald.md`. Neither script ever writes to the shared snippet, the
+  shared template or the other game's wrapper.

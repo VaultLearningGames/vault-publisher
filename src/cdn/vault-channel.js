@@ -16,19 +16,19 @@
 // The marker comments are kept so this file can be diffed against that deployed copy: the diff is the
 // vaultReportChannel() function added inside the markers (Analytics.1b), and nothing else — the copied core is
 // not reformatted, renamed, reordered or simplified (VAULT_CHANNEL_ALIASES is byte-for-byte the reference's
-// table). The reference's reporting (a top-level try just after its VAULT_CHANNEL_LOGIC_END) is not copied as a
+// table). vaultForwardParams (Analytics.1c) lives after the block, not inside it: the reference does not forward
+// from inside its markers — its forwarding is the wrapper's own inline script (the index.html served next to the
+// iframe.html above) — and keeping it out of the block leaves the marker diff at exactly that one function.
+// The reference's reporting (a top-level try just after its VAULT_CHANNEL_LOGIC_END) is not copied as a
 // block: Analytics.1b gathers it into that one function, keeping the reference's field and dimension names and
 // statement order, and nothing in this file auto-runs — resolving and then reporting is the caller's job
 // (the wrapper, Analytics.2).
-//
-// Deliberately NOT in this file (a sibling card owns it):
-//   TODO(Analytics.1c): vaultForwardParams — forward vault_ch / vault_src to the next frame.
 // The file must load and resolve with neither gtag nor ga defined, and reporting a channel when neither exists
 // is a silent no-op: no call, no console output, no throw.
 //
 // A plain browser script: no imports, no requires, no dependencies, no top-level auto-invocation. Its top-level
 // declarations are globals (VAULT_CHANNELS, VAULT_CHANNEL_ALIASES, VAULT_PARTNER_CHANNELS, vaultResolveChannel,
-// vaultReportChannel).
+// vaultReportChannel, vaultForwardParams).
 
   /* VAULT_CHANNEL_LOGIC_START */
   var VAULT_CHANNELS = {
@@ -89,3 +89,24 @@
     } catch (e) {}
   }
   /* VAULT_CHANNEL_LOGIC_END */
+  // Analytics.1c: forward the acquisition source down to the inner game frame. Modelled on the reference's own
+  // forwarding, the inline script of the wrapper served next to the iframe.html above (index.html): it reads the
+  // outer document's query at call time with new URL(location.href).searchParams, copies each vault param only
+  // when it is present and non-empty (the first occurrence when a name is repeated), and appends them with
+  // URLSearchParams' own percent-encoding. Same here, for an inner iframe's URL, in the contract's order
+  // (vault_src, vault_referrer, vault_ch): the values pass through raw — no defaults, no alias normalisation, no
+  // vaultResolveChannel call — and the URL is returned unchanged when none of the three is present. The reference
+  // appends "?" because its base ("iframe.html") never carries a query string; url here may, so the first
+  // separator is "&" in that case.
+  function vaultForwardParams(url) {
+    var outer = new URL(location.href).searchParams;
+    var params = new URLSearchParams();
+    var names = ['vault_src', 'vault_referrer', 'vault_ch'];
+    for (var i = 0; i < names.length; i++) {
+      var value = outer.get(names[i]);
+      if (value) params.set(names[i], value);
+    }
+    var qs = params.toString();
+    if (!qs) return url;
+    return url + (url.indexOf('?') !== -1 ? '&' : '?') + qs;
+  }

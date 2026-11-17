@@ -156,3 +156,33 @@ Two games' wrappers were hand-written before that snippet existed and each keeps
   it against a built `iframe.html`, `--write` applies the change to the game's own file, `--out doc` records the
   outcome in `docs/verification/analytics-3b-lost-emerald.md`. Neither script ever writes to the shared snippet, the
   shared template or the other game's wrapper.
+
+### Cutting the staging release of the channel work
+
+The channel snippet reaches players through a release, and a release is only worth cutting once the whole snippet is
+on the branch it is cut from. `node scripts/cut-channel-staging-release.ts` is that gate and that release, in one
+command, against **staging only** (it refuses a publisher or CDN address whose host doesn't say `staging`; production
+releases are `.github/workflows/release.yml` behind its required approval).
+
+It fetches `origin`, reads `origin/staging`'s SHA, and decides three checks against **that commit** — through
+`git ls-tree` / `git show`, never the working tree, a local branch or a PR head:
+
+| Check | Passes when | Owner if it fails |
+| --- | --- | --- |
+| the shared snippet | `src/cdn/vault-channel.js` is at the ref with a `VAULT_CHANNEL_LOGIC_START`…`_END` block | *Analytics: shared vault_ch reader for all 23 CDN games* |
+| the template inclusion | the outer (`index.html`) and inner (`iframe.html`) CDN wrapper templates each carry the block, inlined or through `src/cdn/templates/vault-channel-include.html` | the same card |
+| the wrappers | `fieldday/jowilder/iframe.html` and the Lost Emerald wrapper are at the ref, each with the block | *Analytics: reconcile Jo Wilder and Lost Emerald wrappers with the shared snippet* |
+
+If any check fails the command stops: it prints a blocker naming the missing artifact, every path it looked in, the
+commands it ran and the sibling card that owns the gap, and it cuts nothing and patches nothing. The marker counts it
+prints are matching **lines**, so they are the numbers `git grep -c VAULT_CHANNEL_LOGIC_START <sha>` prints.
+
+When all three pass it records the release that is live now (for rollback), then — with `--cut` and a staging token
+(`--token`, `VAULT_PUBLISHER_TOKEN`) — follows the documented release procedure for staging: `POST
+/v1/admin/releases/publish` on `portal.vaultlearninggames-staging.org` with the gate SHA as the build ref and
+`channel-<sha12>` as the release name, so the release id always says which commit it carries. Without `--cut` it is a
+dry run: the gate is reported and nothing is released. Last it smoke-checks one game's outer
+`index.html` on `https://cdn.vaultlearninggames-staging.org` — HTTP 200 with the marker present (per-game
+verification is `scripts/verify-channel-edge-cases.ts`'s). `--out doc` records the outcome in
+`docs/verification/analytics-4a-staging-release.md`, `--json` writes the same run as data; the command exits 1 when
+the gate blocked it or the release or smoke check didn't come out right.

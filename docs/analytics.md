@@ -186,3 +186,40 @@ dry run: the gate is reported and nothing is released. Last it smoke-checks one 
 verification is `scripts/verify-channel-edge-cases.ts`'s). `--out doc` records the outcome in
 `docs/verification/analytics-4a-staging-release.md`, `--json` writes the same run as data; the command exits 1 when
 the gate blocked it or the release or smoke check didn't come out right.
+
+### Grepping the deployed CDN artifacts
+
+A release id says what *should* be on the CDN; only the served bytes say what is. `node
+scripts/verify-cdn-channel-served.ts` fetches the DEPLOYED wrapper layers from
+`https://cdn.vaultlearninggames-staging.org` and greps each one — never `git grep` of a template, never a template's
+source — for the three things a working channel needs:
+
+| Pattern | Why |
+| --- | --- |
+| `VAULT_CHANNEL_LOGIC_START` | the shared block is in this layer at all |
+| `vaultResolveChannel` | the resolver itself, not just the marker |
+| `pbswi` → `pbswisconsineducation.org` | the alias table's sentinel entry, so a stray mention of a partner isn't mistaken for the table |
+
+It walks a game's layers the way a browser does: the outer `index.html`, the `iframe.html` that page frames, and any
+further hop (to depth 4, with a cycle guard), and it checks step 4 too — that every layer passes the source params
+(`vault_ch`, `vault_src`, `utm_*`) to the next one **unchanged**, since a wrapper that carries the snippet but drops
+`vault_ch` reports the wrong channel just as surely as one with no snippet.
+
+The three games come from the publisher's own CDN game list (`GET /v1/catalog`, the same list the site plays from —
+never a hand-written one): the-legend-of-the-lost-emerald, the first of The Yard's games (a `yardgames` path
+segment), and the first further ordinary CDN game, each the first candidate in list order whose outer page is
+actually served. A candidate stepped past because its `index.html` 404s is named as a blocker all the same.
+`--games a,b,c` picks by slug, `--all` greps the whole list.
+
+Step 1 is a gate: the release id comes from `--release`, else from the one Analytics.4a recorded in
+`docs/verification/analytics-4a-staging-release.md`, and the served outer page is searched for a build stamp
+(`<!-- build: … -->`, `data-build`, an asset `?v=<hash>`) that names it. **No release id means STOP** — the report is
+a blocker against that card and not one byte is fetched; `--observe` fetches the layers anyway and labels the table
+an observation of what the CDN serves today rather than evidence about a release. A stamp that names another release
+is reported as a possibly stale deploy, and nothing is re-deployed from here.
+
+Read-only and staging only (it refuses a non-staging host without `--allow-any-host`), and it patches nothing: a
+game whose deployed artifact lacks the snippet or the alias table at any layer is named as a blocker against
+*Analytics: shared vault_ch reader for all 23 CDN games*, which owns the wrappers. `--out doc` records the run in
+`docs/verification/analytics-4b-staging-cdn-grep.md`, `--json` writes it as data; it exits 1 when the gate blocked it
+or any game is a blocker.

@@ -4,7 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { randomUUID } from 'node:crypto';
 import { bearerToken, type GitHubIdentity, type Verifier } from './auth.ts';
 import type { Db, Game, ManifestFile, Release, Studio } from './db.ts';
-import { copyRelease, makeLive, ReleaseLayoutError, releasePrefix, storageCall, type Budget } from './releases.ts';
+import { LIVE_CACHE, copyRelease, makeLive, ReleaseLayoutError, releasePrefix, storageCall, type Budget } from './releases.ts';
 import { buildCatalog } from './catalog.ts';
 import type { PreviewSite } from './config.ts';
 import { parseRun } from './game-checks.ts';
@@ -29,6 +29,8 @@ import { requestHeaders, type Storage } from './storage.ts';
 import { guardedFetcher, type Fetcher } from './net-guard.ts';
 import type { Analytics } from './analytics/ga.ts';
 import { checkMonitors, monitoredBuilds } from './url-monitor.ts';
+import { putChannelAsset, readChannelAsset } from './cdn-channel-asset.ts';
+import { shipChannelLayer } from './cdn-outer-wrapper.ts';
 
 export interface AppDeps {
   db: Db;
@@ -308,6 +310,14 @@ export function createApp(deps: AppDeps) {
         db.setSetting(marker, JSON.stringify({ version, done: live.done }));
         return { pending: live.remaining, files: live.files };
       }
+      // The switch finished: ship the shared channel script into the live directory (Analytics.2b/2d). The
+      // release's own wrapper files already carry the channel block from their preview build, so only the
+      // script needs to land here — before any player can load the page that references it (it never blocks
+      // the switch: a failure here is logged and retried on the next switch).
+      if ((await production.list(gamePrefix)).some((o) => o.key === `${gamePrefix}index.html`)) {
+        await putChannelAsset(production, gamePrefix, LIVE_CACHE)
+          .catch((err) => { console.error('channel script:', err); });
+      }
       db.setSetting(marker, '');
       db.setCurrentRelease(game.id, release.id);
       const rollback = previous !== undefined && previous.id > release.id;
@@ -504,13 +514,28 @@ export function createApp(deps: AppDeps) {
     if (db.hasNewerUpload(upload)) fail(409, 'a newer upload to this preview has started; this one is superseded');
 
     const prefix = previewPrefix(db.studioById(game.studio_id)!, game, upload.ref_name);
+    // The channel layer is for builds that ship an HTML wrapper (index.html or iframe.html). A build that has
+    // neither is left entirely alone: no snippet, no patching, nothing written.
+    const isWrapperBuild = upload.manifest.some((f) => f.path === 'index.html' || f.path === 'iframe.html');
     const stored = new Map((await staging.list(prefix)).map((o) => [o.key, o.size]));
     const missing = upload.manifest.filter((f) => stored.get(prefix + f.path) !== f.size).map((f) => f.path);
     if (missing.length > 0) fail(409, `${missing.length} file(s) missing or incomplete`, missing.slice(0, 20));
 
     const wanted = new Set(upload.manifest.map((f) => prefix + f.path));
+    // The shared channel script (Analytics.2b/2d) is Vault's, not the build's: it is never part of the build's
+    // manifest and is never removed as a "stale" file (wrapper builds only, see isWrapperBuild).
+    if (isWrapperBuild) wanted.add(`${prefix}vault-channel.js`);
     const stale = [...stored.keys()].filter((key) => !wanted.has(key));
     if (stale.length > 0) await staging.deleteKeys(stale);
+
+    // The channel layer (Analytics.2d, unconditional: every preview build): the shared snippet next to the
+    // wrappers, and both wrapper layers patched to include it and to forward through vaultForwardParams().
+    // The build's own files were all just verified, so this never needs to resume.
+    if (isWrapperBuild) {
+      const channel = await shipChannelLayer(staging, prefix, await readChannelAsset().then((b) => new TextDecoder().decode(b)))
+        .catch((err) => { console.error('channel layer:', err); return null; });
+      if (channel) await putChannelAsset(staging, prefix);
+    }
 
     const totalBytes = upload.manifest.reduce((sum, f) => sum + f.size, 0);
     db.upsertBuild(upload, upload.manifest.length, totalBytes);

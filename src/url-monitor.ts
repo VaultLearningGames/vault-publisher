@@ -15,6 +15,8 @@ import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import type { Db, Game, Studio, Upload } from './db.ts';
 import { BlockedUrlError, checkUrl, type Fetcher } from './net-guard.ts';
 import { headersFor, isSafeFilePath } from './paths.ts';
+import { putChannelAsset, readChannelAsset } from './cdn-channel-asset.ts';
+import { shipChannelLayer } from './cdn-outer-wrapper.ts';
 import type { Storage } from './storage.ts';
 
 const MB = 1024 * 1024;
@@ -384,13 +386,25 @@ export async function checkMonitor(env: MonitorEnv, monitor: UrlMonitor, opts: {
     }
     await clearIncoming();
     if (removed.length) await staging.deleteKeys(removed.map((p) => prefix + p));
+    // The channel layer (Analytics.2d, unconditional): the shared snippet next to the wrappers, both wrapper
+    // layers patched to include it, and the forward call deciding what params reach the inner frame. A failure
+    // here does not undo the copied files, only the channel block — it is reported, not hidden.
+    let channelNote = '';
+    try {
+      if ('index.html' in after) {
+        await shipChannelLayer(staging, prefix, new TextDecoder().decode(await readChannelAsset()));
+        await putChannelAsset(staging, prefix);
+      }
+    } catch (err) {
+      channelNote = ` The channel layer was not applied: ${(err as Error).message}`;
+    }
     const fingerprint = createHash('sha256').update(Object.keys(after).sort().map((p) => `${p}\n${after[p].sha256}\n`).join('')).digest('hex').slice(0, 16);
     db.upsertBuild({ game_id: game.id, ref_name: monitor.ref_name, ref_type: 'branch', commit_sha: `url:${fingerprint}`, actor: MONITOR_ACTOR } as Upload, count, total);
     db.audit(`system:${MONITOR_ACTOR}`, 'preview.publish', prefix, { source: monitor.url, files: count, bytes: total, changed: changed.length, removed: removed.length });
     const first = !Object.keys(before).length;
     const what = first ? `Copied ${plural(count, 'file')} (${size(total)}) into a test build.`
       : `Updated the test build: ${plural(changed.length, 'file')} changed${removed.length ? `, ${removed.length} removed` : ''} (${plural(count, 'file')}, ${size(total)}).`;
-    return finish({ status: 'changed', message: `${what}${note ? ` ${note}` : ''}`, files: count, bytes: total, changed: changed.length, removed: removed.length }, after);
+    return finish({ status: 'changed', message: `${what}${note ? ` ${note}` : ''}${channelNote}`, files: count, bytes: total, changed: changed.length, removed: removed.length }, after);
   } catch (err) {
     abort.abort(); // stop the other downloads
     await clearIncoming().catch(() => {});
